@@ -59,7 +59,7 @@ public enum EExportServerType
     None = -1,
     
     [Description("Blender")]
-    Blender = 40000,
+    Blender = MaterialPorter.Fork.BlenderPort,
     
     [Description("Unreal Engine")]
     Unreal = 40001,

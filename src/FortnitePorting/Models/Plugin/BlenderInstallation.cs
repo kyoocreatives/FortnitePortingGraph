@@ -42,7 +42,7 @@ public partial class BlenderInstallation(string blenderExecutablePath) : Observa
         "startup");
 
     private string? MetaPath => StartupPath is null ? null : Path.Combine(StartupPath,
-        "fortnite_porting",
+        MaterialPorter.Fork.PluginFolder,
         "fortnite_porting_meta.json");
 
     public static readonly DirectoryInfo PluginWorkingDirectory = new(Path.Combine(App.PluginsFolder.FullName, "Blender"));
@@ -113,7 +113,7 @@ public partial class BlenderInstallation(string blenderExecutablePath) : Observa
 
         Status = EPluginStatusType.Modifying;
 
-        FileSystemExtensions.Copy(Path.Combine(PluginWorkingDirectory.FullName, "fortnite_porting"), Path.Combine(StartupPath, "fortnite_porting"));
+        FileSystemExtensions.Copy(Path.Combine(PluginWorkingDirectory.FullName, "fortnite_porting"), Path.Combine(StartupPath, MaterialPorter.Fork.PluginFolder));
 
         if (MetaPath is not null)
             File.WriteAllText(MetaPath, JsonConvert.SerializeObject(new FPPluginMeta { Version = Globals.VersionString }));
@@ -138,7 +138,7 @@ public partial class BlenderInstallation(string blenderExecutablePath) : Observa
 
         Status = EPluginStatusType.Modifying;
 
-        var pluginPath = Path.Combine(StartupPath, "fortnite_porting");
+        var pluginPath = Path.Combine(StartupPath, MaterialPorter.Fork.PluginFolder);
         if (Directory.Exists(pluginPath))
             Directory.Delete(pluginPath, true);
     }

@@ -37,7 +37,7 @@ public class AppService : IService
 
     public DirectoryInfo ApplicationDataFolder => AppSettings.Application.UseAppDataPath && Directory.Exists(AppSettings.Application.AppDataPath)
         ? new DirectoryInfo(AppSettings.Application.AppDataPath) 
-        : new DirectoryInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), "FortnitePorting"));
+        : new DirectoryInfo(Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData), MaterialPorter.Fork.AppFolder));
     
     public DirectoryInfo DataFolder => new(Path.Combine(App.ApplicationDataFolder.FullName, ".data"));
     public DirectoryInfo AssetsFolder => new(Path.Combine(App.ApplicationDataFolder.FullName, "Assets"));
@@ -63,7 +63,7 @@ public class AppService : IService
         AssetsFolder.Create();
         PluginsFolder.Create();
 
-        RegisterUrlScheme();
+        // Material Porter fork: no fortniteporting:// registration (it served the stripped login, and belongs to FP)
 
         Lifetime.Startup += OnAppStart;
         Lifetime.Exit += OnAppExit;

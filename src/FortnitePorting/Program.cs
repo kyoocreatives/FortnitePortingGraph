@@ -35,7 +35,7 @@ internal static class Program
         
         try
         {
-            _programMutex = new Mutex(true, "FortnitePortingMutex", out var isNew);
+            _programMutex = new Mutex(true, MaterialPorter.Fork.InstanceMutex, out var isNew);
 
             if (isNew)
             {
@@ -63,7 +63,7 @@ internal static class Program
     {
         TaskService.Run(() =>
         {
-            using var pipe = new NamedPipeServerStream("FortnitePorting");
+            using var pipe = new NamedPipeServerStream(MaterialPorter.Fork.InstancePipe);
 
             var reader = new BinaryReader(pipe);
             while (true)
@@ -84,7 +84,7 @@ internal static class Program
     {
         try
         {
-            using var pipe = new NamedPipeClientStream("FortnitePorting");
+            using var pipe = new NamedPipeClientStream(MaterialPorter.Fork.InstancePipe);
             pipe.Connect(1000);
 
             var writer = new BinaryWriter(pipe);
