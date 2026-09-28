@@ -71,6 +71,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   (`JunoBuilding{Prop,Set}AccountItemDefinition`), the meshes of the actor each previews.
   LEGO wildlife isn't there: the creatures' packages (and most LEGO gameplay content) are in
   pakchunks whose keys aren't published; items whose actor is in one are hidden.
+  Their colour is a vertex colour's index into the LEGO LUT: exact since the translator
+  samples a TF_Nearest texture Closest and its Time starts at 100 s (a building piece's
+  damage flash, timed from a hit, was full red at Time 0).
 - **Status line and log.** As in Material Porter's app: a status line under the
   window (a busy bar while an export runs or Blender imports, the latest step)
   and a Log drawer (`MaterialPorter/StatusLog.cs`, a Serilog sink): the export's
