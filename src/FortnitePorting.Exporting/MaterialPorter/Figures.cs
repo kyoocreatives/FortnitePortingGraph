@@ -22,6 +22,16 @@ public static class Figures
     public const string ItemClass = "JunoAthenaCharacterItemOverrideDefinition";
     /// <summary>A LEGO emote: its Battle Royale emote and the figure's montage ("Animation").</summary>
     public const string EmoteClass = "JunoAthenaDanceItemOverrideDefinition";
+    /// <summary>LEGO building props and building sets: an actor class of meshes ("BuildingActorClassToPreview").</summary>
+    public static readonly string[] PropClasses = ["JunoBuildingPropAccountItemDefinition", "JunoBuildingSetAccountItemDefinition"];
+
+    /// <summary>
+    /// Whether a LEGO prop's actor class can be read: much of LEGO Fortnite's gameplay content
+    /// (its creatures among it) is in chunks whose keys aren't published.
+    /// </summary>
+    public static bool HasPropActor(IFileProvider provider, UObject item) =>
+        item.GetOrDefault<FSoftObjectPath>("BuildingActorClassToPreview").AssetPathName.Text is { Length: > 0 } path && path != "None"
+        && provider.TryGetGameFile(path[..path.LastIndexOf('.')] + ".uasset", out _);
 
     private static readonly object Lock = new();
     private static IFileProvider? _indexed;

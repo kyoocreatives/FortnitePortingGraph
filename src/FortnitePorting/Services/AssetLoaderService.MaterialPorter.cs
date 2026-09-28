@@ -10,7 +10,7 @@ using FortnitePorting.Models.Assets.Loading;
 namespace FortnitePorting.Services;
 
 /// <summary>Material Porter fork: Rocket Racing cars (their bodies), assembled with their wheels and paint;
-/// LEGO figures (cooked ones and recipes) and their emotes.</summary>
+/// LEGO figures (cooked ones and recipes), their emotes, building props and sets.</summary>
 public partial class AssetLoaderService
 {
     public AssetLoaderService()
@@ -50,6 +50,13 @@ public partial class AssetLoaderService
                     HighResIconHandler = asset => BaseDance(asset) is { } dance ? AssetLoader.GetHighResIcon(dance) : null,
                     DisplayNameHandler = asset => BaseDance(asset)?.GetAnyOrDefault<FText?>("DisplayName", "ItemName")?.Text ?? asset.Name,
                     DescriptionHandler = asset => BaseDance(asset)?.GetAnyOrDefault<FText?>("Description", "ItemDescription")?.Text.TrimEnd() ?? "",
+                },
+                // building props and sets: their preview actor's meshes (the ones whose actor can be read)
+                new AssetLoader(EExportType.LegoProp)
+                {
+                    ClassNames = [..Figures.PropClasses],
+                    HideRarity = true,
+                    HidePredicate = (_, asset, _) => UEParse.Provider is not { } provider || !Figures.HasPropActor(provider, asset),
                 }
             ]
         });

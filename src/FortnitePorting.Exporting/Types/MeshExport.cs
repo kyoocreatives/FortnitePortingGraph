@@ -569,6 +569,13 @@ public class MeshExport : BaseExport
                 Type = EExportType.Vehicle;     // the plugins import it as a vehicle
                 break;
             }
+            case EExportType.LegoProp:
+            {
+                // Material Porter fork: a LEGO building prop or set, the meshes of the actor its item previews
+                if (asset.GetOrDefault<UBlueprintGeneratedClass?>("BuildingActorClassToPreview") is { } actorClass)
+                    AddObjects(Context.Blueprint(actorClass));
+                break;
+            }
             case EExportType.LegoOutfit:
             {
                 // Material Porter fork: a LEGO figure, cooked (its Bake folder's meshes) or from its recipe
