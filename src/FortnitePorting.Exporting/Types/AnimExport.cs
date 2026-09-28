@@ -65,6 +65,7 @@ public class AnimExport : BaseExport
                 break;
             }
             case EExportType.Emote:
+            case EExportType.LegoEmote: // Material Porter fork: a LEGO emote's montage is its override's "Animation"
             {
                 if (styles.Length > 0)
                 {
@@ -105,7 +106,10 @@ public class AnimExport : BaseExport
     
     private void AnimMontage(UAnimMontage montage)
     {
-        Skeleton = Context.Skeleton(montage.Skeleton.Load<USkeleton>())!;
+        // Material Porter fork: a LEGO emote's montage names no skeleton; its sequences do (the figure's)
+        var skeleton = montage.Skeleton.Load<USkeleton>()
+                       ?? montage.CompositeSections.Select(section => section.LinkedSequence.Load<UAnimSequence>()?.Skeleton.Load<USkeleton>()).FirstOrDefault(s => s is not null);
+        Skeleton = Context.Skeleton(skeleton)!;
         HandleSectionTree(Sections, montage, montage.CompositeSections.First());
 
         var notifies = new List<FAnimNotifyEvent>();

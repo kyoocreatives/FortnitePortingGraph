@@ -20,6 +20,8 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 public static class Figures
 {
     public const string ItemClass = "JunoAthenaCharacterItemOverrideDefinition";
+    /// <summary>A LEGO emote: its Battle Royale emote and the figure's montage ("Animation").</summary>
+    public const string EmoteClass = "JunoAthenaDanceItemOverrideDefinition";
 
     private static readonly object Lock = new();
     private static IFileProvider? _indexed;

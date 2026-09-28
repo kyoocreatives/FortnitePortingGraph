@@ -10,7 +10,7 @@ using FortnitePorting.Models.Assets.Loading;
 namespace FortnitePorting.Services;
 
 /// <summary>Material Porter fork: Rocket Racing cars (their bodies), assembled with their wheels and paint;
-/// LEGO figures (cooked ones and recipes).</summary>
+/// LEGO figures (cooked ones and recipes) and their emotes.</summary>
 public partial class AssetLoaderService
 {
     public AssetLoaderService()
@@ -40,6 +40,16 @@ public partial class AssetLoaderService
                     HighResIconHandler = asset => AssetLoader.GetHighResIcon(asset) ?? FigurePreview(asset, "LargePreviewImage", "SmallPreviewImage"),
                     DisplayNameHandler = asset => BaseCharacter(asset)?.GetAnyOrDefault<FText?>("DisplayName", "ItemName")?.Text ?? asset.Name,
                     DescriptionHandler = asset => BaseCharacter(asset)?.GetAnyOrDefault<FText?>("Description", "ItemDescription")?.Text.TrimEnd() ?? "",
+                },
+                // the figure's montage of a Battle Royale emote: imported onto the selected figure's armature
+                new AssetLoader(EExportType.LegoEmote)
+                {
+                    ClassNames = [Figures.EmoteClass],
+                    HideRarity = true,
+                    LowResIconHandler = asset => BaseDance(asset) is { } dance ? AssetLoader.GetLowResIcon(dance) : null,
+                    HighResIconHandler = asset => BaseDance(asset) is { } dance ? AssetLoader.GetHighResIcon(dance) : null,
+                    DisplayNameHandler = asset => BaseDance(asset)?.GetAnyOrDefault<FText?>("DisplayName", "ItemName")?.Text ?? asset.Name,
+                    DescriptionHandler = asset => BaseDance(asset)?.GetAnyOrDefault<FText?>("Description", "ItemDescription")?.Text.TrimEnd() ?? "",
                 }
             ]
         });
@@ -47,6 +57,9 @@ public partial class AssetLoaderService
 
     /// <summary>The Battle Royale outfit a LEGO figure stands for.</summary>
     private static UObject? BaseCharacter(UObject figure) => figure.GetOrDefault<UObject?>("BaseAthenaCharacterItemDefinition");
+
+    /// <summary>The Battle Royale emote a LEGO emote stands for.</summary>
+    private static UObject? BaseDance(UObject emote) => emote.GetOrDefault<UObject?>("BaseAthenaDanceItemDefinition");
 
     /// <summary>A figure's preview from its schema's additional data.</summary>
     private static UTexture2D? FigurePreview(UObject figure, params string[] names)
