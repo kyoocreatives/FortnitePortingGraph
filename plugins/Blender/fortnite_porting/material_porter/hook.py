@@ -109,6 +109,11 @@ def _material(job, entry, obj):
     return mat
 
 
+def exact_available(context):
+    """Whether this import builds exact materials (Blender 5, and the app's bridge hasn't failed it)."""
+    return bpy.app.version >= (5, 0, 0) and not _session(context)["down"]
+
+
 def build_exact(context, material_data, texture_data=None, override_parameters=None, obj=None):
     """The exact Blender material for FP's material data, or None (FP's presets then)."""
     if bpy.app.version < (5, 0, 0):
