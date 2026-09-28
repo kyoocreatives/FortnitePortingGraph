@@ -29,8 +29,10 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 ///    material, a 2x2 colour grid ("LU/RU/LL/RL Color &lt;X&gt;": the quadrants
 ///    top left, top right, bottom left, bottom right), its surfaces' grid and its deco, mask and normal.
 /// A hand or leg replacement removes the body's own part (the program's remove masks).
-/// All parts are skinned to SK_Figure. Not done yet: the skeleton body's own colour
-/// layout, cloth.
+/// The skeleton body ("Body Selector" Skeleton) has its own layout (the program's layout 10,
+/// 7 blocks) that its mesh doesn't tie to parts (rigid on 5 bones, its UVs across the blocks);
+/// every skeleton recipe gives all its blocks the same values, which fill its whole grid.
+/// All parts are skinned to SK_Figure. Not done yet: cloth.
 /// </summary>
 public sealed class FigureRecipe
 {
@@ -218,10 +220,11 @@ public sealed class FigureRecipe
                     rawName += "_No" + replaced.Replace(" ", "");
                 }
         var body = new Part { Name = "Body", Raw = raw, RawName = rawName, Material = MaterialFor(provider, Ints.GetValueOrDefault("Body Material Type")) };
-        var blocks = BodyBlocks.Select(b => (b.X, b.Y, b.W, b.H, Colour(Floats.GetValueOrDefault(b.Part + " Color", 1))));
-        body.Textures["Tex Color D"] = Grid("FigureBody", blocks);
+        // the skeleton body: its torso's values over the whole grid (its blocks all have the same)
+        var layout = bodyConstant == BodyConstant ? BodyBlocks : [("torso", 0, 0, 32, 32)];
+        body.Textures["Tex Color D"] = Grid("FigureBody", layout.Select(b => (b.X, b.Y, b.W, b.H, Colour(Floats.GetValueOrDefault(b.Part + " Color", 1)))));
         // the recipe's "Body Color M" is a placeholder the game fills, as it fills "Body Color D"
-        body.Textures["Tex Color M"] = Grid("FigureBodyM", BodyBlocks.Select(b => (b.X, b.Y, b.W, b.H, Surface(b.Part, null, Floats.GetValueOrDefault(b.Part + " Color", 1)))), linear: true);
+        body.Textures["Tex Color M"] = Grid("FigureBodyM", layout.Select(b => (b.X, b.Y, b.W, b.H, Surface(b.Part, null, Floats.GetValueOrDefault(b.Part + " Color", 1)))), linear: true);
         Copy(body, "Body Deco D", "Tex Deco D");
         Copy(body, "Body Deco M", "Tex Deco M");
         Copy(body, "Body Normal", "Tex Normal");
