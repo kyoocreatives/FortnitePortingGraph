@@ -424,6 +424,9 @@ public partial class CUE4ParseService : ObservableObject, IService, IResettable
                 break;
             }
         }
+
+        // Material Porter fork: the islands unlocked by map code (their keys never logged)
+        await MaterialPorter.MaterialPorterService.Instance.SubmitIslandKeysAsync(Provider!);
     }
     
     [LoadingStage("Loading Virtual Paths", stage: 7, weight: 15)]

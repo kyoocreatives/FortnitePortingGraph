@@ -39,6 +39,13 @@
                 </sidebar:Sidebar.Items>
                 <sidebar:Sidebar.Footer>
                     <StackPanel Spacing="{ext:Space 1}">
+                        <!-- Material Porter fork: a UEFN island opened by its map code -->
+                        <TextBox Text="{Binding IslandCode}" Watermark="Island code (1234-5678-9012)" IsEnabled="{Binding !IsUnlockingIsland}"/>
+                        <Button HorizontalAlignment="Stretch" Content="{controls:IconText 'Unlock Island', LockOpen}"
+                                IsEnabled="{Binding !IsUnlockingIsland}"
+                                Command="{Binding UnlockIslandCommand}"/>
+                        <TextBlock Text="{Binding IslandStatus}" TextWrapping="Wrap" FontSize="11" Opacity="0.7"
+                                   IsVisible="{Binding IslandStatus, Converter={x:Static StringConverters.IsNotNullOrEmpty}}"/>
                         <Button HorizontalAlignment="Stretch" Content="{controls:IconText 'Reload Maps', Reload}"
                                 IsEnabled="{Binding !IsLoading}"
                                 Command="{Binding ReloadMapsCommand}"/>

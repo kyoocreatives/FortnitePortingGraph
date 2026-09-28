@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Collections.Specialized;
 using System.Linq;
 using System.Diagnostics;
@@ -9,6 +10,9 @@ using FortnitePorting.Exporting;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using CUE4Parse.FileProvider;
+using CUE4Parse.FileProvider.Vfs;
+using CUE4Parse.Encryption.Aes;
+using CUE4Parse.UE4.Objects.Core.Misc;
 using FortnitePorting.Application;
 using FortnitePorting.Services;
 using Microsoft.Extensions.DependencyInjection;
@@ -74,6 +78,136 @@ public class MaterialPorterService : IService
             _bridge = null;
             Log.Error(e, "[Material Porter] could not listen on localhost:{Port}; Blender falls back to FP's materials", Port);
         }
+    }
+
+    // ------------------------------------------------------------ islands
+    /// <summary>A key the user's key tool gave for an island (shared with the Material Porter app).</summary>
+    private sealed class IslandKey
+    {
+        public string Code { get; set; } = "";
+        public string Guid { get; set; } = "";
+        public string Key { get; set; } = "";
+    }
+
+    /// <summary>Island keys, in Material Porter's data folder: unlocked in either app, open in both.</summary>
+    public static string IslandKeysFile => Path.Combine(GameContext.DataDir, ".data", "islands.json");
+
+    private static List<IslandKey> LoadIslandKeys()
+    {
+        try { return File.Exists(IslandKeysFile) ? JsonConvert.DeserializeObject<List<IslandKey>>(File.ReadAllText(IslandKeysFile)) ?? [] : []; }
+        catch { return []; }
+    }
+
+    private static string NormalGuid(string? g) => new string((g ?? "").Where(Uri.IsHexDigit).ToArray()).ToUpperInvariant();
+
+    /// <summary>The downloaded islands (FP registers them, locked) this app has keys for, opened. Keys are never logged.</summary>
+    public async Task SubmitIslandKeysAsync(AbstractVfsFileProvider provider)
+    {
+        var opened = 0;
+        foreach (var k in LoadIslandKeys())
+        {
+            try { opened += await provider.SubmitKeyAsync(new FGuid(NormalGuid(k.Guid)), new FAesKey(k.Key)); }
+            catch (Exception e) { Log.Warning("[Material Porter] island {Code}: {Message}", k.Code, e.Message); }
+        }
+        Log.Information("[Material Porter] islands: {Opened} archives opened with {Keys} saved keys", opened, LoadIslandKeys().Count);
+    }
+
+    /// <summary>The user's island key tool (Material Porter's setting, else Documents\UEFN-AES-grabber-main).</summary>
+    public static string IslandKeyTool
+    {
+        get
+        {
+            try
+            {
+                var settings = Path.Combine(GameContext.DataDir, "settings.json");
+                if (File.Exists(settings) && JObject.Parse(File.ReadAllText(settings))["IslandKeyTool"]?.ToString() is { Length: > 0 } dir)
+                    return dir;
+            }
+            catch { /* the default */ }
+            return Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.MyDocuments), "UEFN-AES-grabber-main");
+        }
+    }
+
+    /// <summary>
+    /// A map code's island key from the key tool, kept with Material Porter's keys, and the
+    /// island mounted. False when Fortnite hasn't downloaded that island (the key waits for it).
+    /// </summary>
+    public async Task<bool> UnlockIslandAsync(string code, Action<string> status, Action<string> signIn)
+    {
+        var (guid, key) = await RunKeyToolAsync(IslandKeyTool, code, status, signIn);
+        var keys = LoadIslandKeys();
+        keys.RemoveAll(k => NormalGuid(k.Guid) == NormalGuid(guid));
+        keys.Add(new IslandKey { Code = code, Guid = NormalGuid(guid), Key = key });
+        Directory.CreateDirectory(Path.GetDirectoryName(IslandKeysFile)!);
+        await File.WriteAllTextAsync(IslandKeysFile, JsonConvert.SerializeObject(keys, Formatting.Indented));
+        if (Game.Provider is not AbstractVfsFileProvider provider) return false;
+        var opened = await provider.SubmitKeyAsync(new FGuid(NormalGuid(guid)), new FAesKey(key));
+        if (opened == 0) return false;
+        try { provider.LoadVirtualPaths(); } catch { /* its files resolve by path still */ }
+        Log.Information("[Material Porter] island {Code} unlocked ({Opened} archives)", code, opened);
+        return true;
+    }
+
+    /// <summary>
+    /// The key tool (Node.js, `node .` in its folder) run for one code: its sign-in link goes to
+    /// signIn, its progress to status; its "AES Key:" and "GUID:" lines come back, never logged.
+    /// </summary>
+    private static async Task<(string Guid, string Key)> RunKeyToolAsync(string toolDir, string code, Action<string> status, Action<string> signIn)
+    {
+        if (string.IsNullOrWhiteSpace(toolDir) || !File.Exists(Path.Combine(toolDir, "index.js")))
+            throw new FileNotFoundException("No island key tool at " + toolDir);
+        var psi = new ProcessStartInfo("node", ".")
+        {
+            WorkingDirectory = toolDir, UseShellExecute = false, CreateNoWindow = true,
+            RedirectStandardInput = true, RedirectStandardOutput = true, RedirectStandardError = true,
+        };
+        Process? started;
+        try { started = Process.Start(psi); }
+        catch (System.ComponentModel.Win32Exception) { throw new InvalidOperationException("Node.js isn't installed (the island key tool runs on it)"); }
+        using var proc = started ?? throw new InvalidOperationException("the key tool didn't start");
+        string? guid = null, key = null, error = null;
+        void Line(string? l, bool err)
+        {
+            if (string.IsNullOrWhiteSpace(l)) return;
+            var t = l.Trim().Replace("Enter the map code:", "").Trim();
+            if (t.Length == 0) return;
+            if (t.StartsWith("AES Key:", StringComparison.OrdinalIgnoreCase)) { key = t[8..].Trim(); return; }
+            if (t.StartsWith("GUID:", StringComparison.OrdinalIgnoreCase)) { guid = t[5..].Trim(); return; }
+            var at = t.IndexOf("https://", StringComparison.OrdinalIgnoreCase);
+            if (t.StartsWith("Authorize here", StringComparison.OrdinalIgnoreCase) && at >= 0)
+            {
+                signIn(t[at..].Trim());
+                status("Sign in to Epic in the page that opened");
+                return;
+            }
+            if (System.Text.RegularExpressions.Regex.Match(t, @"errorMessage:\s*'(.*)'") is { Success: true } em)
+            {
+                error = "Epic: " + em.Groups[1].Value;
+                return;
+            }
+            if (t.Contains("encrypt", StringComparison.OrdinalIgnoreCase) || t.Contains("can't be downloaded", StringComparison.OrdinalIgnoreCase)
+                || (t.StartsWith("Error:", StringComparison.OrdinalIgnoreCase) && t.Length > 8 && !t.EndsWith("{")))
+            {
+                error = t;
+                return;
+            }
+            if (!err) status(t);
+        }
+        var output = Task.Run(async () => { while (await proc.StandardOutput.ReadLineAsync() is { } l) Line(l, false); });
+        var errors = Task.Run(async () => { while (await proc.StandardError.ReadLineAsync() is { } l) Line(l, true); });
+        // the tool reads the code after signing in; the pipe holds it till then
+        await proc.StandardInput.WriteLineAsync(code);
+        proc.StandardInput.Close();
+        using var timeout = new System.Threading.CancellationTokenSource(TimeSpan.FromMinutes(6));   // an unanswered sign-in expires
+        try { await proc.WaitForExitAsync(timeout.Token); }
+        catch (OperationCanceledException)
+        {
+            try { proc.Kill(true); } catch { /* gone */ }
+            throw new TimeoutException("The key tool waited too long (sign-in not finished)");
+        }
+        await Task.WhenAll(output, errors);
+        if (key is null || guid is null) throw new InvalidOperationException(error ?? "the key tool gave no key for " + code);
+        return (guid, key);
     }
 
     /// <summary>

@@ -11,6 +11,7 @@ using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.Engine;
+using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.Exporting.MaterialPorter;
 using FortnitePorting.Exporting.Models;
@@ -55,6 +56,12 @@ public partial class ExportContext
             try
             {
                 reader.LevelAsync(package, Matrix4x4.Identity, 0, CancellationToken).GetAwaiter().GetResult();
+                // a UEFN island's cells aren't in its runtime hash (FP never visits them): read them with it
+                foreach (var cell in IslandCells(level, package))
+                {
+                    if (CancellationToken.IsCancellationRequested) break;
+                    reader.LevelAsync(cell, Matrix4x4.Identity, 0, CancellationToken).GetAwaiter().GetResult();
+                }
             }
             catch (OperationCanceledException)
             {
@@ -105,6 +112,37 @@ public partial class ExportContext
         }
 
         return meshes;
+    }
+
+    /// <summary>
+    /// The _Generated_ cell levels beside a World Partition map whose runtime hash
+    /// lists none (UEFN islands); none for a cell, a classic map, or a map FP walks.
+    /// </summary>
+    private List<string> IslandCells(ULevel level, string package)
+    {
+        if (package.Contains("/_Generated_/", StringComparison.OrdinalIgnoreCase)) return [];
+        if (level.GetOrDefault<UObject>("WorldSettings") is not { } settings
+            || settings.GetOrDefault<UObject>("WorldPartition") is not { } partition
+            || partition.GetOrDefault<UObject>("RuntimeHash") is not { } hash) return [];
+        foreach (var data in hash.GetOrDefault("RuntimeStreamingData", Array.Empty<FStructFallback>()))
+            if (data.GetOrDefault("SpatiallyLoadedCells", Array.Empty<FPackageIndex>()).Length
+                + data.GetOrDefault("NonSpatiallyLoadedCells", Array.Empty<FPackageIndex>()).Length > 0) return [];
+        foreach (var grid in hash.GetOrDefault("StreamingGrids", Array.Empty<FStructFallback>()))
+        foreach (var gridLevel in grid.GetOrDefault("GridLevels", Array.Empty<FStructFallback>()))
+        foreach (var layerCell in gridLevel.GetOrDefault("LayerCells", Array.Empty<FStructFallback>()))
+            if (layerCell.GetOrDefault("GridCells", Array.Empty<UObject>()).Length > 0) return [];
+
+        string key;
+        try { key = FileProvider.FixPath(package); }
+        catch { return []; }
+        var dot = key.LastIndexOf('.');
+        if (dot > key.LastIndexOf('/')) key = key[..dot];
+        var prefix = key + "/_Generated_/";
+        var cells = FileProvider.Files.Keys
+            .Where(k => k.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && k.EndsWith(".umap", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(k => k, StringComparer.OrdinalIgnoreCase).ToList();
+        Log.Information("[Material Porter] {Map}: {Count} island cells beside it", package, cells.Count);
+        return cells;
     }
 
     /// <summary>A landscape's weight layers: LayerInfo asset name -> the LayerName materials sample.</summary>

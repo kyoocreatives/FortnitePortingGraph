@@ -32,6 +32,8 @@ public partial class SupabaseService : ObservableObject, IService
     public SupabaseService(APIService api)
     {
         Api = api;
+        // no accounts: islands are opened with the user's own keys (map codes), for everyone
+        Permissions = new UserPermissions { CanExportUEFN = true };
         if (Disabled) return;
         
         TaskService.Run(async () =>
