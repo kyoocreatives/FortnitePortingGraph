@@ -31,6 +31,8 @@ public sealed class Bridge : IDisposable
     HttpListener listener;
     public event Action<string> Log;
     public int Port { get; private set; }
+    /// <summary>Routes a host adds (route, query) -> the answer; null: none.</summary>
+    public Func<string, System.Collections.Specialized.NameValueCollection, Task<object>> Extra { get; set; }
 
     public Bridge(GameContext game, MaterialService materials)
     {
@@ -80,7 +82,7 @@ public sealed class Bridge : IDisposable
                 "texture" => await materials.BlenderTextureAsync(Need(path)),
                 "collection" => await materials.CollectionAsync(Need(path)),
                 "material" => (await materials.DescribeAsync(Need(path))).ToJson(),
-                _ => throw new KeyNotFoundException("no route " + route),
+                _ => Extra != null && await Extra(route, q) is { } extra ? extra : throw new KeyNotFoundException("no route " + route),
             };
             if (route != "ping") Log?.Invoke($"Blender asked for {route} {ShortName(path)}");
             Timing.Log($"bridge {route} {ShortName(path)}", sw);

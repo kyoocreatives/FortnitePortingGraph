@@ -44,10 +44,15 @@ def _texture_path(texture):
     return (texture or {}).get("Path")
 
 
-def _overlay(texture_data, override_parameters, slot):
+def _overlay(texture_data, override_parameters, slot, values=None):
     """What FP puts over the material's own values: a building's texture data
-    (by layer, like FP) and a style's parameter overrides."""
+    (by layer, like FP), a style's parameter overrides, and the fork map
+    reader's values (a dynamic instance's, a building's texture data)."""
     textures, scalars, vectors = {}, {}, {}
+    if values:
+        textures.update(values.get("Textures") or {})
+        scalars.update(values.get("Scalars") or {})
+        vectors.update(values.get("Vectors") or {})
     for data in texture_data or []:
         index = data.get("Index") or 0
         ts = "_Texture_%d" % (index + 1) if index > 0 else ""
@@ -123,7 +128,7 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
         else:
             _log("%s: %s - FP's own material" % (material_data.get("Name"), e))
         return None
-    overlay = _overlay(texture_data, override_parameters, material_data.get("Slot"))
+    overlay = _overlay(texture_data, override_parameters, material_data.get("Slot"), material_data.get("MPValues"))
     if overlay:
         for kind, values in overlay.items():
             entry[kind] = dict(entry.get(kind) or {}, **values)

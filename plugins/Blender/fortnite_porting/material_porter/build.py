@@ -19,14 +19,16 @@ from .ue_graph import SHADING_MODELS, Translator, Val
 PREFIX = "MP "            # built materials: "MP MI_Foo"
 KEY_PATH = "mp_path"      # the game object a built material translates
 KEY_REV = "mp_rev"        # the build revision that made it (older ones are rebuilt, not reused)
-BUILD_REVISION = 7        # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data
+BUILD_REVISION = 8        # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data
                           # 4: instance overrides to the default (Opaque, DefaultLit, one-sided) honoured
                           # 6: vector parameters without a stored default are (0, 0, 0, 0), not alpha 1
+                          # 8: single layer water (the medium, refraction, water info stand-ins); graph clip()s
 KEY_REPLACES = "mp_replaces"
 KEY_REPLACED_BY = "mp_replaced_by"
 KEY_FP = "mp_fp"          # a function group's fingerprint, to share it
 KEY_VARIANT = "mp_variant"  # a style's parameter values over the instance (their hash)
 KEY_SHAPE = "mp_shape"    # what decides a build's trees beyond parameter values (build_like reuses it)
+KEY_WATER = "mp_water"    # a water material (MSM_SingleLayerWater): its objects get the depth under them
 
 
 def _enum(v, default):
@@ -70,18 +72,24 @@ def assemble(tr, mat, a, s):
                 per_pixel = sm
             shading = SHADING_MODELS[int(sm.s)] if sm is not None and sm.const and 0 <= int(sm.s) < len(SHADING_MODELS) \
                 else "MSM_DefaultLit"
+        # the water medium comes with the graph's SingleLayerWaterMaterialOutput
+        water = shading == "MSM_SingleLayerWater" and "WaterAbsorption" in a
 
-        link(a["BaseColor"], "Base Color")
-        link(a["Metallic"], "Metallic")
+        if not water:
+            # (water: BaseColor and Metallic are its surface layer's, below)
+            link(a["BaseColor"], "Base Color")
+            link(a["Metallic"], "Metallic")
         link(a["Roughness"], "Roughness")
-        # UE's Specular 0.5 is F0 0.04, as is Blender's Specular IOR Level 0.5
-        link(a["Specular"], "Specular IOR Level")
+        if not water:
+            # UE's Specular 0.5 is F0 0.04, as is Blender's Specular IOR Level 0.5 (IOR 1.5)
+            link(a["Specular"], "Specular IOR Level")
         emissive = a["EmissiveColor"]
         if not (emissive.const and not any(_comps(emissive.s)[:3])):
             link(emissive, "Emission Color")
             bsdf.inputs["Emission Strength"].default_value = 1.0
 
         n = a["Normal"]
+        bsdf_n = None
         if not (n.const and _comps(n.s)[:3] == (0.0, 0.0, 1.0)):
             if s["tangent_normal"]:
                 # UE's tangent space is DirectX (green down): flip Y, then
@@ -115,6 +123,8 @@ def assemble(tr, mat, a, s):
             link(a["SubsurfaceColor"], "Sheen Tint")
 
         surface = Val(bsdf.outputs[0], 3)
+        if water:
+            surface = _water(tr, mat, a, bsdf, bsdf_n, out)
         if shading == "MSM_Unlit":
             em = tr.node("ShaderNodeEmission", "unlit")
             tr.link(emissive, em.inputs["Color"])
@@ -126,8 +136,11 @@ def assemble(tr, mat, a, s):
             cut = m if m.const else tr.math('GREATER_THAN', m, tr.const(s["clip"] - 1e-4), label="opacity mask clip")
             if cut.const:
                 cut = tr.const(1.0 if cut.s > s["clip"] else 0.0)
+            for keep in tr.clips:
+                # the graph's own clip()s: not drawn where one is 0
+                cut = tr.binop('MULTIPLY', cut, keep, label="clip()")
             if not (cut.const and cut.s == 1.0):
-                if shading == "MSM_Unlit":
+                if shading == "MSM_Unlit" or water:
                     surface = _with_alpha(tr, surface, cut)
                 else:
                     link(cut, "Alpha")
@@ -214,6 +227,98 @@ def _per_pixel_models(tr, bsdf, a, sm, profile=None):
     link(a["SubsurfaceColor"], "Sheen Tint")
 
 
+IOR_WATER = 1.333
+# a dielectric's reflectance at normal incidence from its IOR, as Blender's
+# Principled BSDF makes it: ((n - 1) / (n + 1))^2
+F0_WATER = ((IOR_WATER - 1.0) / (IOR_WATER + 1.0)) ** 2
+
+
+def _water(tr, mat, a, bsdf, normal, out):
+    """UE's single layer water (MSM_SingleLayerWater) in Eevee.
+
+    UE lights the water surface itself (specular from Specular and
+    Roughness, and a surface layer of BaseColor where Opacity > 0), then
+    adds the water the view ray crosses to the scene behind it, per colour
+    channel (coefficients per cm, path in cm):
+        T = exp(-(Scattering + Absorption) * path)
+        the scene behind * T * ColorScaleBehindWater
+        + (1 - F) * Scattering (1 - T) / (Scattering + Absorption) * (sun * phase + ambient / 4 pi)
+    Here the surface is a Principled BSDF refracting at water's IOR (Eevee's
+    raytraced transmission shows the ground through it) with its
+    transmission tinted T * ColorScaleBehindWater; the in-scattered light is
+    a diffuse lobe lit by the scene, its albedo the scattered amount / 4
+    (the isotropic phase 1 / 4 pi against a diffuse lobe's 1 / pi) * (1 - F).
+    The path is the translator's (the env's depth over the view's
+    steepness). Returns the surface shader."""
+    path = tr.water_path()
+    zero3, one3 = tr.const((0.0, 0.0, 0.0), 3), tr.const((1.0, 1.0, 1.0), 3)
+    # UE: max(0, coefficients)
+    sc = tr.vmath('MAXIMUM', tr.as3(a["WaterScattering"]), zero3, label="scattering (per cm)", out_w=3)
+    ab = tr.vmath('MAXIMUM', tr.as3(a["WaterAbsorption"]), zero3, label="absorption (per cm)", out_w=3)
+    ext = tr.vmath('ADD', sc, ab, label="extinction", out_w=3)
+    depth = tr.vmath('SCALE', ext, path, label="optical depth", out_w=3)
+    trans = tr.combine([tr.math('EXPONENT', tr.binop('MULTIPLY', c, tr.const(-1.0))) for c in tr.comps(depth)])
+    scattered = tr.vmath('DIVIDE', tr.vmath('MULTIPLY', sc, tr.vmath('SUBTRACT', one3, trans, out_w=3), out_w=3),
+                         tr.vmath('MAXIMUM', ext, tr.const((1e-5,) * 3, 3), out_w=3), label="scattered amount", out_w=3)
+    tint = trans
+    cs = a["WaterColorScaleBehindWater"]
+    if not (cs.const and _comps(cs.s)[:3] == (1.0, 1.0, 1.0)):
+        tint = tr.vmath('MULTIPLY', trans, tr.vmath('MAXIMUM', tr.as3(cs), zero3, out_w=3), label="colour behind water",
+                        out_w=3)
+    # the surface: reflects, refracts the ground through the water's tint
+    tr.link(tint, bsdf.inputs["Base Color"])
+    bsdf.inputs["Transmission Weight"].default_value = 1.0
+    bsdf.inputs["IOR"].default_value = IOR_WATER
+    bsdf.label = "UE water surface"
+    # UE's F0 is 0.08 * Specular; Blender's is F0(IOR) * 2 * Specular IOR Level
+    tr.link(tr.binop('MULTIPLY', a["Specular"], tr.const(0.08 / (2.0 * F0_WATER)), label="specular level"),
+            bsdf.inputs["Specular IOR Level"])
+    # the water under the surface, lit
+    fres = tr.node("ShaderNodeFresnel", "water fresnel")
+    fres.inputs["IOR"].default_value = IOR_WATER
+    if normal is not None:
+        tr.link(normal, fres.inputs["Normal"])
+    albedo = tr.vmath('SCALE', scattered, tr.binop('MULTIPLY', tr.binop('SUBTRACT', tr.const(1.0), Val(fres.outputs[0], 1)),
+                                                   tr.const(0.25)), label="in-scattered albedo", out_w=3)
+    medium = tr.node("ShaderNodeBsdfDiffuse", "water medium (in-scattered light)")
+    tr.link(albedo, medium.inputs["Color"])
+    add = tr.node("ShaderNodeAddShader", "water")
+    tr.L.new(bsdf.outputs[0], add.inputs[0])
+    tr.L.new(medium.outputs[0], add.inputs[1])
+    surface = Val(add.outputs[0], 3)
+    # Opacity: the surface layer (foam, debris) over the water
+    op = a["Opacity"]
+    if not (op.const and op.s <= 0.0):
+        layer = tr.node("ShaderNodeBsdfPrincipled", "UE water surface layer")
+        for name, pin in (("Base Color", "BaseColor"), ("Metallic", "Metallic"), ("Roughness", "Roughness"),
+                          ("Specular IOR Level", "Specular")):
+            tr.link(a[pin], layer.inputs[name])
+        if normal is not None:
+            tr.link(normal, layer.inputs["Normal"])
+        mix = tr.node("ShaderNodeMixShader", "surface opacity")
+        tr.link(tr.saturate(op), mix.inputs[0])
+        tr.L.new(add.outputs[0], mix.inputs[1])
+        tr.L.new(layer.outputs[0], mix.inputs[2])
+        surface = Val(mix.outputs[0], 3)
+    # one refracting interface (the thickness 0), traced through the scene
+    zero = tr.node("ShaderNodeValue", "thickness: one interface")
+    zero.outputs[0].default_value = 0.0
+    if tr.tree == mat.node_tree:
+        tr.L.new(zero.outputs[0], out.inputs["Thickness"])
+    else:
+        tr.tree.interface.new_socket("Thickness", in_out='OUTPUT', socket_type='NodeSocketFloat')
+        tr.L.new(zero.outputs[0], out.inputs["Thickness"])
+    mat.surface_render_method = 'DITHERED'
+    if hasattr(mat, "use_raytrace_refraction"):
+        mat.use_raytrace_refraction = True
+    mat[KEY_WATER] = 1
+    note = getattr(tr.env, "note", None)
+    ee = getattr(bpy.context.scene, "eevee", None)
+    if note is not None and ee is not None and not getattr(ee, "use_raytracing", True):
+        note("the ground shows through water with Render > Raytracing on (off: the water refracts only the sky)")
+    return surface
+
+
 def _with_alpha(tr, surface, alpha):
     mix = tr.node("ShaderNodeMixShader", "alpha")
     tp = tr.node("ShaderNodeBsdfTransparent", "see-through")
@@ -238,6 +343,8 @@ def _material_node(mat, root, label, values, width):
             sock.default_value = value
     out = tree.nodes.new("ShaderNodeOutputMaterial")
     tree.links.new(node.outputs["Surface"], out.inputs["Surface"])
+    if "Thickness" in node.outputs:
+        tree.links.new(node.outputs["Thickness"], out.inputs["Thickness"])
     node.location = (-width - 60.0, 0.0)
     out.location = (0.0, 0.0)
     tree.nodes.active = node

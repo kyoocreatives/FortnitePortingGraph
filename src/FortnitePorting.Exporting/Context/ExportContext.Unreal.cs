@@ -97,6 +97,9 @@ public partial class ExportContext
 
     public List<ExportMesh> Level(ULevel level)
     {
+        // Material Porter fork: its map reader places the level's actors
+        if (MaterialPorterLevel(level) is { } materialPorterMeshes) return materialPorterMeshes;
+
         var actors = new List<ExportMesh>();
         var totalActors = level.Actors.Length;
         var currentActor = 0;

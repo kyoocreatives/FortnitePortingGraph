@@ -1,6 +1,13 @@
 using System;
+using System.Collections.Specialized;
+using System.Linq;
 using System.Diagnostics;
 using System.IO;
+using System.Threading.Tasks;
+using CUE4Parse.UE4.Objects.Engine;
+using FortnitePorting.Exporting;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using CUE4Parse.FileProvider;
 using FortnitePorting.Application;
 using FortnitePorting.Services;
@@ -58,6 +65,7 @@ public class MaterialPorterService : IService
         {
             _bridge = new Bridge(Game, Materials);
             _bridge.Log += message => Log.Information("[Material Porter] {Message}", message);
+            _bridge.Extra = ExtraRouteAsync;
             _bridge.Start(Port);
             Log.Information("[Material Porter] exact materials served on localhost:{Port} ({Build})", Port, Game.BuildVersion);
         }
@@ -66,5 +74,35 @@ public class MaterialPorterService : IService
             _bridge = null;
             Log.Error(e, "[Material Porter] could not listen on localhost:{Port}; Blender falls back to FP's materials", Port);
         }
+    }
+
+    /// <summary>
+    /// GET /fork-export-world?path=&lt;level package&gt;[&amp;landscape=1]: FP's world export of that one
+    /// level (actors and instances, as the Map page sends it to Blender) as the JSON the plugin
+    /// receives - for tests that import it headless.
+    /// </summary>
+    private async Task<object?> ExtraRouteAsync(string route, NameValueCollection query)
+    {
+        if (route != "fork-export-world") return null;
+        var path = query["path"] ?? throw new ArgumentException("path missing");
+        // a World Partition cell's world is named after its map, not its file
+        var package = await Game.Provider.LoadPackageAsync(path);
+        var world = package.GetExports().OfType<UWorld>().FirstOrDefault()
+                    ?? throw new System.IO.FileNotFoundException("no world in " + path);
+        using var meta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
+        meta.WorldFlags = EWorldFlags.Actors | EWorldFlags.InstancedFoliage | (query["landscape"] == "1" ? EWorldFlags.Landscape : 0);
+        var session = new ExportSession(meta);
+        var data = await session.RunAsync(() => [session.CreateExport(world.Name, world, EExportType.World, [])]);
+        var payload = new
+        {
+            MetaData = new
+            {
+                data.MetaData.Version,
+                data.MetaData.AssetsRoot,
+                Settings = AppServices.AppSettings.ExportSettings.GetSettingsViewModel(EExportLocation.Blender),
+            },
+            data.Exports,
+        };
+        return new JRaw(JsonConvert.SerializeObject(payload));
     }
 }

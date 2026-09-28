@@ -93,6 +93,16 @@ geometry, camera), so an env only defines what it knows better:
     env.texture_slices(name, sampler) -> [bpy.types.Image] a texture array
     env.texture_parameter(pname, default) -> the texture a parameter holds
     env.primitive_index()             -> Val (1)
+    env.water_depth()                 -> Val (1)   UE cm from a water surface down to the
+                                                   ground (the water info texture's heights)
+    env.water_flow()                  -> Val (2)   the surface's flow, DrawWaterInfo's encoding
+                                                   (speed / MaxVelocity, angle / 2 pi)
+
+A water material (MSM_SingleLayerWater) also gives its medium:
+Translator.material_attributes() adds WaterScattering, WaterAbsorption
+(per cm), WaterPhaseG and WaterColorScaleBehindWater from its
+SingleLayerWaterMaterialOutput, and the view ray's way through the water
+(water_path(), cm) is what SceneDepthWithoutWater - PixelDepth measures.
 """
 import hashlib
 import json
@@ -423,7 +433,64 @@ CUSTOM_HASHES = {
     "ee3c506f": "custom_taa_params",        # View.TemporalAAParams (float2 here)
     "d2fa8df2": "custom_refract",           # return refract(Ray, Normal, Index);
     "0eafe77b": "custom_packed_hsv",        # asuint(PackedHSV.x): H 12 bits, S and V 10 bits each
+    "2658b7cc": "custom_euler_to_quat",     # roll/pitch/yaw degrees -> quaternion (MF_EulerToQUat)
+    "2e4092f5": "custom_one_minus_exp",     # return 1-exp(-x);
+    "791169ec": "custom_one_minus_exp",     # return 1.0-exp(-x);
+    # the Water plugin's runtime: a water body's data, its zone's water info
+    # texture, its Gerstner waves - see Translator.water_depth()
+    "1186187d": "custom_zero",              # GetWaterWaveParamIndex(Parameters): the water body's index
+    "e9d7efe6": "custom_zero",              # GetWaterBodyData(i).WaterZoneIndex
+    "71f271be": "custom_zero",              # GetWaterInfoTextureViewIndex(WaterZoneIndex)
+    "729bc03c": "custom_water_body_fixed",  # FixedVelocity / FixedZHeight / FixedWaterDepth outputs
+    "0aad0772": "custom_water_zone",        # GetWaterZoneData: Location; Extent, HeightExtent, GroundZMin
+    "766f134a": "custom_water_info_z",      # DecodeWaterInfoZHeight(WaterInfoSample, zone)
+    "58bda2dd": "custom_water_info_ground",  # DecodeWaterInfoGroundHeight(WaterInfoSample, zone)
+    "a8eed0bd": "custom_water_info_velocity",  # DecodeWaterInfoVelocity(WaterInfoSample, MaxVelocity)
+    "7462ade0": "custom_water_flow",        # Flow (speed / MaxVelocity, angle / 2 pi) -> velocity
+    "92a4fca7": "custom_gerstner_waves",    # GetPerFrequencyGerstnerWavesNew: WPO and normals
+    "2c319634": "custom_one",               # ComputeWaveDepthAttenuationFactorNew (no waves to attenuate)
+    "e52cfc8a": "custom_hole_clip",         # if (ClipMask == 0) clip(-1); return NormalPassThru;
+    "30028fa0": "custom_hole_clip",         # if (ClipMask == 0) clip(-1); return ScatteringPassThru;
+    "647da244": "custom_hole_clip",         # if (HoleMask == 0) clip(-1); return NormalPassThru;
+    "efd032f9": "custom_hit_proxy_clip",    # #if HIT_PROXY_SHADER clip(x); #endif return PassThrough;
+    "92ef46a2": "custom_dynamic_bounds",    # clip() outside the water's dynamic bounds
+    "8b65a300": "custom_dynamic_bounds",    # clip() inside them
 }
+
+# handlers that read only some of their inputs (the water info sample a
+# decode stands in for never becomes nodes)
+CUSTOM_LAZY = {"custom_water_body_fixed", "custom_water_zone", "custom_water_info_z", "custom_water_info_ground",
+               "custom_water_info_velocity", "custom_gerstner_waves", "custom_zero", "custom_one"}
+
+
+class _LazyInputs(dict):
+    """A Custom node's inputs, each evaluated when first read."""
+
+    def __init__(self, evaluate, refs):
+        super().__init__()
+        self._evaluate, self._refs = evaluate, refs
+
+    def __missing__(self, key):
+        if key not in self._refs:
+            raise KeyError(key)
+        v = self[key] = self._evaluate(self._refs[key])
+        return v
+
+    def get(self, key, default=None):
+        return self[key] if key in self._refs or dict.__contains__(self, key) else default
+
+    def values(self):
+        return [self[k] for k in self._refs]
+
+
+# UE's water medium (MSM_SingleLayerWater): its SingleLayerWaterMaterialOutput
+# pins, the attribute each becomes, the default of an unlinked one
+WATER_OUTPUTS = (("ScatteringCoefficients", "WaterScattering", (0.0, 0.0, 0.0)),
+                 ("AbsorptionCoefficients", "WaterAbsorption", (0.0, 0.0, 0.0)),
+                 ("PhaseG", "WaterPhaseG", 0.0),
+                 ("ColorScaleBehindWater", "WaterColorScaleBehindWater", (1.0, 1.0, 1.0)))
+# how deep the water is (cm) where the env knows no ground under it
+WATER_DEPTH_DEFAULT = 300.0
 
 
 def custom_code(p):
@@ -442,6 +509,7 @@ UNREAD_PINS = {
     "*": {"CoordinatesDX", "CoordinatesDY", "MipValue", "AutomaticViewMipBiasValue"},
     "DDX": {"Value"}, "DDY": {"Value"},
     "DepthFade": {"FadeDistance"}, "SceneDepth": {"Input"}, "SceneColor": {"Input"},
+    "SceneDepthWithoutWater": {"Input"},
     "SceneTexture": {"Coordinates"}, "DistanceFieldApproxAO": {"BaseDistance", "Radius", "Normal", "Position"},
     "SkyAtmosphereLightIlluminance": {"WorldPosition"}, "SamplePhysicsVectorField": {"WorldPosition"},
     "RuntimeVirtualTextureSampleParameter": {"WorldPosition", "Coordinates"},
@@ -805,6 +873,8 @@ class Translator:
         # then one frame per material function it calls, nested as UE nests them
         self.section = []
         self._shared = {}
+        # clip()s of the material's own graph: where one is 0 the pixel isn't drawn
+        self.clips = []
 
     def activate(self):
         """Make this the translator the env builds nodes with; returns the
@@ -1047,13 +1117,26 @@ class Translator:
             v = self.input(g, pins["MaterialAttributes"], {}, None)
             attrs = v.s if v is not None and isinstance(v.s, Attrs) else Attrs()
             out = {n: attrs.get(n) for n in names}
+            out.update(self.water_outputs(g))
             self.prune_unused()
             return out
         out = {}
         for n in names:
             pin = next((k for k, a in PIN_ATTRIBUTE.items() if a == n and linked(pins.get(k))), None)
             out[n] = self.input(g, pins[pin], {}, None) if pin else attribute_default(n)
+        out.update(self.water_outputs(g))
         return out
+
+    def water_outputs(self, g):
+        """A water material's medium (its SingleLayerWaterMaterialOutput, a
+        custom output beside the attributes), {WATER_OUTPUTS name: Val}; {}
+        for a material without one."""
+        x = next((x for x in g.o if T(x) == "SingleLayerWaterMaterialOutput"), None)
+        if x is None:
+            return {}
+        p = x.get("Properties") or {}
+        return {name: self.input(g, p.get(pin), {}, self.const(d, 1 if isinstance(d, float) else 3))
+                for pin, name, d in WATER_OUTPUTS}
 
     def input(self, g, ref, scope, default):
         """Evaluate an FExpressionInput dict (or return default)."""
@@ -1255,7 +1338,7 @@ class Translator:
         if t == "Arctangent2Fast" or t == "Arctangent2":
             return self.math('ARCTAN2', P("Y"), P("X"))
         if t == "Custom":
-            return self.custom(g, x, scope)
+            return self.custom(g, x, scope, out)
         if t in ("TextureObject", "TextureObjectParameter"):
             tex = str((p.get("Texture") or {}).get("ObjectName", "")) if isinstance(p.get("Texture"), dict) \
                 else str(p.get("Texture", ""))
@@ -2190,6 +2273,31 @@ class Translator:
     def light_color(self):
         return self._hook("light_color", lambda: self.stand_in("sun colour 1", self.const((1.0, 1.0, 1.0), 3)))
 
+    def pixel_depth(self):
+        def fallback():
+            n = self.shared("camera data", lambda: self.node("ShaderNodeCameraData", "camera data"))
+            return self.binop('MULTIPLY', Val(n.outputs["View Z Depth"], 1), self.const(100.0))
+        return self._hook("pixel_depth", fallback)
+
+    def water_depth(self):
+        """How deep the water is under this pixel of its surface (UE cm, the
+        surface's height less the ground's; below 0 where the ground rises
+        over it). At run time the water info texture holds both heights;
+        here the env's water_depth() answers, else WATER_DEPTH_DEFAULT."""
+        return self.shared("water depth", lambda: self._hook("water_depth", lambda: self.stand_in(
+            "water depth %g cm (the ground under the water unknown)" % WATER_DEPTH_DEFAULT,
+            self.const(WATER_DEPTH_DEFAULT))))
+
+    def water_path(self):
+        """The view ray's way through the water to the ground behind it (UE
+        cm, >= 0): the depth over the ray's steepness, the ground taken level
+        under the pixel (what SceneDepthWithoutWater - PixelDepth measures)."""
+        def make():
+            up = self.math('ABSOLUTE', self.comps(self.env.camera_vector())[2])
+            path = self.binop('DIVIDE', self.water_depth(), self.math('MAXIMUM', up, self.const(0.02)))
+            return self.math('MAXIMUM', path, self.const(0.0), label="water path")
+        return self.shared("water path", make)
+
     def sample_array(self, tname, coords, sampler):
         """A texture array at (u, v, slice): the env's slices, the nearest one
         (as UE rounds the slice index); float4 with alpha."""
@@ -2247,6 +2355,9 @@ class Translator:
                 g, p.get("InOpacity"), scope, self.const(float(p.get("InOpacityDefault", 1.0)))))
         if t == "SceneDepth":
             return self.stand_in("SceneDepth as far (1e6)", self.const(1e6))
+        if t == "SceneDepthWithoutWater":
+            # the scene behind the water: its depth along this pixel's view ray
+            return self.binop('ADD', self.pixel_depth(), self.water_path(), label="scene depth without water")
         if t == "SceneColor":
             return self.stand_in("SceneColor as black", self.const((0.0, 0.0, 0.0), 3))
         if t == "SceneTexture":
@@ -2435,10 +2546,7 @@ class Translator:
         if t in ("VertexTangentWS",):
             return self.tangent_frame()[0]
         if t == "PixelDepth":
-            def fallback():
-                n = self.shared("camera data", lambda: self.node("ShaderNodeCameraData", "camera data"))
-                return self.binop('MULTIPLY', Val(n.outputs["View Z Depth"], 1), self.const(100.0))
-            return self._hook("pixel_depth", fallback)
+            return self.pixel_depth()
         if t == "ObjectPositionWS":
             rel = "CameraRelative" in str(p.get("OriginType", ""))
             return self._hook("object_position", lambda: env.actor_position(rel), rel)
@@ -2520,12 +2628,19 @@ class Translator:
     # Custom nodes carry HLSL; each known snippet is rebuilt here by hand
     # (whitespace-insensitive match), anything else is reported and passes
     # its first input through.
-    def custom(self, g, x, scope):
+    def custom(self, g, x, scope, out=0):
         p = x.get("Properties") or {}
-        ins = {i.get("InputName"): self.input(g, i.get("Input"), scope, self.const(0.0))
-               for i in p.get("Inputs", [])}
         handler = custom_handler(p)
+        if handler in CUSTOM_LAZY:
+            # reads only some inputs: the rest never become nodes
+            ins = _LazyInputs(lambda ref: self.input(g, ref, scope, self.const(0.0)),
+                              {i.get("InputName"): i.get("Input") for i in p.get("Inputs", [])})
+        else:
+            ins = {i.get("InputName"): self.input(g, i.get("Input"), scope, self.const(0.0))
+                   for i in p.get("Inputs", [])}
         if handler is not None:
+            # a snippet's AdditionalOutputs are output indices 1.. (0: its return value)
+            self.custom_out = out
             return getattr(self, handler)(ins, p)
         # unknown: its first numeric input, else zeros of its output type
         # (never a texture: those can't go on)
@@ -2807,6 +2922,119 @@ class Translator:
         g = self.binop('SUBTRACT', self.const(2.0), self.math('ABSOLUTE', self.binop('SUBTRACT', h6, self.const(2.0))))
         b = self.binop('SUBTRACT', self.const(2.0), self.math('ABSOLUTE', self.binop('SUBTRACT', h6, self.const(4.0))))
         return self.saturate(self.combine([r, g, b]))
+
+    # ------------------------------------------------------------ water
+    # The Water plugin draws each water body's surface mesh into its zone's
+    # water info texture at run time (DrawWaterInfo: the vertex colour's flow,
+    # the surface height, the ground height under it); materials decode it.
+    # A material on the surface mesh itself reads the same things off the
+    # pixel: its height, its vertex colour, the depth the env knows.
+    def custom_water_info_z(self, ins, p):
+        # DecodeWaterInfoZHeight: the water's height here - the surface's own
+        return self.comps(self.env.world_position(False))[2]
+
+    def custom_water_info_ground(self, ins, p):
+        # DecodeWaterInfoGroundHeight: the ground under the surface
+        return self.binop('SUBTRACT', self.comps(self.env.world_position(False))[2], self.water_depth(),
+                          label="ground under the water")
+
+    def custom_water_info_velocity(self, ins, p):
+        # DecodeWaterInfoVelocity(sample, MaxVelocity) = (sample.xy - 0.5) * 2 * MaxVelocity, of
+        # DrawWaterInfo's (Flow velocity / (2 * its MaxVelocity) + 0.5): the surface's flow
+        return self._flow_velocity(self.water_flow(), self.mask(self._in(ins, "MaxVelocity", 1024.0), [0]))
+
+    def custom_water_flow(self, ins, p):
+        return self._flow_velocity(self._in(ins, "Flow"), self.mask(self._in(ins, "MaxVelocity", 1024.0), [0]))
+
+    def _flow_velocity(self, flow, max_velocity):
+        """float Magnitude = Flow.x * MaxVelocity; float Direction = Flow.y * 2 * PI;
+        return float2(Magnitude * cos(Direction), Magnitude * sin(Direction));"""
+        speed, turn = self.comps(flow)[:2]
+        mag = self.binop('MULTIPLY', speed, max_velocity)
+        ang = self.binop('MULTIPLY', turn, self.const(2.0 * math.pi))
+        return self.combine([self.binop('MULTIPLY', mag, self.math('COSINE', ang)),
+                             self.binop('MULTIPLY', mag, self.math('SINE', ang))])
+
+    def water_flow(self):
+        """The surface's flow as DrawWaterInfo reads it: vertex colour R =
+        speed / MaxFlowVelocity, G = direction / 2 pi (a river's info mesh
+        carries it; still water's is black)."""
+        return self._hook("water_flow", lambda: self.mask(self.env.vertex_color()[0], [0, 1]))
+
+    def custom_water_body_fixed(self, ins, p):
+        # FixedVelocity / FixedZHeight / FixedWaterDepth of the body's runtime
+        # data (read only behind the Use Fixed switches; the snippet returns 0)
+        self.warnings.append("stand-in: water body's fixed velocity / height / depth as 0")
+        return self.const((0.0, 0.0, 0.0), 3) if getattr(self, "custom_out", 0) == 1 else self.const(0.0)
+
+    def custom_water_zone(self, ins, p):
+        # where the zone's water info texture lies: only that texture's UVs
+        # read it, and the decodes above don't sample it
+        self.warnings.append("stand-in: water zone (location 0, extent 1)")
+        return [self.const((0.0, 0.0), 2), self.const((1.0, 1.0), 2), self.const((1.0, 1.0), 2),
+                self.const(0.0)][min(getattr(self, "custom_out", 0), 3)]
+
+    def custom_gerstner_waves(self, ins, p):
+        # the body's waves are generated at run time (its wave asset's
+        # generator): still water - no offset, the surface's own normal
+        out = getattr(self, "custom_out", 0)
+        self.warnings.append("stand-in: Gerstner waves as still water")
+        if out in (1, 2, 3):
+            return self.const((0.0, 0.0, 1.0), 3)
+        return self.const((0.0, 0.0, 0.0), 3) if out else self.const(0.0)
+
+    def custom_hole_clip(self, ins, p):
+        # if (Mask == 0) clip(-1); return PassThru: the pixel isn't drawn
+        # where the mask is 0 - kept for the material's opacity mask
+        names = [i.get("InputName") for i in p.get("Inputs", [])]
+        mask = next((n for n in names if "Mask" in str(n)), names[-1])
+        through = next((n for n in names if n != mask), names[0])
+        hole = self.math('COMPARE', self.mask(self._in(ins, mask), [0]), self.const(0.0), self.const(0.0))
+        self.clip(self.binop('SUBTRACT', self.const(1.0), hole, label="not a hole"))
+        return self._in(ins, through)
+
+    def custom_hit_proxy_clip(self, ins, p):
+        # the clip is only compiled into editor hit-proxy shaders
+        return self._in(ins, "PassThrough")
+
+    def custom_dynamic_bounds(self, ins, p):
+        # the water's dynamic bounds are set at run time (none: nothing clipped)
+        self.warnings.append("stand-in: water dynamic bounds clip() not applied")
+        return self._in(ins, "Color")
+
+    def clip(self, keep):
+        """A clip() in the material's own graph: where `keep` is 0 the pixel
+        isn't drawn (the build multiplies its opacity mask by clips)."""
+        if self.function is None:
+            self.clips.append(keep)
+        else:
+            self.warnings.append("clip() inside %s: the pixels it discards are drawn" % self.function.fname)
+
+    def custom_one_minus_exp(self, ins, p):
+        # return 1 - exp(-x), per component
+        x = self._in(ins, "x")
+        w = {"CMOT_Float1": 1, "CMOT_Float2": 2, "CMOT_Float3": 3}.get(
+            str(p.get("OutputType", "")).split("::")[-1], min(x.w, 3))
+        return self.combine([self.binop('SUBTRACT', self.const(1.0),
+                                        self.math('EXPONENT', self.binop('MULTIPLY', c, self.const(-1.0))))
+                             for c in self.comps(x)[:w]])
+
+    def custom_euler_to_quat(self, ins, p):
+        # roll, pitch, yaw (Euler.xyz, degrees) -> q (xyz, w)
+        e = self.comps(self._in(ins, "Euler"))
+        k = self.binop('DIVIDE', self.mask(self._in(ins, "M_PI", math.pi), [0]), self.const(360.0))
+        roll, pitch, yaw = (self.binop('MULTIPLY', c, k) for c in e)
+        c1, s1 = self.math('COSINE', yaw), self.math('SINE', yaw)
+        c2, s2 = self.math('COSINE', pitch), self.math('SINE', pitch)
+        c3, s3 = self.math('COSINE', roll), self.math('SINE', roll)
+
+        def m3(a, b, c):
+            return self.binop('MULTIPLY', self.binop('MULTIPLY', a, b), c)
+        w = self.binop('ADD', m3(c1, c2, c3), m3(s1, s2, s3))
+        x = self.binop('SUBTRACT', m3(c1, c2, s3), m3(s1, s2, c3))
+        y = self.binop('ADD', m3(c1, s2, c3), m3(s1, c2, s3))
+        z = self.binop('SUBTRACT', m3(s1, c2, c3), m3(c1, s2, s3))
+        return self.with_alpha(self.combine([x, y, z]), w)
 
     def custom_clip(self, ins, p):
         # clip() discards the pixel: as a value, 0 there

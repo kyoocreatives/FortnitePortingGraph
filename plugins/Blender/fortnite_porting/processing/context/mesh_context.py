@@ -210,6 +210,10 @@ class MeshImportContext:
         if self.options.get("ImportAt3DCursor") and can_spawn_at_3d_cursor:
             imported_object.location += bpy.context.scene.cursor.location
 
+        # Material Porter fork: a spline mesh's bend, custom data, white vertex colours
+        from ...material_porter.placement import after_import
+        after_import(mesh, imported_object, imported_mesh, self.scale)
+
         self.imported_meshes.append({
             "Skeleton": imported_object,
             "Mesh": imported_mesh,
