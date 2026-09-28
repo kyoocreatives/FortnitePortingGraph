@@ -20,13 +20,10 @@ one answers for a FortnitePorting import:
 """
 import bpy
 
-from .ue_graph import WATER_DEPTH_DEFAULT, Val
+from .ue_graph import Val
 
 COLORSPACE_SRGB = "sRGB"
 COLORSPACE_DATA = "Non-Color"
-# a water surface's depth, baked by a map import (importer.bake_water): x the
-# metres down to the ground under each vertex, y 1 where it was baked
-WATER_ATTRIBUTE = "mp_water"
 
 # images this session loaded, by file: a map's hundreds of materials share
 # textures, and images.load(check_existing=True) walks every image each time
@@ -190,22 +187,6 @@ class MaterialEnv:
             n.layer_name = "COL0"
             return Val(n.outputs["Color"], 3), Val(n.outputs["Alpha"], 1)
         return self.once("col0", make)
-
-    def water_depth(self):
-        """How deep the water is under a water surface's pixel, UE cm - at
-        run time the water info texture's water height less its ground
-        height: the depth a map import bakes onto the surface mesh (the
-        mp_water attribute), elsewhere the translator's default."""
-        tr = self.tr
-
-        def make():
-            n = tr.node("ShaderNodeAttribute", "water depth (baked)")
-            n.attribute_type = 'GEOMETRY'
-            n.attribute_name = WATER_ATTRIBUTE
-            metres, known = tr.comps(Val(n.outputs["Vector"], 3))[:2]
-            return tr.lerp(tr.const(WATER_DEPTH_DEFAULT), tr.binop('MULTIPLY', metres, tr.const(100.0)), known,
-                           label="water depth (cm)")
-        return self.once("water depth", make)
 
     def local_bounds(self):
         """The first target object's bounding box, in UE cm (materials are
