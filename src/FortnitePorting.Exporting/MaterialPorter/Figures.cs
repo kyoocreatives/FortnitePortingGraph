@@ -26,14 +26,16 @@ public static class Figures
     private static Dictionary<string, List<string>> _bakes = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The figure's AssembledMeshSchema (a soft reference on the item), loaded.</summary>
-    public static UObject? Schema(UObject item, IFileProvider? provider = null)
+    public static UObject? Schema(UObject item, IFileProvider? provider = null) => Schemas(item, provider).FirstOrDefault();
+
+    /// <summary>The figure's schemas, full detail first, then low detail.</summary>
+    private static IEnumerable<UObject> Schemas(UObject item, IFileProvider? provider)
     {
         foreach (var name in (string[]) ["AssembledMeshSchema", "LowDetailsAssembledMeshSchema"])
         {
             if (!item.TryGetValue(out FSoftObjectPath path, name) || path.AssetPathName.IsNone || path.AssetPathName.Text.Length == 0) continue;
-            if (provider is null ? path.TryLoad(out UObject? schema) : path.TryLoad(provider, out schema)) return schema;
+            if (provider is null ? path.TryLoad(out UObject? schema) : path.TryLoad(provider, out schema)) yield return schema;
         }
-        return null;
     }
 
     /// <summary>The references a baked schema lists (SkeletalMeshes: soft or hard, or in structs), unloaded.</summary>
@@ -93,29 +95,27 @@ public static class Figures
     }
 
     /// <summary>Whether the figure has cooked meshes (listed by its schema, or in its Bake folder), without loading them.</summary>
-    public static bool HasBake(IFileProvider provider, UObject item)
-    {
-        var schema = Schema(item, provider);
-        return schema is not null && (SchemaMeshRefs(schema).Any() || BakeCandidates(provider, schema).Count > 0);
-    }
+    public static bool HasBake(IFileProvider provider, UObject item) =>
+        Schemas(item, provider).Any(schema => SchemaMeshRefs(schema).Any() || BakeCandidates(provider, schema).Count > 0);
 
     /// <summary>The figure's cooked skeletal meshes: its schema's, or else its Bake folder's.</summary>
     public static List<USkeletalMesh> BakedMeshes(IFileProvider provider, UObject item)
     {
-        var schema = Schema(item, provider);
-        if (schema is null) return [];
-        var meshes = SchemaMeshRefs(schema).Select(r => LoadMesh(provider, r)).OfType<USkeletalMesh>()
-            .DistinctBy(m => m.GetPathName()).ToList();
-        if (meshes.Count > 0) return meshes;
-        foreach (var key in BakeCandidates(provider, schema))
+        foreach (var schema in Schemas(item, provider))
         {
-            try
+            var meshes = SchemaMeshRefs(schema).Select(r => LoadMesh(provider, r)).OfType<USkeletalMesh>()
+                .DistinctBy(m => m.GetPathName()).ToList();
+            if (meshes.Count > 0) return meshes;
+            foreach (var key in BakeCandidates(provider, schema))
             {
-                if (provider.LoadPackage(key).GetExports().OfType<USkeletalMesh>().FirstOrDefault() is { } mesh) return [mesh];
-            }
-            catch
-            {
-                // not a package that loads: the next one
+                try
+                {
+                    if (provider.LoadPackage(key).GetExports().OfType<USkeletalMesh>().FirstOrDefault() is { } mesh) return [mesh];
+                }
+                catch
+                {
+                    // not a package that loads: the next one
+                }
             }
         }
         return [];
