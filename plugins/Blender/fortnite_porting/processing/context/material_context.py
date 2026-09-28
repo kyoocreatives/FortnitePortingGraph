@@ -199,6 +199,20 @@ class MaterialImportContext:
                 for vector in parameters.get("Vectors"):
                     replace_or_add_parameter(vectors, vector)
 
+        # Material Porter fork: the exact material, rebuilt from its UE graph; FP's presets when it can't be
+        from ...material_porter.hook import build_exact
+        if exact := build_exact(self, material_data, meta.get("TextureData"), override_parameters,
+                                None if as_material_data else material_slot.id_data):
+            exact["Hash"] = hash_code(material_hash)
+            exact["OriginalName"] = material_data.get("Name")
+            if not as_material_data:
+                material_slot.material = exact
+            if material.users == 0:
+                bpy.data.materials.remove(material)
+            material_hash_cache[hash_key] = exact
+            material_name_cache[material_name.casefold()] = exact
+            return
+
         output_node = nodes.new(type="ShaderNodeOutputMaterial")
         output_node.location = (200, 0)
 
