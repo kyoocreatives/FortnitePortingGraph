@@ -345,7 +345,7 @@ public partial class ExportContext
     }
 
     /// <summary>
-    /// A cooked figure's expression: its face material (the bake's RigDrivenFace instance) with the
+    /// A cooked figure's expression: its face material (an instance of M_Figure_RigDrivenFace) with the
     /// picked poses, its character accents moved where the face rig puts them for the mouth picked.
     /// </summary>
     private void FigureFace(UObject item, List<ExportPart> parts, IReadOnlyDictionary<string, int> face)
@@ -355,7 +355,7 @@ public partial class ExportContext
             for (var i = 0; i < part.Materials.Count; i++)
             {
                 var material = part.Materials[i];
-                if (!material.Path.Contains("RigDrivenFace", StringComparison.OrdinalIgnoreCase)) continue;
+                if (!material.BaseMaterialPath.Contains("RigDrivenFace", StringComparison.OrdinalIgnoreCase)) continue;
                 var values = new ParamSet { Label = "expression" };
                 foreach (var (k, v) in FigureRecipe.FaceScalars(face)) values.Scalars[k] = v;
                 if (face.TryGetValue("Mouth", out var mouth))
