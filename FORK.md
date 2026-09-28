@@ -36,24 +36,25 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   as children on its wheel sockets, and the values the car's Mutable program
   gives each material (`Mutable.g.cs`), sent to Blender as a Vehicle.
 - **LEGO figures.** Assets > Lego > Outfits lists the LEGO outfits
-  (`JunoAthenaCharacterItemOverrideDefinition`), 2,429 of 2,480
+  (`JunoAthenaCharacterItemOverrideDefinition`), all 2,480
   (`Exporting/MaterialPorter/Figures.cs`):
   - *cooked* (347): the skeletal mesh the AssembledMeshSchema lists
     (`SkeletalMeshes`), or the one in the figure's `Bake` folder, with its baked
     materials;
-  - *recipes* (the rest): a CustomizableObjectInstance on the shared Mutable object
+  - *recipes* (2,133): a CustomizableObjectInstance (Figure_X/Mutable/[Dataless/]COI_...) on the shared Mutable object
     `CO_Figure_Recipe_Dataless`, which builds only the body. `FigureRecipe.g.cs`
     dresses it as the game does: the body decoded from the program's streamed
-    mesh ROMs (`MutableMeshes.g.cs`, written once as
-    `Assets/MaterialPorter/Figures/FigureBody.uemodel` by `UEModelWriter.g.cs`),
+    mesh ROMs (`MutableMeshes.g.cs`) with its stomach panel merged in and, for a
+    hand/leg replacement, that part removed by the program's remove mask; written
+    once per variant as `Assets/MaterialPorter/Figures/FigureBody_r<rev>[_NoLegR...].uemodel`
+    by `UEModelWriter.g.cs`,
     its colour grid (32x32, the program's layout blocks, each part's
     `<part> Color` id through `T_LUT_Default`), deco and normal from the recipe;
     the head with its face material and a grid of its `Color Head ID`; each
     accessory or replacement part with the recipe material (or its override),
     a 2x2 colour grid and its decos. Generated grids are served by the bridge as
     `/MaterialPorter/Generated/<name>` (MaterialService.GeneratedDir).
-  Not done: the body parts a hand/leg replacement removes (~20 recipes), the
-  skeleton body's own colour layout, cloth, per-part metal/glow, the face's
+  Not done: the skeleton body's own colour layout, cloth, per-part metal/glow, the face's
   rig-driven expression (a default face shows).
 - **Faster world imports.** Exact materials of a world are laid out when a
   node editor first shows them; FP's per-object metadata scan, active-object

@@ -295,16 +295,22 @@ public class MaterialPorterService : IService
                     ? $"{args.DisplayName} = {args.Object.GetPathName()}" : a.CreationData.DisplayName)
                 .OrderBy(n => n).ToList();
             var filter = query["filter"] ?? "";
-            // check=1 (LEGO): every listed figure's cooked mesh resolved, the ones without named
+            // check=1 (LEGO): every listed figure resolved to a cooked mesh or a recipe; the ones with neither named
+            var cooked = 0;
             var failed = query["check"] != "1" ? [] : loader.Source.Items
                 .Select(a => (a.CreationData as Models.Assets.Asset.AssetItemCreationArgs)?.Object)
-                .Where(o => o is not null && Figures.BakedMeshes(Game.Provider, o).Count == 0)
+                .Where(o =>
+                {
+                    if (o is null) return false;
+                    if (Figures.BakedMeshes(Game.Provider, o).Count > 0) { cooked++; return false; }
+                    return Figures.RecipeInstance(Game.Provider, o) is null;
+                })
                 .Select(o => o!.Name).ToList();
             return JToken.FromObject(new
             {
                 total = loader.TotalAssets, listed = names.Count, seconds = clock.Elapsed.TotalSeconds,
                 sample = names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(12),
-                failed = failed.Count, failedSample = failed.Take(12)
+                cooked, failed = failed.Count, failedSample = failed.Take(12)
             });
         }
         if (route == "fork-export-asset")

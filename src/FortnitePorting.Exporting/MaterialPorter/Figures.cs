@@ -96,8 +96,9 @@ public static class Figures
 
     /// <summary>Whether the figure has cooked meshes (listed by its schema, or in its Bake folder), without loading them.</summary>
     /// <summary>
-    /// The figure's recipe: its schema's CustomizableObjectInstance when that is a recipe
-    /// on the shared Dataless object (FigureRecipe builds those), else null.
+    /// The figure's recipe: its schema's CustomizableObjectInstance (Figure_X/Mutable/Dataless/COI_...,
+    /// or Figure_X/Mutable/COI_... for the newer ones), all on the shared recipe object that
+    /// FigureRecipe builds; else null.
     /// </summary>
     public static string? RecipeInstance(IFileProvider provider, UObject item)
     {
@@ -105,7 +106,7 @@ public static class Figures
         {
             if (!schema.TryGetValue(out FSoftObjectPath instance, "CustomizableObjectInstance")) continue;
             var path = instance.AssetPathName.Text;
-            if (!string.IsNullOrEmpty(path) && path != "None" && path.Contains("/Mutable/Dataless/", StringComparison.OrdinalIgnoreCase))
+            if (!string.IsNullOrEmpty(path) && path != "None" && path.Contains("/Mutable/", StringComparison.OrdinalIgnoreCase))
                 return path;
         }
         return null;

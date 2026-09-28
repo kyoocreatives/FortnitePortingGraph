@@ -234,6 +234,14 @@ public sealed class MutableMeshes
         return mesh;
     }
 
+    /// <summary>A mask constant's vertices (a remove op's: indices of the mesh it removes from).</summary>
+    public HashSet<int> MaskVertices(int constant)
+    {
+        var geo = Contents(constant).FirstOrDefault(x => x.Content == EMeshContentFlags.GeometryData).Mesh;
+        var ids = geo is null ? null : Channel(geo.VertexBuffers, EMeshBufferSemantic.VertexIndex, 0, out _);
+        return ids is null ? new HashSet<int>() : ids.Select(x => (int)x).ToHashSet();
+    }
+
     /// <summary>n x `from` components as n x `to` (missing ones `fill`).</summary>
     static float[] Take(float[] src, int from, int to, float fill = 0f)
     {
@@ -319,6 +327,27 @@ public sealed class RawSkinnedMesh
     public List<(short Bone, int Vertex, float Weight)> Weights = new();
     /// <summary>Influences on bones the skeleton doesn't have (left out).</summary>
     public int UnknownBones;
+
+    /// <summary>
+    /// This mesh without the faces all of whose vertices a mask holds (a remove-mask op:
+    /// the body part a replacement takes the place of). The vertices stay, unused.
+    /// </summary>
+    public RawSkinnedMesh Without(IReadOnlySet<int> mask)
+    {
+        var kept = new List<int>(Indices.Length);
+        for (var t = 0; t + 2 < Indices.Length; t += 3)
+            if (!(mask.Contains(Indices[t]) && mask.Contains(Indices[t + 1]) && mask.Contains(Indices[t + 2])))
+                kept.AddRange([Indices[t], Indices[t + 1], Indices[t + 2]]);
+        var cut = new RawSkinnedMesh
+        {
+            VertexCount = VertexCount, Positions = Positions, Normals = Normals, Tangents = Tangents,
+            Colors = Colors, Indices = kept.ToArray(), UnknownBones = UnknownBones,
+        };
+        cut.Uvs.AddRange(Uvs);
+        cut.Weights.AddRange(Weights);
+        cut.Sections.Add((0, 0, cut.Indices.Length / 3));
+        return cut;
+    }
 
     /// <summary>
     /// This mesh with another's geometry added (a program merging two constants: the

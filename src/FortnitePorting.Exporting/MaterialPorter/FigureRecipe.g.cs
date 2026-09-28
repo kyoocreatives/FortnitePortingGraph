@@ -26,8 +26,8 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 ///  - each accessory or replacement part ("&lt;X&gt; SKM"): its mesh with the recipe
 ///    material, a 2x2 colour grid ("LU/RU/LL/RL Color &lt;X&gt;": the quadrants
 ///    top left, top right, bottom left, bottom right) and its deco, mask and normal.
-/// All parts are skinned to SK_Figure. Not done yet: the body parts a replacement
-/// removes (hands and legs, a few dozen recipes), the skeleton body's own colour
+/// A hand or leg replacement removes the body's own part (the program's remove masks).
+/// All parts are skinned to SK_Figure. Not done yet: the skeleton body's own colour
 /// layout, cloth, per-part surfaces (metal, glow).
 /// </summary>
 public sealed class FigureRecipe
@@ -40,6 +40,8 @@ public sealed class FigureRecipe
     const int BodyConstant = 4, SkeletonBodyConstant = 13;
     /// <summary>The standard body's stomach panel: the body is open there, the program merges it in (torso block, body deco).</summary>
     const int StomachConstant = 37;
+    /// <summary>The standard body's remove masks by replaced part (the program's constants 0..3).</summary>
+    static readonly (string Part, int Constant)[] BodyMasks = [("Leg L", 0), ("Leg R", 1), ("Hand L", 2), ("Hand R", 3)];
     /// <summary>Bumped when the bodies built here change: their shared files are named by it.</summary>
     const int BodyRevision = 2;
 
@@ -121,6 +123,7 @@ public sealed class FigureRecipe
     static IFileProvider? _provider;
     static byte[]? _lut;
     static readonly Dictionary<int, RawSkinnedMesh> _bodies = new();
+    static readonly Dictionary<int, HashSet<int>> _masks = new();
     static USkeleton? _skeleton;
 
     public static async Task<USkeleton> SkeletonAsync(IFileProvider provider)
@@ -134,7 +137,7 @@ public sealed class FigureRecipe
         await Gate.WaitAsync();
         try
         {
-            if (!ReferenceEquals(_provider, provider)) { _provider = provider; _lut = null; _bodies.Clear(); _skeleton = null; }
+            if (!ReferenceEquals(_provider, provider)) { _provider = provider; _lut = null; _bodies.Clear(); _masks.Clear(); _skeleton = null; }
             _skeleton ??= await provider.LoadPackageObjectAsync<USkeleton>(SkeletonPath);
             if (_lut is null)
             {
@@ -158,6 +161,8 @@ public sealed class FigureRecipe
                 var mesh = program.Skinned(body, bones) ?? throw new InvalidDataException("the figure body didn't decode");
                 if (body == BodyConstant && program.Skinned(StomachConstant, bones) is { } stomach) mesh = mesh.Merged(stomach);
                 _bodies[body] = mesh;
+                if (body == BodyConstant)
+                    foreach (var (_, constant) in BodyMasks) _masks[constant] = program.MaskVertices(constant);
             }
         }
         finally { Gate.Release(); }
@@ -175,12 +180,25 @@ public sealed class FigureRecipe
     /// <summary>The figure's parts, the body first. Writes its colour grids to <see cref="GeneratedDir"/>.</summary>
     public async Task<List<Part>> PartsAsync(IFileProvider provider)
     {
+        if (!CustomizableObject.Contains("/RecipeSystem/", StringComparison.OrdinalIgnoreCase))
+            throw new InvalidDataException("not a figure recipe (its object is " + CustomizableObject + ")");
         var bodyConstant = Ints.GetValueOrDefault("Body Selector") is "Skeleton" ? SkeletonBodyConstant : BodyConstant;
         await Shared(provider, CustomizableObject, bodyConstant);
         var parts = new List<Part>();
 
         // the body: layout blocks in their parts' colours
-        var body = new Part { Name = "Body", Raw = _bodies[bodyConstant], RawName = (bodyConstant == BodyConstant ? "FigureBody" : "FigureBodySkeleton") + "_r" + BodyRevision, Material = MaterialFor(provider, Ints.GetValueOrDefault("Body Material Type")) };
+        // a hand or leg replacement takes the body's own part away
+        var raw = _bodies[bodyConstant];
+        var rawName = (bodyConstant == BodyConstant ? "FigureBody" : "FigureBodySkeleton") + "_r" + BodyRevision;
+        if (bodyConstant == BodyConstant)
+            foreach (var (replaced, constant) in BodyMasks)
+                if (Meshes.ContainsKey(replaced + " SKM") && !(Ints.GetValueOrDefault(replaced + " Replacement") ?? "None").Equals("None", StringComparison.OrdinalIgnoreCase)
+                    && _masks.TryGetValue(constant, out var mask) && mask.Count > 0)
+                {
+                    raw = raw.Without(mask);
+                    rawName += "_No" + replaced.Replace(" ", "");
+                }
+        var body = new Part { Name = "Body", Raw = raw, RawName = rawName, Material = MaterialFor(provider, Ints.GetValueOrDefault("Body Material Type")) };
         var blocks = BodyBlocks.Select(b => (b.X, b.Y, b.W, b.H, Colour(Floats.GetValueOrDefault(b.Part + " Color", 1))));
         body.Textures["Tex Color D"] = Grid("FigureBody", blocks);
         Copy(body, "Body Deco D", "Tex Deco D");
