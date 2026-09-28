@@ -124,6 +124,10 @@ public enum EExportType
     [Description("Sprites"), Export(EPrimitiveExportType.Mesh)]
     Sprite = ExportCategory.Gameplay + 7,
 
+    // Material Porter fork: Rocket Racing cars (body, wheels, paint through Mutable); sent to Blender as a Vehicle
+    [Description("Cars"), Export(EPrimitiveExportType.Mesh)]
+    Car = ExportCategory.Gameplay + 8,
+
     // FESTIVAL
 
     [Description("Guitars"), Export(EPrimitiveExportType.Mesh)]

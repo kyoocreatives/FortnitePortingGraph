@@ -7,6 +7,8 @@ using System.IO;
 using System.Threading.Tasks;
 using CUE4Parse.UE4.Objects.Engine;
 using FortnitePorting.Exporting;
+using FortnitePorting.Exporting.MaterialPorter;
+using CUE4Parse.UE4.Assets.Exports;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 using CUE4Parse.FileProvider;
@@ -64,6 +66,10 @@ public class MaterialPorterService : IService
         Game.Provider = provider;
         Game.BuildVersion = string.IsNullOrWhiteSpace(buildVersion) ? "unknown" : buildVersion;
         Materials = new MaterialService(Game);
+        // cars: the registry's decals and wheel sets, read once in the background
+        _carSkins = _carWheels = null;
+        Cars.Items = CarItemsAsync;
+        _ = Task.Run(CarItemsAsync);
         _bridge?.Dispose();
         try
         {
@@ -215,8 +221,91 @@ public class MaterialPorterService : IService
     /// level (actors and instances, as the Map page sends it to Blender) as the JSON the plugin
     /// receives - for tests that import it headless.
     /// </summary>
+    // ------------------------------------------------------------ cars
+    private List<CarItem>? _carSkins, _carWheels;
+    private readonly System.Threading.SemaphoreSlim _carGate = new(1, 1);
+
+    /// <summary>The registry's car decals and wheel sets, titled by their item names (read once).</summary>
+    public async Task<(List<CarItem> Skins, List<CarItem> Wheels)> CarItemsAsync()
+    {
+        await _carGate.WaitAsync();
+        try
+        {
+            if (_carSkins is null || _carWheels is null)
+            {
+                async Task<List<CarItem>> Of(string cls)
+                {
+                    var list = new List<CarItem>();
+                    foreach (var a in AppServices.UEParse.AssetRegistry.Where(a => a.AssetClass.Text == cls))
+                    {
+                        var title = a.AssetName.Text;
+                        try
+                        {
+                            if (await Game.Provider.LoadPackageObjectAsync(a.ObjectPath) is { } item
+                                && item.GetOrDefault<global::CUE4Parse.UE4.Objects.Core.i18N.FText?>("ItemName")?.Text is { Length: > 0 } name)
+                                title = name;
+                        }
+                        catch { /* its asset name, then */ }
+                        list.Add(new CarItem(a.AssetName.Text, title, a.PackageName.Text, a.ObjectPath));
+                    }
+                    return list;
+                }
+                _carSkins = await Of(Cars.SkinClass);
+                _carWheels = await Of(Cars.WheelClass);
+            }
+            return (_carSkins, _carWheels);
+        }
+        finally { _carGate.Release(); }
+    }
+
+    /// <summary>A car body item's plan under these picks (channel index -> option index).</summary>
+    public async Task<CarPlan> CarPlanAsync(string bodyObjectPath, IReadOnlyDictionary<int, int>? picks)
+    {
+        var (skins, wheels) = await CarItemsAsync();
+        var dot = bodyObjectPath.LastIndexOf('.');
+        var package = dot > bodyObjectPath.LastIndexOf('/') ? bodyObjectPath[..dot] : bodyObjectPath;
+        var name = dot > bodyObjectPath.LastIndexOf('/') ? bodyObjectPath[(dot + 1)..] : bodyObjectPath.Split('/').Last();
+        return await new Cars(Game.Provider).PlanAsync(package, name, skins, wheels, picks);
+    }
+
     private async Task<object?> ExtraRouteAsync(string route, NameValueCollection query)
     {
+        if (route == "fork-car")
+        {
+            // tests: a car body's channels and what the picks ("0:1,5:3") give
+            var picks = (query["picks"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries)
+                .Select(x => x.Split(':')).Where(x => x.Length == 2).ToDictionary(x => int.Parse(x[0]), x => int.Parse(x[1]));
+            var plan = await CarPlanAsync(query["path"] ?? throw new ArgumentException("path missing"), picks);
+            return new
+            {
+                channels = plan.Channels.Select(c => new { c.Name, c.Default, options = c.Options.Count, first = c.Options.Take(4).Select(o => o.Name) }),
+                plan.Styles, plan.BodyMesh, plan.BodyOverrides, plan.WheelMesh,
+                wheels = plan.Wheels.Select(w => new { w.Label, at = new[] { w.Transform.M41, w.Transform.M42, w.Transform.M43 } }),
+                @params = plan.Params.ToDictionary(kv => kv.Key, kv => new { kv.Value.Vectors, kv.Value.Scalars }),
+            };
+        }
+        if (route == "fork-export-asset")
+        {
+            // tests: FP's export of one asset (type=Car|Outfit|...; picks for a car) as the plugin receives it
+            var asset = await Game.Provider.LoadPackageObjectAsync(query["path"] ?? throw new ArgumentException("path missing"));
+            var type = Enum.Parse<EExportType>(query["type"] ?? "Car");
+            var carStyles = (query["picks"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))
+                .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportCarStyle { Channel = int.Parse(x[0]), Option = int.Parse(x[1]) })
+                .ToArray();
+            using var assetMeta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
+            var assetSession = new ExportSession(assetMeta);
+            var assetData = await assetSession.RunAsync(() => [assetSession.CreateExport(asset.Name, asset, type, carStyles)]);
+            return new JRaw(JsonConvert.SerializeObject(new
+            {
+                MetaData = new
+                {
+                    assetData.MetaData.Version,
+                    assetData.MetaData.AssetsRoot,
+                    Settings = AppServices.AppSettings.ExportSettings.GetSettingsViewModel(EExportLocation.Blender),
+                },
+                assetData.Exports,
+            }));
+        }
         if (route != "fork-export-world") return null;
         var path = query["path"] ?? throw new ArgumentException("path missing");
         // a World Partition cell's world is named after its map, not its file

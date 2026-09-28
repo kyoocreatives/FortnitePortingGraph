@@ -238,6 +238,66 @@ public partial class ExportContext
         return export;
     }
 
+    /// <summary>
+    /// A Rocket Racing car (Material Porter fork): its body with the tier's (or a decal's)
+    /// material, the picked wheels as children on the body's wheel sockets, and the values
+    /// the car's Mutable program gives each material. Picks: channel index -> option index.
+    /// </summary>
+    public List<ExportMesh> MaterialPorterCar(UObject body, IReadOnlyDictionary<int, int> picks)
+    {
+        if (Cars.Items is null || body.Owner?.Name is not { } package) return [];
+        var (skins, wheels) = Cars.Items().GetAwaiter().GetResult();
+        var plan = new Cars(FileProvider).PlanAsync(package, body.Name, skins, wheels, picks).GetAwaiter().GetResult();
+        Log.Information("[Material Porter] car {Body}: {Styles}", body.Name, string.Join(", ", plan.Styles));
+        if (plan.BodyMesh is null || LoadMaterialPorterObject(plan.BodyMesh) is not USkeletalMesh bodyMesh) return [];
+        if (Mesh(bodyMesh) is not { } export) return [];
+        export.Name = body.Name;
+        CarMaterials(export, plan, plan.BodyOverrides);
+
+        var wheel = plan.WheelMesh is null ? null : LoadMaterialPorterObject(plan.WheelMesh) switch
+        {
+            USkeletalMesh sk => Mesh(sk),
+            UStaticMesh sm => Mesh(sm),
+            _ => null
+        };
+        if (wheel is not null)
+            foreach (var (label, transform) in plan.Wheels)
+            {
+                var child = new ExportMesh { Name = label, Path = wheel.Path, NumLods = wheel.NumLods };
+                child.Materials.AddRange(wheel.Materials);
+                CarMaterials(child, plan, null);
+                SetMaterialPorterTransform(child, transform);
+                export.Children.Add(child);
+            }
+        return [export];
+    }
+
+    /// <summary>A car part's slots: a decal's material where it goes, Mutable's values over each material they touch.</summary>
+    private void CarMaterials(ExportMesh mesh, CarPlan plan, Dictionary<int, string>? overrides)
+    {
+        var slots = mesh.Materials.GroupBy(m => m.Slot).ToDictionary(g => g.Key, g => g.First());
+        var changed = new HashSet<int>();
+        foreach (var (slot, path) in overrides ?? [])
+            if (LoadMaterialPorterObject(path) is UMaterialInterface mi && Material(mi, slot) is { } decal)
+            {
+                slots[slot] = decal;
+                changed.Add(slot);
+            }
+        foreach (var (slot, material) in slots)
+        {
+            var tail = material.Path[(material.Path.LastIndexOf('/') + 1)..];
+            if (plan.Params.TryGetValue(tail, out var values))
+            {
+                mesh.OverrideMaterials.Add(new MaterialPorterMaterial(material with { Slot = slot })
+                {
+                    MPValues = values,
+                    Hash = HashCode.Combine(material.Hash, values.Key()),
+                });
+            }
+            else if (changed.Contains(slot)) mesh.OverrideMaterials.Add(material with { Slot = slot });
+        }
+    }
+
     /// <summary>A UE world matrix (row vectors) as FP's location, rotation and scale; a mirror goes into X's scale.</summary>
     private static void SetMaterialPorterTransform(ExportObject export, Matrix4x4 world)
     {

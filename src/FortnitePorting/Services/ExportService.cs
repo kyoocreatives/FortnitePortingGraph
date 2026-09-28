@@ -284,6 +284,8 @@ public class ExportService(
     {
         return styles.Select<BaseStyleData, ExportStyleBase>(style => style switch
         {
+            // Material Porter fork: a car channel's pick
+            CarStyleData car => new Exporting.MaterialPorter.ExportCarStyle { Channel = car.Channel, Option = car.Option },
             AssetColorStyleData colorStyle => new ExportColorStyle
             {
                 StyleData = colorStyle.StyleData,

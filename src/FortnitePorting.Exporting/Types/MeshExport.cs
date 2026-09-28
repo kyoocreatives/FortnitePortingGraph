@@ -39,6 +39,7 @@ public class MeshExport : BaseExport
     public readonly List<ExportOverrideMorphTargets> OverrideMorphTargets = [];
     public ExportLightCollection Lights = new();
     public AnimExport? Animation;
+    [Newtonsoft.Json.JsonIgnore] public Dictionary<int, int> CarPicks = [];
     
     public MeshExport(string name, UObject asset, ExportStyleBase[] styles, EExportType exportType, ExportDataMeta metaData, IExportFileMeta? fileMeta) : base(name, exportType, metaData)
     {
@@ -53,6 +54,8 @@ public class MeshExport : BaseExport
             return;
         }
 
+        // Material Porter fork: a car's style picks (channel -> option)
+        CarPicks = styles.OfType<MaterialPorter.ExportCarStyle>().ToDictionary(s => s.Channel, s => s.Option);
         Export(asset, exportType);
 
         var assetStyles = styles.OfType<ExportStructStyle>();
@@ -554,6 +557,13 @@ public class MeshExport : BaseExport
             case EExportType.Wildlife:
             {
                 Meshes.AddIfNotNull(Context.Mesh(asset));
+                break;
+            }
+            case EExportType.Car:
+            {
+                // Material Porter fork: the body, its wheels on their sockets, Mutable's colours
+                Meshes.AddRange(Context.MaterialPorterCar(asset, CarPicks));
+                Type = EExportType.Vehicle;     // the plugins import it as a vehicle
                 break;
             }
             case EExportType.Vehicle:

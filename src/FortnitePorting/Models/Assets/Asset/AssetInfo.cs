@@ -65,6 +65,9 @@ public partial class AssetInfo : Base.BaseAssetInfo
             if (styleInfo.StyleDatas.Count > 0) StyleInfos.Add(styleInfo);
         }
 
+        // Material Porter fork: a car's channels (tier, colours, decal, wheels), built in C#
+        if (Asset.CreationData.ExportType is EExportType.Car) AddCarStyles();
+
         if (Asset.CreationData.ExportType is EExportType.Emote)
         {
             var maleBaseAnimation = Asset.CreationData.Object.GetOrDefault<UAnimMontage?>("Animation");

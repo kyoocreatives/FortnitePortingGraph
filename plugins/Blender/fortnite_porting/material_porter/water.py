@@ -129,7 +129,8 @@ def bake_water(objects):
     normal: straight down under level water, into the rock behind a
     waterfall. Returns a note."""
     t0 = time.perf_counter()
-    objects = [o for o in objects if o.type == 'MESH']
+    # a zero scale (flat to nothing: nothing to hit, no inverse) is left out
+    objects = [o for o in objects if o.type == 'MESH' and abs(o.matrix_world.determinant()) > 1e-12]
     water = [o for o in objects if is_water(o)]
     if not water:
         return None
