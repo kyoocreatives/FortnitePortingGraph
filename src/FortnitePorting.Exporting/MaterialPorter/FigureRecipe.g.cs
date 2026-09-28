@@ -16,7 +16,7 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 /// ("COI_Figure_X_Dataless") on the shared Mutable object CO_Figure_Recipe_Dataless.
 /// That program builds only the body's geometry; the game dresses it from the
 /// recipe's values, and so is it done here:
-///  - the body: the program's standard body mesh (a streamed constant), with
+///  - the body: the program's standard body mesh (a streamed constant, its stomach panel merged in), with
 ///    MI_Figure_DecoratedPlastic_RecipeCOv2 (or the variant a "Body Material Type"
 ///    names), its "Tex Color D" a 32x32 grid of the body's layout blocks (layout 11 of
 ///    the program), each block the LUT colour of its part's "&lt;part&gt; Color" id
@@ -38,6 +38,10 @@ public sealed class FigureRecipe
     const string RecipeMaterial = MaterialFolder + "MI_Figure_DecoratedPlastic_RecipeCOv2.MI_Figure_DecoratedPlastic_RecipeCOv2";
     /// <summary>The program's bodies at LOD 0 by "Body Selector": the standard one, the skeleton.</summary>
     const int BodyConstant = 4, SkeletonBodyConstant = 13;
+    /// <summary>The standard body's stomach panel: the body is open there, the program merges it in (torso block, body deco).</summary>
+    const int StomachConstant = 37;
+    /// <summary>Bumped when the bodies built here change: their shared files are named by it.</summary>
+    const int BodyRevision = 2;
 
     /// <summary>Generated textures' paths and folder (the app's MaterialService.GeneratedDir, which serves them).</summary>
     public const string GeneratedRoot = "/MaterialPorter/Generated/";
@@ -151,7 +155,9 @@ public sealed class FigureRecipe
             {
                 var program = await MutableMeshes.LoadAsync(provider, customizableObject.Split('.')[0]);
                 var bones = _skeleton.ReferenceSkeleton.FinalRefBoneInfo.Select(b => b.Name.Text).ToList();
-                _bodies[body] = program.Skinned(body, bones) ?? throw new InvalidDataException("the figure body didn't decode");
+                var mesh = program.Skinned(body, bones) ?? throw new InvalidDataException("the figure body didn't decode");
+                if (body == BodyConstant && program.Skinned(StomachConstant, bones) is { } stomach) mesh = mesh.Merged(stomach);
+                _bodies[body] = mesh;
             }
         }
         finally { Gate.Release(); }
@@ -174,7 +180,7 @@ public sealed class FigureRecipe
         var parts = new List<Part>();
 
         // the body: layout blocks in their parts' colours
-        var body = new Part { Name = "Body", Raw = _bodies[bodyConstant], RawName = bodyConstant == BodyConstant ? "FigureBody" : "FigureBodySkeleton", Material = MaterialFor(provider, Ints.GetValueOrDefault("Body Material Type")) };
+        var body = new Part { Name = "Body", Raw = _bodies[bodyConstant], RawName = (bodyConstant == BodyConstant ? "FigureBody" : "FigureBodySkeleton") + "_r" + BodyRevision, Material = MaterialFor(provider, Ints.GetValueOrDefault("Body Material Type")) };
         var blocks = BodyBlocks.Select(b => (b.X, b.Y, b.W, b.H, Colour(Floats.GetValueOrDefault(b.Part + " Color", 1))));
         body.Textures["Tex Color D"] = Grid("FigureBody", blocks);
         Copy(body, "Body Deco D", "Tex Deco D");

@@ -319,6 +319,31 @@ public sealed class RawSkinnedMesh
     public List<(short Bone, int Vertex, float Weight)> Weights = new();
     /// <summary>Influences on bones the skeleton doesn't have (left out).</summary>
     public int UnknownBones;
+
+    /// <summary>
+    /// This mesh with another's geometry added (a program merging two constants: the
+    /// figure body and the stomach panel that closes it), all in one section.
+    /// </summary>
+    public RawSkinnedMesh Merged(RawSkinnedMesh other)
+    {
+        var n = VertexCount;
+        var merged = new RawSkinnedMesh
+        {
+            VertexCount = n + other.VertexCount,
+            Positions = [.. Positions, .. other.Positions],
+            Normals = [.. Normals, .. other.Normals],
+            Tangents = [.. Tangents, .. other.Tangents],
+            Indices = [.. Indices, .. other.Indices.Select(i => i + n)],
+            UnknownBones = UnknownBones + other.UnknownBones,
+        };
+        for (var k = 0; k < Math.Min(Uvs.Count, other.Uvs.Count); k++) merged.Uvs.Add([.. Uvs[k], .. other.Uvs[k]]);
+        if (Colors is not null)
+            merged.Colors = [.. Colors, .. other.Colors ?? Enumerable.Repeat((byte)255, other.VertexCount * 4)];
+        merged.Weights.AddRange(Weights);
+        merged.Weights.AddRange(other.Weights.Select(w => (w.Bone, w.Vertex + n, w.Weight)));
+        merged.Sections.Add((0, 0, merged.Indices.Length / 3));
+        return merged;
+    }
 }
 
 /// <summary>Google's CityHash32: Mutable's bone ids are CityHash32 of the bone name's UTF-16 bytes.</summary>
