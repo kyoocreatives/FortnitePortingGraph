@@ -23,7 +23,7 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 ///    (T_LUT_Default, 512 x 1: pixel N is colour id N), deco and normal from the recipe;
 ///  - the head: the recipe's head mesh with its "Head Material", its base colour grid
 ///    ("Tex Color-D") the LUT colour of the face material's "Color Head ID", its character
-///    accents placed with the mouth (the face rig's job at run time);
+///    accents placed as the face rig places them (the schema's accent registrations);
 ///  - each accessory or replacement part ("&lt;X&gt; SKM"): its mesh with the recipe
 ///    material, a 2x2 colour grid ("LU/RU/LL/RL Color &lt;X&gt;": the quadrants
 ///    top left, top right, bottom left, bottom right) and its deco, mask and normal.
@@ -220,19 +220,8 @@ public sealed class FigureRecipe
             var id = (face is null ? null : await ScalarAsync(provider, face, "Color Head ID"))
                      ?? (Ints.GetValueOrDefault("Head Standard Color") is { } std && std.Split('_') is { Length: > 1 } bits && int.TryParse(bits[1], out var n) ? n : 24);
             headPart.Textures["Tex Color-D"] = Grid("FigureHead", [(0, 0, 32, 32, Colour(id))]);
-            // character accents (a mustache, a beard) are placed by the face rig at run time,
-            // with the mouth: the face material's mouth placement (a stand-in for the rig)
-            if (face is not null)
-            {
-                var mouth = new Dictionary<string, double>
-                {
-                    ["U"] = await ScalarAsync(provider, face, "MouthU") ?? 0, ["V"] = await ScalarAsync(provider, face, "MouthV") ?? 0,
-                    ["Rotation"] = await ScalarAsync(provider, face, "MouthRotation") ?? 0,
-                    ["ScaleU"] = await ScalarAsync(provider, face, "MouthScaleU") ?? 1, ["ScaleV"] = await ScalarAsync(provider, face, "MouthScaleV") ?? 1,
-                };
-                for (var accent = 1; accent <= 4; accent++)
-                    foreach (var (k, v) in mouth) headPart.Scalars[$"CharacterAccent{accent}{k}"] = v;
-            }
+            // character accents (a mustache, a beard) are placed by the face rig at run time
+            if (face is not null) await PlaceAccentsAsync(provider, face, headPart);
             parts.Add(headPart);
         }
 
@@ -284,6 +273,72 @@ public sealed class FigureRecipe
             // a material that doesn't load: the fallback
         }
         return null;
+    }
+
+    /// <summary>
+    /// The figure's AssembledMeshSchema (its data assets for the face rig): set by the caller,
+    /// else the convention /FigureCosmetics/AMS/AMS_&lt;figure folder&gt;.
+    /// </summary>
+    public string? SchemaPath { get; set; }
+
+    /// <summary>Rig units (a registration's translation) to face UV units, fitted on the cooked figures' baked values.</summary>
+    const double RigToFaceUv = 0.0413;
+
+    /// <summary>
+    /// What the face rig does with a figure's character accents: the schema's CharacterAcc data
+    /// names each accent's registration ("beard_bean", "beard" or None), its BeardRegistration
+    /// data gives that registration's transform and pose for each mouth pose. The accent sits at
+    /// the mouth plus the transform's x/z in face UV (V = MouthV + z * 0.0413 matches the baked
+    /// figures: -0.118 for a mustache's 1.993, -0.191 for a goatee's 0.215), unscaled.
+    /// </summary>
+    async Task PlaceAccentsAsync(IFileProvider provider, string face, Part head)
+    {
+        var schema = SchemaPath ?? (Instance.Split('/').FirstOrDefault(x => x.StartsWith("Figure_", StringComparison.OrdinalIgnoreCase)) is { } folder
+            ? $"/FigureCosmetics/AMS/AMS_{folder}.AMS_{folder}" : null);
+        var props = schema is null ? null : await PropertiesAsync(provider, schema);
+        var maps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var data in props?["AdditionalData"] ?? new JArray())
+        foreach (var kv in data["DataAssetMap"] ?? new JArray())
+            if ((string?)kv["Key"] is { } key && ObjectPath(kv["Value"]) is { } path) maps[key] = path;
+        if (!maps.TryGetValue("CharacterAcc", out var accPath) || await PropertiesAsync(provider, accPath) is not { } acc) return;
+        var registrations = (acc["Character Accent Registration"] as JArray)?.Select(x => (string?)x ?? "None").ToList() ?? [];
+        var beard = maps.TryGetValue("BeardRegistration", out var beardPath) ? await PropertiesAsync(provider, beardPath) : null;
+
+        var mouthU = await ScalarAsync(provider, face, "MouthU") ?? 0;
+        var mouthV = await ScalarAsync(provider, face, "MouthV") ?? 0;
+        var mouthPose = (int)Math.Round(await ScalarAsync(provider, face, "MouthPose") ?? 0);
+        for (var i = 0; i < Math.Min(4, registrations.Count); i++)
+        {
+            var (transforms, poses) = registrations[i].ToLowerInvariant() switch
+            {
+                "beard_bean" => ("BeardBean", "BeardBeanPoses"),
+                "beard" => ("Beard", "BeardPoses"),
+                _ => (null, null),
+            };
+            if (transforms is null || beard?[transforms] is not JArray list || list.Count == 0) continue;
+            var t = list[Math.Clamp(mouthPose, 0, list.Count - 1)]["Translation"];
+            var a = i + 1;
+            head.Scalars[$"CharacterAccent{a}U"] = mouthU + ((double?)t?["X"] ?? 0) * RigToFaceUv;
+            head.Scalars[$"CharacterAccent{a}V"] = mouthV + ((double?)t?["Z"] ?? 0) * RigToFaceUv;
+            if (beard[poses] is JArray p && p.Count > 0) head.Scalars[$"CharacterAccent{a}Pose"] = (double?)p[Math.Clamp(mouthPose, 0, p.Count - 1)] ?? 0;
+        }
+    }
+
+    /// <summary>An object's tagged properties as JSON, or null.</summary>
+    static async Task<JToken?> PropertiesAsync(IFileProvider provider, string objectPath)
+    {
+        try
+        {
+            var package = objectPath.Contains('.') ? objectPath[..objectPath.LastIndexOf('.')] : objectPath;
+            var name = objectPath[(objectPath.LastIndexOf('.') + 1)..];
+            var exports = (await provider.LoadPackageAsync(package)).GetExports().ToList();
+            var obj = exports.FirstOrDefault(e => e.Name == name) ?? exports.FirstOrDefault();
+            return obj is null ? null : JObject.Parse(JsonConvert.SerializeObject(obj, Ser))["Properties"];
+        }
+        catch
+        {
+            return null;
+        }
     }
 
     /// <summary>The int parameter that turns a part on ("None", "... Extend", "... Override", "... ON").</summary>

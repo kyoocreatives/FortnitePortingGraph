@@ -51,12 +51,13 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     its colour grid (32x32, the program's layout blocks, each part's
     `<part> Color` id through `T_LUT_Default`), deco and normal from the recipe;
     the head with its face material, a grid of its `Color Head ID`, its character
-    accents (mustaches, beards) placed with the mouth as the face rig does; each
+    accents (mustaches, beards) placed as the face rig does (the schema's CharacterAcc
+    and BeardRegistration data: mouth + registration offset); each
     accessory or replacement part with the recipe material (or its override),
     a 2x2 colour grid and its decos. Generated grids are served by the bridge as
     `/MaterialPorter/Generated/<name>` (MaterialService.GeneratedDir).
   Not done: the skeleton body's own colour layout, cloth, per-part metal/glow, the face's
-  rig-driven expression (a default face shows).
+  rig-driven expression (a neutral mouth shows).
 - **Faster world imports.** Exact materials of a world are laid out when a
   node editor first shows them; FP's per-object metadata scan, active-object
   switch and edit-mode Tris to Quads were replaced (a Hera cell 214 s to 89 s;

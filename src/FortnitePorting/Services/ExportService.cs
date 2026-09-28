@@ -100,6 +100,13 @@ public class ExportService(
                 var exportData = await session.RunAsync(() => exportFunction(session));
                 if (metaData.CancellationToken.IsCancellationRequested) return;
 
+                // Material Porter fork: a mesh file missing at hand-over is an import error in Blender; say which
+                foreach (var mesh in exportData.Exports.OfType<Exporting.Types.MeshExport>().SelectMany(e => e.Meshes))
+                {
+                    var file = System.IO.Path.Combine(metaData.CustomPath ?? metaData.AssetsRoot, mesh.Path.TrimStart('/').Split('.')[0] + ".uemodel");
+                    if (!System.IO.File.Exists(file)) Log.Warning("[Material Porter] handing {Path} to the plugin before its file exists ({File})", mesh.Path, file);
+                }
+
                 await SendToPluginAsync(serverType, exportData, PluginSettingsFor(metaData.ExportLocation));
             }
 

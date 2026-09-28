@@ -324,6 +324,10 @@ public class MaterialPorterService : IService
             using var assetMeta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
             var assetSession = new ExportSession(assetMeta);
             var assetData = await assetSession.RunAsync(() => [assetSession.CreateExport(asset.Name, asset, type, carStyles)]);
+            // what Blender would find the moment the export is handed over: every mesh file there
+            var missingNow = assetData.Exports.OfType<Exporting.Types.MeshExport>().SelectMany(e => e.Meshes)
+                .Select(m => m.Path).Where(p => !File.Exists(System.IO.Path.Combine(assetMeta.AssetsRoot, p.TrimStart('/').Split('.')[0] + ".uemodel"))).ToList();
+            if (missingNow.Count > 0) Log.Warning("[Material Porter] export handed over before its mesh files: {Missing}", string.Join(", ", missingNow));
             return new JRaw(JsonConvert.SerializeObject(new
             {
                 MetaData = new
