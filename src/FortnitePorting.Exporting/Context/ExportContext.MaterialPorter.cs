@@ -5,11 +5,13 @@ using System.Numerics;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Actor;
+using CUE4Parse.UE4.Assets.Exports.Component.Landscape;
 using CUE4Parse.UE4.Assets.Exports.Material;
 using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.Engine;
+using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.Exporting.MaterialPorter;
 using FortnitePorting.Exporting.Models;
 using FortnitePorting.Shared.Extensions;
@@ -30,6 +32,8 @@ namespace FortnitePorting.Exporting.Context;
 public partial class ExportContext
 {
     public static bool UseMaterialPorterMaps = true;
+    /// <summary>Tests: only actors whose name holds this (null: all).</summary>
+    public static string? MaterialPorterActorFilter;
 
     private readonly Dictionary<string, ExportMesh?> _mpMeshes = new(StringComparer.OrdinalIgnoreCase);
 
@@ -57,7 +61,8 @@ public partial class ExportContext
                 return meshes;
             }
 
-            var placed = reader.Placed.OrderBy(m => m.Actor, StringComparer.Ordinal).ThenBy(m => m.Mesh, StringComparer.Ordinal).ToList();
+            var placed = reader.Placed.Where(m => MaterialPorterActorFilter is null || m.Actor.Contains(MaterialPorterActorFilter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(m => m.Actor, StringComparer.Ordinal).ThenBy(m => m.Mesh, StringComparer.Ordinal).ToList();
             var done = 0;
             foreach (var m in placed)
             {
@@ -77,11 +82,63 @@ public partial class ExportContext
             var type = actorLazy.ResolvedObject?.Class?.Name.Text ?? string.Empty;
             if (!type.Contains("Landscape", StringComparison.Ordinal) && type != "FortMainHLOD") continue;
             if (actorLazy.Load() is not { } actor) continue;
-            if (actor is ALandscapeProxy or { ExportType: "FortMainHLOD" })
+            if (MaterialPorterActorFilter is { } only && !actor.Name.Contains(only, StringComparison.OrdinalIgnoreCase)) continue;
+            if (actor is ALandscapeProxy proxy)
+            {
+                // FP names a weight layer after its LayerInfo asset; the exact materials ask by LayerName
+                var names = LandscapeLayerNames(proxy);
+                foreach (var landscape in Actor(actor, loadTemplate: false).Where(x => x is not null))
+                {
+                    var export = new MaterialPorterMesh
+                    {
+                        Name = landscape.Name, Path = landscape.Path, NumLods = landscape.NumLods, IsEmpty = landscape.IsEmpty,
+                        Location = landscape.Location, Rotation = landscape.Rotation, Scale = landscape.Scale,
+                        MPLayerNames = names,
+                    };
+                    export.Materials.AddRange(landscape.Materials);
+                    export.OverrideMaterials.AddRange(landscape.OverrideMaterials);
+                    meshes.Add(export);
+                }
+            }
+            else if (actor.ExportType == "FortMainHLOD")
                 meshes.AddRange(Actor(actor, loadTemplate: false).Where(x => x is not null));
         }
 
         return meshes;
+    }
+
+    /// <summary>A landscape's weight layers: LayerInfo asset name -> the LayerName materials sample.</summary>
+    private static Dictionary<string, string> LandscapeLayerNames(ALandscapeProxy proxy)
+    {
+        var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        int components = 0, allocations = 0;
+        var errors = new List<string>();
+        foreach (var componentLazy in proxy.LandscapeComponents ?? [])
+        {
+            ULandscapeComponent? component;
+            try { component = componentLazy.Load<ULandscapeComponent>(); }
+            catch (Exception e) { errors.Add("component: " + e.Message); continue; }
+            if (component is null) continue;
+            components++;
+            foreach (var allocation in component.GetWeightmapLayerAllocations() ?? [])
+            {
+                allocations++;
+                var asset = allocation.GetLayerName();
+                if (asset is null || names.ContainsKey(asset)) continue;
+                try
+                {
+                    // the property, read as tagged (this CUE4Parse's LayerName field stays None)
+                    var info = allocation.LayerInfo.Load();
+                    var layer = info?.GetOrDefault<FName>("LayerName") ?? default;
+                    if (!layer.IsNone && !string.IsNullOrEmpty(layer.Text)) names[asset] = layer.Text;
+                    else errors.Add(asset + ": no LayerName (" + string.Join(",", info?.Properties.Select(p => p.Name.Text) ?? []) + ")");
+                }
+                catch (Exception e) { errors.Add(asset + ": " + e.Message); }
+            }
+        }
+        Log.Information("[Material Porter] {Landscape}: {Components} components, {Allocations} layer allocations, layers {Layers}; {Errors}",
+            proxy.Name, components, allocations, string.Join(", ", names.Select(kv => kv.Key + "=" + kv.Value)), string.Join("; ", errors.Distinct().Take(4)));
+        return names;
     }
 
     /// <summary>One placement as FP's mesh record: the mesh (exported once), where it stands, what its slots wear.</summary>

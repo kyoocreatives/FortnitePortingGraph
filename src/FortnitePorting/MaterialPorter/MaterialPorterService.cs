@@ -46,7 +46,7 @@ public static class Timing
 /// </summary>
 public class MaterialPorterService : IService
 {
-    public const int Port = 24320;
+    public static int Port => Fork.BridgePort;
 
     public static MaterialPorterService Instance => AppServices.Services.GetRequiredService<MaterialPorterService>();
 
@@ -77,7 +77,7 @@ public class MaterialPorterService : IService
     }
 
     /// <summary>
-    /// GET /fork-export-world?path=&lt;level package&gt;[&amp;landscape=1]: FP's world export of that one
+    /// GET /fork-export-world?path=&lt;level package&gt;[&amp;landscape=1][&amp;actor=name part]: FP's world export of that one
     /// level (actors and instances, as the Map page sends it to Blender) as the JSON the plugin
     /// receives - for tests that import it headless.
     /// </summary>
@@ -92,7 +92,10 @@ public class MaterialPorterService : IService
         using var meta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
         meta.WorldFlags = EWorldFlags.Actors | EWorldFlags.InstancedFoliage | (query["landscape"] == "1" ? EWorldFlags.Landscape : 0);
         var session = new ExportSession(meta);
-        var data = await session.RunAsync(() => [session.CreateExport(world.Name, world, EExportType.World, [])]);
+        Exporting.Context.ExportContext.MaterialPorterActorFilter = query["actor"];
+        Exporting.Models.ExportData data;
+        try { data = await session.RunAsync(() => [session.CreateExport(world.Name, world, EExportType.World, [])]); }
+        finally { Exporting.Context.ExportContext.MaterialPorterActorFilter = null; }
         var payload = new
         {
             MetaData = new
