@@ -58,6 +58,13 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     `/MaterialPorter/Generated/<name>` (MaterialService.GeneratedDir).
   Not done: the skeleton body's own colour layout, cloth, per-part metal/glow, the face's
   rig-driven expression (a neutral mouth shows).
+- **Status line and log.** As in Material Porter's app: a status line under the
+  window (a busy bar while an export runs or Blender imports, the latest step)
+  and a Log drawer (`MaterialPorter/StatusLog.cs`, a Serilog sink): the export's
+  steps, the bridge's answers to Blender, warnings, and what the Blender plugin
+  reports while it imports (`material_porter/status.py` sends FP's log lines, the
+  exact materials' notes and an import summary - meshes, materials, exact ones,
+  seconds - to the bridge's `log` route, batched, never holding the import).
 - **Faster world imports.** Exact materials of a world are laid out when a
   node editor first shows them; FP's per-object metadata scan, active-object
   switch and edit-mode Tris to Quads were replaced (a Hera cell 214 s to 89 s;

@@ -285,6 +285,22 @@ public class MaterialPorterService : IService
                 @params = plan.Params.ToDictionary(kv => kv.Key, kv => new { kv.Value.Vectors, kv.Value.Scalars }),
             };
         }
+        if (route == "log")
+        {
+            // the Blender plugin telling what it does while it imports (status.py): a JSON list of lines, begin/end
+            var lines = JsonConvert.DeserializeObject<string[]>(query["lines"] ?? "[]") ?? [];
+            StatusLog.Instance.FromBlender(query["state"], lines);
+            return "ok";
+        }
+        if (route == "fork-status")
+        {
+            // tests: the status line and the newest log lines, as the window shows them
+            return await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => new
+            {
+                StatusLog.Instance.LastLine, StatusLog.Instance.IsBusy, StatusLog.Instance.BusyWhat,
+                Lines = StatusLog.Instance.Lines.Take(int.TryParse(query["count"], out var n) ? n : 60).ToArray(),
+            });
+        }
         if (route == "fork-loader")
         {
             // tests: run one asset tab's loader as the Assets page does, and say what it lists

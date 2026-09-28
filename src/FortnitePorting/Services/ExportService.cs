@@ -78,6 +78,10 @@ public class ExportService(
         var exportedProperly = false;
         await TaskService.RunAsync(async () =>
         {
+            // Material Porter fork: the status line says an export runs, its log what it does
+            using var status = MaterialPorter.StatusLog.Instance.Exporting($"Exporting to {metaData.ExportLocation}");
+            var clock = System.Diagnostics.Stopwatch.StartNew();
+            MaterialPorter.StatusLog.Instance.Write($"Export to {metaData.ExportLocation} started");
             var session = CreateSession(metaData);
             var serverType = metaData.ExportLocation.ServerType;
 
@@ -108,6 +112,7 @@ public class ExportService(
                 }
 
                 await SendToPluginAsync(serverType, exportData, PluginSettingsFor(metaData.ExportLocation));
+                MaterialPorter.StatusLog.Instance.Write($"Sent {exportData.Exports.Length} export(s) to the {serverType} plugin ({clock.Elapsed.TotalSeconds:0.0} s)");
             }
 
             exportedProperly = !metaData.CancellationToken.IsCancellationRequested;

@@ -84,7 +84,7 @@ public sealed class Bridge : IDisposable
                 "material" => (await materials.DescribeAsync(Need(path))).ToJson(),
                 _ => Extra != null && await Extra(route, q) is { } extra ? extra : throw new KeyNotFoundException("no route " + route),
             };
-            if (route != "ping") Log?.Invoke($"Blender asked for {route} {ShortName(path)}");
+            if (route is not ("ping" or "log")) Log?.Invoke($"Blender asked for {route} {ShortName(path)}");   // "log": Blender telling what it does
             Timing.Log($"bridge {route} {ShortName(path)}", sw);
         }
         catch (Exception e)
