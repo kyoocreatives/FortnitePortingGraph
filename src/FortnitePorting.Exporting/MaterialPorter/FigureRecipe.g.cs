@@ -20,16 +20,17 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 ///    MI_Figure_DecoratedPlastic_RecipeCOv2 (or the variant a "Body Material Type"
 ///    names), its "Tex Color D" a 32x32 grid of the body's layout blocks (layout 11 of
 ///    the program), each block the LUT colour of its part's "&lt;part&gt; Color" id
-///    (T_LUT_Default, 512 x 1: pixel N is colour id N), deco and normal from the recipe;
+///    (T_LUT_Default, 512 x 1: pixel N is colour id N), its "Tex Color M" the same grid of
+///    the blocks' surfaces (metal, glow, see-through), deco and normal from the recipe;
 ///  - the head: the recipe's head mesh with its "Head Material", its base colour grid
 ///    ("Tex Color-D") the LUT colour of the face material's "Color Head ID", its character
 ///    accents placed as the face rig places them (the schema's accent registrations);
 ///  - each accessory or replacement part ("&lt;X&gt; SKM"): its mesh with the recipe
 ///    material, a 2x2 colour grid ("LU/RU/LL/RL Color &lt;X&gt;": the quadrants
-///    top left, top right, bottom left, bottom right) and its deco, mask and normal.
+///    top left, top right, bottom left, bottom right), its surfaces' grid and its deco, mask and normal.
 /// A hand or leg replacement removes the body's own part (the program's remove masks).
 /// All parts are skinned to SK_Figure. Not done yet: the skeleton body's own colour
-/// layout, cloth, per-part surfaces (metal, glow).
+/// layout, cloth.
 /// </summary>
 public sealed class FigureRecipe
 {
@@ -176,6 +177,23 @@ public sealed class FigureRecipe
         return [_lut[i * 4], _lut[i * 4 + 1], _lut[i * 4 + 2], 255];
     }
 
+    /// <summary>
+    /// A block's surface as the material reads "Tex Color M" (R metallic, G ink, B surface
+    /// type, A emissive): metallic its colour's (the LUT's alpha: 255 for the metallic colours,
+    /// as the bakes have it) unless its "Metal Enum" overrides it with its "Metal Value";
+    /// B its "Surface" (the see-through share in a transparent material) and A its "Glow".
+    /// A block's values are named "&lt;prefix&gt; Glow" (a body block) or "&lt;prefix&gt; Glow &lt;part&gt;" (a quadrant).
+    /// </summary>
+    byte[] Surface(string prefix, string? part, double colour)
+    {
+        string Name(string what) => part is null ? $"{prefix} {what}" : $"{prefix} {what} {part}";
+        static byte Byte(double v) => (byte)Math.Clamp((int)Math.Round(v * 255), 0, 255);
+        var i = Math.Clamp((int)Math.Round(colour), 0, _lut!.Length / 4 - 1);
+        var metal = (Ints.GetValueOrDefault(Name("Metal Enum")) ?? "").Equals("OverrideMetalValue", StringComparison.OrdinalIgnoreCase)
+            ? Byte(Floats.GetValueOrDefault(Name("Metal Value"))) : _lut[i * 4 + 3];
+        return [metal, 0, Byte(Floats.GetValueOrDefault(Name("Surface"))), Byte(Floats.GetValueOrDefault(Name("Glow")))];
+    }
+
     // ------------------------------------------------------------ the figure
 
     /// <summary>The figure's parts, the body first. Writes its colour grids to <see cref="GeneratedDir"/>.</summary>
@@ -202,10 +220,11 @@ public sealed class FigureRecipe
         var body = new Part { Name = "Body", Raw = raw, RawName = rawName, Material = MaterialFor(provider, Ints.GetValueOrDefault("Body Material Type")) };
         var blocks = BodyBlocks.Select(b => (b.X, b.Y, b.W, b.H, Colour(Floats.GetValueOrDefault(b.Part + " Color", 1))));
         body.Textures["Tex Color D"] = Grid("FigureBody", blocks);
+        // the recipe's "Body Color M" is a placeholder the game fills, as it fills "Body Color D"
+        body.Textures["Tex Color M"] = Grid("FigureBodyM", BodyBlocks.Select(b => (b.X, b.Y, b.W, b.H, Surface(b.Part, null, Floats.GetValueOrDefault(b.Part + " Color", 1)))), linear: true);
         Copy(body, "Body Deco D", "Tex Deco D");
         Copy(body, "Body Deco M", "Tex Deco M");
         Copy(body, "Body Normal", "Tex Normal");
-        Copy(body, "Body Color M", "Tex Color M");
         if (Floats.TryGetValue("Body Metallic Power Deco", out var metal)) body.Scalars["Metallic Power Deco"] = metal;
         if (Floats.TryGetValue("Body Emissive Mult", out var em)) body.Scalars["Emissive Mult"] = em;
         if (Floats.TryGetValue("Body Element Emissive Mult", out var eem)) body.Scalars["Element Emissive Mult"] = eem;
@@ -242,9 +261,9 @@ public sealed class FigureRecipe
                 ? own : MaterialFor(provider, Ints.GetValueOrDefault(x + " Material"));
             var part = new Part { Name = x, Mesh = mesh, Material = material };
             // quadrants: top left, top right, bottom left, bottom right
-            var quads = new[] { ("LU", 0, 0), ("RU", 16, 0), ("LL", 0, 16), ("RL", 16, 16) }
-                .Select(q => (q.Item2, q.Item3, 16, 16, Colour(Floats.GetValueOrDefault($"{q.Item1} Color {x}", 1))));
-            part.Textures["Tex Color D"] = Grid("FigurePart", quads);
+            var quads = new[] { ("LU", 0, 0), ("RU", 16, 0), ("LL", 0, 16), ("RL", 16, 16) };
+            part.Textures["Tex Color D"] = Grid("FigurePart", quads.Select(q => (q.Item2, q.Item3, 16, 16, Colour(Floats.GetValueOrDefault($"{q.Item1} Color {x}", 1)))));
+            part.Textures["Tex Color M"] = Grid("FigurePartM", quads.Select(q => (q.Item2, q.Item3, 16, 16, Surface(q.Item1, x, Floats.GetValueOrDefault($"{q.Item1} Color {x}", 1)))), linear: true);
             Copy(part, x + " Deco D", "Tex Deco D");
             Copy(part, x + " Deco Mask", "Tex Deco M");
             Copy(part, x + " Normal", "Tex Normal");
@@ -371,9 +390,9 @@ public sealed class FigureRecipe
     /// <summary>
     /// A 32x32 colour grid of blocks (x, y, w, h in pixels), written as a PNG 8 times
     /// the size (the game samples it unfiltered: the blocks stay sharp when Blender
-    /// filters it). Returns its generated texture path.
+    /// filters it). Returns its generated texture path (named _Lin when it holds data, not colour).
     /// </summary>
-    static string Grid(string kind, IEnumerable<(int X, int Y, int W, int H, byte[] Rgba)> blocks)
+    static string Grid(string kind, IEnumerable<(int X, int Y, int W, int H, byte[] Rgba)> blocks, bool linear = false)
     {
         const int size = 32, scale = 8;
         var px = new byte[size * size * 4];
@@ -381,7 +400,7 @@ public sealed class FigureRecipe
             for (var y = y0; y < Math.Min(size, y0 + h); y++)
             for (var x = x0; x < Math.Min(size, x0 + w); x++)
                 Array.Copy(c, 0, px, (y * size + x) * 4, 4);
-        var name = kind + "_" + Convert.ToHexString(SHA1.HashData(px))[..12];
+        var name = kind + "_" + Convert.ToHexString(SHA1.HashData(px))[..12] + (linear ? "_Lin" : "");
         var dir = GeneratedDir ?? throw new InvalidOperationException("FigureRecipe.GeneratedDir isn't set");
         var file = Path.Combine(dir, name + ".png");
         if (!File.Exists(file))
