@@ -22,7 +22,8 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 ///    the program), each block the LUT colour of its part's "&lt;part&gt; Color" id
 ///    (T_LUT_Default, 512 x 1: pixel N is colour id N), deco and normal from the recipe;
 ///  - the head: the recipe's head mesh with its "Head Material", its base colour grid
-///    ("Tex Color-D") the LUT colour of the face material's "Color Head ID";
+///    ("Tex Color-D") the LUT colour of the face material's "Color Head ID", its character
+///    accents placed with the mouth (the face rig's job at run time);
 ///  - each accessory or replacement part ("&lt;X&gt; SKM"): its mesh with the recipe
 ///    material, a 2x2 colour grid ("LU/RU/LL/RL Color &lt;X&gt;": the quadrants
 ///    top left, top right, bottom left, bottom right) and its deco, mask and normal.
@@ -219,6 +220,19 @@ public sealed class FigureRecipe
             var id = (face is null ? null : await ScalarAsync(provider, face, "Color Head ID"))
                      ?? (Ints.GetValueOrDefault("Head Standard Color") is { } std && std.Split('_') is { Length: > 1 } bits && int.TryParse(bits[1], out var n) ? n : 24);
             headPart.Textures["Tex Color-D"] = Grid("FigureHead", [(0, 0, 32, 32, Colour(id))]);
+            // character accents (a mustache, a beard) are placed by the face rig at run time,
+            // with the mouth: the face material's mouth placement (a stand-in for the rig)
+            if (face is not null)
+            {
+                var mouth = new Dictionary<string, double>
+                {
+                    ["U"] = await ScalarAsync(provider, face, "MouthU") ?? 0, ["V"] = await ScalarAsync(provider, face, "MouthV") ?? 0,
+                    ["Rotation"] = await ScalarAsync(provider, face, "MouthRotation") ?? 0,
+                    ["ScaleU"] = await ScalarAsync(provider, face, "MouthScaleU") ?? 1, ["ScaleV"] = await ScalarAsync(provider, face, "MouthScaleV") ?? 1,
+                };
+                for (var accent = 1; accent <= 4; accent++)
+                    foreach (var (k, v) in mouth) headPart.Scalars[$"CharacterAccent{accent}{k}"] = v;
+            }
             parts.Add(headPart);
         }
 

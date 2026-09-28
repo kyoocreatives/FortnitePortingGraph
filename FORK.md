@@ -50,7 +50,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     by `UEModelWriter.g.cs`,
     its colour grid (32x32, the program's layout blocks, each part's
     `<part> Color` id through `T_LUT_Default`), deco and normal from the recipe;
-    the head with its face material and a grid of its `Color Head ID`; each
+    the head with its face material, a grid of its `Color Head ID`, its character
+    accents (mustaches, beards) placed with the mouth as the face rig does; each
     accessory or replacement part with the recipe material (or its override),
     a 2x2 colour grid and its decos. Generated grids are served by the bridge as
     `/MaterialPorter/Generated/<name>` (MaterialService.GeneratedDir).
