@@ -58,7 +58,8 @@ class MeshImportContext:
                 self.parent_deform_bones(imported_mesh["Skeleton"], ["dfrm_", "deform_"])
                 self.parent_bones(imported_mesh["Skeleton"], extra_deform_mappings)
             
-        if self.type in [EExportType.OUTFIT, EExportType.FALL_GUYS_OUTFIT] and self.options.get("MergeArmatures"):
+        # Material Porter fork: a LEGO figure's parts too (the body's armature takes them)
+        if self.type in [EExportType.OUTFIT, EExportType.FALL_GUYS_OUTFIT, EExportType.LEGO_OUTFIT] and self.options.get("MergeArmatures"):
             master_skeleton = merge_parts(self.imported_meshes)
             master_mesh = get_armature_mesh(master_skeleton)
             # Update attribute to account for joined mesh
@@ -88,7 +89,8 @@ class MeshImportContext:
                 solidify.use_flip_normals = True
                 solidify.material_offset = len(master_mesh.data.materials) - 1
                 
-            if rig_type == ERigType.TASTY:
+            # Material Porter fork: Tasty's rig is for Fortnite's humanoid skeleton, not a LEGO figure's
+            if rig_type == ERigType.TASTY and self.type != EExportType.LEGO_OUTFIT:
                 self.create_tasty_rig(master_skeleton, self.get_metadata("MasterSkeletalMesh"))
 
             if anim_data := data.get("Animation"):

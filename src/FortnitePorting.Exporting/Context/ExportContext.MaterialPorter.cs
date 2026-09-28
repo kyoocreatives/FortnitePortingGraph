@@ -14,6 +14,7 @@ using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.UObject;
+using FortnitePorting.CUE4Parse.Models.Fortnite.Enums;
 using FortnitePorting.Exporting.MaterialPorter;
 using FortnitePorting.Exporting.Models;
 using FortnitePorting.Shared.Extensions;
@@ -284,7 +285,10 @@ public partial class ExportContext
         if (meshes.Count > 0)
         {
             Log.Information("[Material Porter] figure {Item}: {Meshes}", item.Name, string.Join(", ", meshes.Select(m => m.Name)));
-            return meshes.Select(m => Mesh(m)).OfType<ExportMesh>().ToList();
+            // parts, the first one the body: the plugin merges them onto its armature
+            var cooked = meshes.Select(m => Mesh<ExportPart>(m)).OfType<ExportPart>().ToList();
+            for (var i = 0; i < cooked.Count; i++) cooked[i].Type = i == 0 ? EFortCustomPartType.Body : EFortCustomPartType.MiscOrTail;
+            return cooked.Cast<ExportMesh>().ToList();
         }
         if (Figures.RecipeInstance(FileProvider, item) is not { } instance)
         {
@@ -308,11 +312,13 @@ public partial class ExportContext
                 var bodyPath = $"/MaterialPorter/Figures/{part.RawName}.{part.RawName}";
                 var file = BuildExportPath(bodyPath, "uemodel");
                 if (!File.Exists(file)) UEModelWriter.Write(file, part.RawName, raw, skeleton, [("Body", part.Material ?? "")]);
-                export = new ExportMesh { Name = part.RawName, Path = bodyPath, NumLods = 1 };
+                export = new ExportPart { Name = part.RawName, Path = bodyPath, NumLods = 1, Type = EFortCustomPartType.Body };
             }
             else
             {
-                if (part.Mesh is null || LoadMaterialPorterObject(part.Mesh) is not USkeletalMesh sk || Mesh(sk) is not { } cooked) continue;
+                if (part.Mesh is null || LoadMaterialPorterObject(part.Mesh) is not USkeletalMesh sk || Mesh<ExportPart>(sk) is not { } cooked) continue;
+                // parts: the plugin merges them onto the body's armature (the head as FP's heads)
+                cooked.Type = part.Name == "Head" ? EFortCustomPartType.Head : EFortCustomPartType.MiscOrTail;
                 export = cooked;
                 slots = Math.Max(1, sk.Materials?.Length ?? 1);
             }
