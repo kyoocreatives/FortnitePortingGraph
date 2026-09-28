@@ -49,15 +49,28 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     once per variant as `Assets/MaterialPorter/Figures/FigureBody_r<rev>[_NoLegR...].uemodel`
     by `UEModelWriter.g.cs`,
     its colour grid (32x32, the program's layout blocks, each part's
-    `<part> Color` id through `T_LUT_Default`), deco and normal from the recipe;
+    `<part> Color` id through `T_LUT_Default`) and surface grid (`Tex Color M`: metal
+    from the colour's LUT alpha or the block's `Metal Value`, see-through share, glow),
+    deco and normal from the recipe (the skeleton body: one block's values over its grid);
     the head with its face material, a grid of its `Color Head ID`, its character
     accents (mustaches, beards) placed as the face rig does (the schema's CharacterAcc
     and BeardRegistration data: mouth + registration offset); each
     accessory or replacement part with the recipe material (or its override),
-    a 2x2 colour grid and its decos. Generated grids are served by the bridge as
-    `/MaterialPorter/Generated/<name>` (MaterialService.GeneratedDir).
-  Not done: the skeleton body's own colour layout, cloth, per-part metal/glow, the face's
-  rig-driven expression (a neutral mouth shows).
+    a 2x2 colour grid, its surfaces' grid and its decos. Generated grids are served by the bridge as
+    `/MaterialPorter/Generated/<name>` (MaterialService.GeneratedDir, `_Lin` ones linear).
+  - parts go out as FP parts (body, head, the rest): the plugin merges them onto one armature
+    (no Tasty rig: it is for the humanoid skeleton).
+  - *expression*: Mouth, Eyes and Brows channels (the figure's own or one of the face rig's
+    poses, DA_Figure_Face_Settings: 46/6/12) set the face material's pose parameters; a mouth
+    pose moves the character accents with it. Mouth and brow options preview their atlas cells.
+  Not done: cloth; teeth/tongue poses for an open mouth (the rig's, not known).
+- **LEGO emotes.** Assets > Lego > Emotes (`JunoAthenaDanceItemOverrideDefinition`): the BR
+  emote's name and icon, the figure's montage exported as an emote (sections, sounds, props)
+  onto the selected figure's armature; its skeleton from its sequences (the montage names none).
+- **LEGO props.** Assets > Lego > Props: building props and building sets
+  (`JunoBuilding{Prop,Set}AccountItemDefinition`), the meshes of the actor each previews.
+  LEGO wildlife isn't there: the creatures' packages (and most LEGO gameplay content) are in
+  pakchunks whose keys aren't published; items whose actor is in one are hidden.
 - **Status line and log.** As in Material Porter's app: a status line under the
   window (a busy bar while an export runs or Blender imports, the latest step)
   and a Log drawer (`MaterialPorter/StatusLog.cs`, a Serilog sink): the export's
