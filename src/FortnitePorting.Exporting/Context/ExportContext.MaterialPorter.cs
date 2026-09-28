@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
 using System.Linq;
 using System.Numerics;
 using CUE4Parse.FileProvider;
@@ -272,18 +273,66 @@ public partial class ExportContext
         return [export];
     }
 
-    /// <summary>A LEGO figure as cooked: its schema's skeletal meshes (or its Bake folder's), with their baked materials.</summary>
+    /// <summary>
+    /// A LEGO figure: its cooked skeletal meshes (the schema's, or its Bake folder's) with
+    /// their baked materials; else its recipe (FigureRecipe): the shared Mutable object's
+    /// body and the recipe's cooked parts, dressed with its materials, colours and decos.
+    /// </summary>
     public List<ExportMesh> MaterialPorterFigure(UObject item)
     {
         var meshes = Figures.BakedMeshes(FileProvider, item);
-        if (meshes.Count == 0)
+        if (meshes.Count > 0)
         {
-            Log.Warning("[Material Porter] figure {Item}: no cooked mesh (only its Mutable object, not read yet): {Trace}",
-                item.Name, Figures.Trace(FileProvider, item));
+            Log.Information("[Material Porter] figure {Item}: {Meshes}", item.Name, string.Join(", ", meshes.Select(m => m.Name)));
+            return meshes.Select(m => Mesh(m)).OfType<ExportMesh>().ToList();
+        }
+        if (Figures.RecipeInstance(FileProvider, item) is not { } instance)
+        {
+            Log.Warning("[Material Porter] figure {Item}: no cooked mesh and no recipe: {Trace}", item.Name, Figures.Trace(FileProvider, item));
             return [];
         }
-        Log.Information("[Material Porter] figure {Item}: {Meshes}", item.Name, string.Join(", ", meshes.Select(m => m.Name)));
-        return meshes.Select(m => Mesh(m)).OfType<ExportMesh>().ToList();
+        var recipe = FigureRecipe.LoadAsync(FileProvider, instance).GetAwaiter().GetResult();
+        if (recipe is null) return [];
+        var parts = recipe.PartsAsync(FileProvider).GetAwaiter().GetResult();
+        Log.Information("[Material Porter] figure {Item}: recipe {Instance}, parts {Parts}", item.Name, instance, string.Join(", ", parts.Select(p => p.Name)));
+
+        var exports = new List<ExportMesh>();
+        foreach (var part in parts)
+        {
+            ExportMesh? export;
+            var slots = 1;
+            if (part.Raw is { } raw)
+            {
+                // a body's geometry is the same for every recipe figure with it: one file each
+                var skeleton = FigureRecipe.SkeletonAsync(FileProvider).GetAwaiter().GetResult();
+                var bodyPath = $"/MaterialPorter/Figures/{part.RawName}.{part.RawName}";
+                var file = BuildExportPath(bodyPath, "uemodel");
+                if (!File.Exists(file)) UEModelWriter.Write(file, part.RawName, raw, skeleton, [("Body", part.Material ?? "")]);
+                export = new ExportMesh { Name = part.RawName, Path = bodyPath, NumLods = 1 };
+            }
+            else
+            {
+                if (part.Mesh is null || LoadMaterialPorterObject(part.Mesh) is not USkeletalMesh sk || Mesh(sk) is not { } cooked) continue;
+                export = cooked;
+                slots = Math.Max(1, sk.Materials?.Length ?? 1);
+            }
+            if (part.Material is not null && LoadMaterialPorterObject(part.Material) is UMaterialInterface mi)
+            {
+                var values = new ParamSet { Label = part.Name };
+                foreach (var (k, v) in part.Textures) values.Textures[k] = v;
+                foreach (var (k, v) in part.Scalars) values.Scalars[k] = v;
+                export.Materials.Clear();
+                for (var slot = 0; slot < slots; slot++)
+                {
+                    if (Material(mi, slot) is not { } material) continue;
+                    export.Materials.Add(values.Textures.Count + values.Scalars.Count == 0
+                        ? material with { Slot = slot }
+                        : new MaterialPorterMaterial(material with { Slot = slot }) { MPValues = values, Hash = HashCode.Combine(material.Hash, values.Key()) });
+                }
+            }
+            exports.Add(export);
+        }
+        return exports;
     }
 
     /// <summary>A car part's slots: a decal's material where it goes, Mutable's values over each material they touch.</summary>

@@ -66,6 +66,7 @@ public class MaterialPorterService : IService
         Game.Provider = provider;
         Game.BuildVersion = string.IsNullOrWhiteSpace(buildVersion) ? "unknown" : buildVersion;
         Materials = new MaterialService(Game);
+        FigureRecipe.GeneratedDir = Materials.GeneratedDir;    // LEGO figures' colour grids, served by the bridge
         // cars: the registry's decals and wheel sets, read once in the background
         _carSkins = _carWheels = null;
         Cars.Items = CarItemsAsync;

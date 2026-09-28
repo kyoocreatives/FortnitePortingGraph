@@ -95,6 +95,25 @@ public static class Figures
     }
 
     /// <summary>Whether the figure has cooked meshes (listed by its schema, or in its Bake folder), without loading them.</summary>
+    /// <summary>
+    /// The figure's recipe: its schema's CustomizableObjectInstance when that is a recipe
+    /// on the shared Dataless object (FigureRecipe builds those), else null.
+    /// </summary>
+    public static string? RecipeInstance(IFileProvider provider, UObject item)
+    {
+        foreach (var schema in Schemas(item, provider))
+        {
+            if (!schema.TryGetValue(out FSoftObjectPath instance, "CustomizableObjectInstance")) continue;
+            var path = instance.AssetPathName.Text;
+            if (!string.IsNullOrEmpty(path) && path != "None" && path.Contains("/Mutable/Dataless/", StringComparison.OrdinalIgnoreCase))
+                return path;
+        }
+        return null;
+    }
+
+    /// <summary>Whether the figure can be exported: cooked, or a recipe.</summary>
+    public static bool HasFigure(IFileProvider provider, UObject item) => HasBake(provider, item) || RecipeInstance(provider, item) is not null;
+
     public static bool HasBake(IFileProvider provider, UObject item) =>
         Schemas(item, provider).Any(schema => SchemaMeshRefs(schema).Any() || BakeCandidates(provider, schema).Count > 0);
 

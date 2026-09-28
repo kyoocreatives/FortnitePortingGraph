@@ -404,8 +404,31 @@ public sealed class MaterialService
     /// <summary>Bumped when what a cached texture file holds changes.</summary>
     const int TextureCacheVersion = 2;
 
+    /// <summary>
+    /// Textures made here, not in the game (a LEGO figure's colour grids):
+    /// /MaterialPorter/Generated/&lt;name&gt;.&lt;name&gt; is &lt;GeneratedDir&gt;/&lt;name&gt;.png, named
+    /// for its content; a name ending in _Lin is linear, else sRGB.
+    /// </summary>
+    public const string GeneratedRoot = "/MaterialPorter/Generated/";
+
+    public string GeneratedDir => Directory.CreateDirectory(System.IO.Path.Combine(cache, "generated")).FullName;   // named for content: no version
+
+    TextureFile GeneratedTexture(string path)
+    {
+        var name = path[GeneratedRoot.Length..].Split('.')[0];
+        var file = System.IO.Path.Combine(GeneratedDir, name + ".png");
+        if (!File.Exists(file)) throw new FileNotFoundException("no generated texture " + name);
+        using var codec = SkiaSharp.SKCodec.Create(file);
+        return new TextureFile
+        {
+            File = file, Width = codec.Info.Width, Height = codec.Info.Height,
+            Srgb = !name.EndsWith("_Lin", StringComparison.OrdinalIgnoreCase),
+        };
+    }
+
     async Task<TextureFile> ExportTextureAsync(string path, int cap = 0, bool raw = false)
     {
+        if (path.StartsWith(GeneratedRoot, StringComparison.OrdinalIgnoreCase)) return GeneratedTexture(path);
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var tex = await game.Provider.LoadPackageObjectAsync<UTexture>(path);
         var stem = System.IO.Path.Combine(Dir("textures"), Safe(ResolveKey(path, ".uasset") ?? path));

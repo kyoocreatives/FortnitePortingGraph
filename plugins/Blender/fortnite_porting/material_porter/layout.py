@@ -103,6 +103,7 @@ BUS_MIN = 60.0           # a wire that climbs less than this stays a plain wire
 BUS_SNAP = 24.0          # bus taps closer than this merge
 BUS_PAD = 40.0           # first bus this far into the gap
 BUS_STEP = 24.0          # buses side by side in one gap
+LANE_LIMIT = 1500        # reroutes a tree's lanes may make; past it, plain wires (each new node costs Blender a pass over the tree)
 GAP_NODE_X = 60.0
 GAP_BOX_X = 100.0
 
@@ -1144,6 +1145,13 @@ def _apply(tree, root, stand_ins):
     where = {}
     routed = []
 
+    def lane_points(box):
+        return sum(len(lane[2]) for lane in box.lanes) + sum(lane_points(k) for k in box.kids.values())
+
+    # a big flat graph can ask for thousands of reroutes (a face material: 9,000 for 875
+    # nodes); made one by one they take Blender minutes, so such a tree keeps plain wires
+    route = lane_points(root) <= LANE_LIMIT
+
     def place(box, ox, oy, parent_frame):
         frame = None
         if box.path:
@@ -1166,7 +1174,7 @@ def _apply(tree, root, stand_ins):
                 # a reroute's location is its dot, not a corner
                 x, y = x + 8.0, y + 8.0
             where[n.name] = (x, -y)
-        for src, ident, points, links, feeds in box.lanes:
+        for src, ident, points, links, feeds in (box.lanes if route else ()):
             dots = []
             for x, y in points:
                 r = N.new("NodeReroute")

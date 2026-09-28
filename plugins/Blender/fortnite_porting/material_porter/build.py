@@ -19,7 +19,7 @@ from .ue_graph import SHADING_MODELS, Translator, Val
 PREFIX = "MP "            # built materials: "MP MI_Foo"
 KEY_PATH = "mp_path"      # the game object a built material translates
 KEY_REV = "mp_rev"        # the build revision that made it (older ones are rebuilt, not reused)
-BUILD_REVISION = 8        # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data
+BUILD_REVISION = 9        # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data)
                           # 4: instance overrides to the default (Opaque, DefaultLit, one-sided) honoured
                           # 6: vector parameters without a stored default are (0, 0, 0, 0), not alpha 1
                           # 8: single layer water (the medium, refraction, water info stand-ins); graph clip()s

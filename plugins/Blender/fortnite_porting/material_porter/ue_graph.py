@@ -406,6 +406,7 @@ CUSTOM_HASHES = {
     "a57e06f4": "custom_identity",          # Vector
     "7b8cb983": "custom_identity",          # Scalar
     "1e3af51b": "custom_select3",           # Select == 1 ? A : Select == 2 ? B : C
+    "85321e46": "custom_select_eq4",        # if Select == 1 A, == 2 B, == 3 C, else D (LEGO face atlas channels)
     "c8faff65": "custom_light_direction",   # return View.DirectionalLightDirection;
     "d30c1e33": "custom_light_color",       # return View.DirectionalLightColor;
     "fae396a2": "custom_world_to_clip",     # mul(float4(In.xyz, 1), WorldToClip)
@@ -2786,6 +2787,16 @@ class Translator:
         if s.const:
             return a if s.s == 1 else b if s.s == 2 else c
         v = self.select(self.math('COMPARE', s, self.const(2.0), self.const(0.0)), c, b)
+        return self.select(self.math('COMPARE', s, self.const(1.0), self.const(0.0)), v, a)
+
+    def custom_select_eq4(self, ins, p):
+        # if (Select == 1) A; else if (Select == 2) B; else if (Select == 3) C; else D
+        s = self.mask(self._in(ins, "Select"), [0])
+        a, b, c, d = (self._in(ins, k) for k in "ABCD")
+        if s.const:
+            return {1: a, 2: b, 3: c}.get(s.s, d)
+        v = self.select(self.math('COMPARE', s, self.const(3.0), self.const(0.0)), d, c)
+        v = self.select(self.math('COMPARE', s, self.const(2.0), self.const(0.0)), v, b)
         return self.select(self.math('COMPARE', s, self.const(1.0), self.const(0.0)), v, a)
 
     def custom_array_sample(self, ins, p):

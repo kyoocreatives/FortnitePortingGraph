@@ -492,6 +492,11 @@ class MaterialEnv:
                     img.colorspace_settings.name = space
             except TypeError:
                 pass
+            # UE reads alpha as its own channel; Blender's default (straight alpha,
+            # premultiplied inside) loses a texel's colour where its alpha is 0 - the
+            # LEGO colour LUT (alpha: metallic, 0 for nearly all colours) read black
+            if img.alpha_mode != 'CHANNEL_PACKED':
+                img.alpha_mode = 'CHANNEL_PACKED'
         if img is None:
             img = bpy.data.images.get("MP missing") or bpy.data.images.new("MP missing", 4, 4)
         self._images[key] = img
@@ -532,6 +537,7 @@ class MaterialEnv:
         for i in range(depth):
             name = "%s [%d]" % (key.split("/")[-1].split(".")[0], i)
             img = bpy.data.images.get(name) or bpy.data.images.new(name, w, sh, alpha=True, float_buffer=stack.is_float)
+            img.alpha_mode = 'CHANNEL_PACKED'     # alpha is data, as in UE (see _image)
             # Blender's pixel rows run bottom up: slice 0 (the top) is the last rows
             top = h - (i + 1) * sh
             img.pixels[:] = px[top * w * 4:(top + sh) * w * 4]

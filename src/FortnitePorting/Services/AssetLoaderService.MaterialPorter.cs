@@ -10,7 +10,7 @@ using FortnitePorting.Models.Assets.Loading;
 namespace FortnitePorting.Services;
 
 /// <summary>Material Porter fork: Rocket Racing cars (their bodies), assembled with their wheels and paint;
-/// LEGO figures that are cooked baked.</summary>
+/// LEGO figures (cooked ones and recipes).</summary>
 public partial class AssetLoaderService
 {
     public AssetLoaderService()
@@ -34,8 +34,8 @@ public partial class AssetLoaderService
                 {
                     ClassNames = [Figures.ItemClass],
                     HideRarity = true,
-                    // a figure with no baked mesh is only its Mutable object, which isn't read yet
-                    HidePredicate = (_, asset, _) => UEParse.Provider is not { } provider || !Figures.HasBake(provider, asset),
+                    // cooked figures, and recipe figures (built from the shared Mutable object's body)
+                    HidePredicate = (_, asset, _) => UEParse.Provider is not { } provider || !Figures.HasFigure(provider, asset),
                     LowResIconHandler = asset => AssetLoader.GetLowResIcon(asset) ?? FigurePreview(asset, "SmallPreviewImage", "LargePreviewImage"),
                     HighResIconHandler = asset => AssetLoader.GetHighResIcon(asset) ?? FigurePreview(asset, "LargePreviewImage", "SmallPreviewImage"),
                     DisplayNameHandler = asset => BaseCharacter(asset)?.GetAnyOrDefault<FText?>("DisplayName", "ItemName")?.Text ?? asset.Name,
