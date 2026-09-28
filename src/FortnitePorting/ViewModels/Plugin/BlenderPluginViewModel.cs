@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
+using Serilog;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using FluentAvalonia.UI.Controls;
@@ -110,11 +111,20 @@ public partial class BlenderPluginViewModel : PluginInstallationViewModelBase<Bl
 
             if (TryGetBlenderProcess(installation.BlenderPath, out var blenderProcess))
             {
-                if (verbose)
+                // Material Porter fork: the plugin's files are updated all the same (an open Blender
+                // keeps what it loaded; upstream skipped them, so the next start still ran the old
+                // plugin, silently when the app synced at launch) and Blender is told to restart
+                if (installation.PluginDiffers())
                 {
+                    installation.Install(verbose: false);
+                    Log.Warning("[Material Porter] Blender plugin updated: restart Blender {Version} to load it", installation.BlenderVersion);
                     Info.Message("Blender Extension",
-                        $"Blender {installation.BlenderVersion} is currently open. Please close it and re-sync the installation.\nPath: {installation.BlenderPath}\nPID: {blenderProcess.Id}",
-                        InfoBarSeverity.Error, autoClose: false);
+                        $"The plugin was updated while Blender {installation.BlenderVersion} is open: restart Blender to load it.\nPID: {blenderProcess.Id}",
+                        InfoBarSeverity.Warning, autoClose: false);
+                }
+                else if (verbose)
+                {
+                    Info.Message("Blender Extension", $"Blender {installation.BlenderVersion} already has this plugin.");
                 }
 
                 continue;
