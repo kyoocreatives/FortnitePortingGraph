@@ -29,6 +29,16 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
 - **UEFN islands by map code.** Keys from the user's key tool live in Material
   Porter's `islands.json` (shared by both apps, never logged); the Map page
   lists islands for everyone and has an Unlock Island box.
+- **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
+  Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
+  Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the
+  export is the body (the decal's material when one is picked), the wheels
+  as children on its wheel sockets, and the values the car's Mutable program
+  gives each material (`Mutable.g.cs`), sent to Blender as a Vehicle.
+- **Faster world imports.** Exact materials of a world are laid out when a
+  node editor first shows them; FP's per-object metadata scan, active-object
+  switch and edit-mode Tris to Quads were replaced (a Hera cell 214 s to 89 s;
+  a 30,105-object island 190 s).
 - **No online account.** `SupabaseService` is inert (no client, no sign-in, no
   posted logins, exports or errors); the setup's sign-in step, the Online
   sidebar (Chat, Leaderboard) and the `fortniteporting://` registration are gone.
