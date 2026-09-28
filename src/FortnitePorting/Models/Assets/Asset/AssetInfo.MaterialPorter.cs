@@ -50,7 +50,12 @@ public partial class AssetInfo
                     previews.Add((data, channel.Options[o]));
                 }
                 if (datas.Count == 0) continue;
-                infos.Add(new AssetStyleInfo(channel.Name, datas) { SelectedStyleIndex = Math.Clamp(channel.Default, 0, datas.Count - 1) });
+                infos.Add(new AssetStyleInfo(channel.Name, datas)
+                {
+                    SelectedStyleIndex = Math.Clamp(channel.Default, 0, datas.Count - 1),
+                    // a long list (the wheel sets): a searchable tile grid
+                    IsPicker = datas.Count > 30,
+                });
             }
             await Dispatcher.UIThread.InvokeAsync(() =>
             {
