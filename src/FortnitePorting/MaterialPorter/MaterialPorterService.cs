@@ -294,10 +294,16 @@ public class MaterialPorterService : IService
                     ? $"{args.DisplayName} = {args.Object.GetPathName()}" : a.CreationData.DisplayName)
                 .OrderBy(n => n).ToList();
             var filter = query["filter"] ?? "";
+            // check=1 (LEGO): every listed figure's cooked mesh resolved, the ones without named
+            var failed = query["check"] != "1" ? [] : loader.Source.Items
+                .Select(a => (a.CreationData as Models.Assets.Asset.AssetItemCreationArgs)?.Object)
+                .Where(o => o is not null && Figures.BakedMeshes(Game.Provider, o).Count == 0)
+                .Select(o => o!.Name).ToList();
             return JToken.FromObject(new
             {
                 total = loader.TotalAssets, listed = names.Count, seconds = clock.Elapsed.TotalSeconds,
-                sample = names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(12)
+                sample = names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(12),
+                failed = failed.Count, failedSample = failed.Take(12)
             });
         }
         if (route == "fork-export-asset")

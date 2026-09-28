@@ -40,7 +40,7 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   as a skeletal mesh: the one its AssembledMeshSchema lists (`SkeletalMeshes`),
   or else the one in its figure's `Bake` folder beside its Mutable object
   (`Exporting/MaterialPorter/Figures.cs`). The export is that mesh with its
-  baked materials, built exact. 348 of 2,480 figures are cooked this way; the
+  baked materials, built exact. 347 of 2,480 figures are cooked this way; the
   rest exist only as Mutable objects, not read yet, and stay hidden.
 - **Faster world imports.** Exact materials of a world are laid out when a
   node editor first shows them; FP's per-object metadata scan, active-object
@@ -59,7 +59,7 @@ single-instance pipe/mutex `FortnitePortingMP`, Blender plugin installed as
 bridge on 24320. `FORTNITEPORTING_MP_PROFILE=test` runs a separate instance
 (own folders, lock, bridge 24322) for tests; its bridge's `/fork-export-world`
 and `/fork-export-asset` routes return a level's or an asset's export as the
-plugin receives it, `/fork-loader?type=` runs one Assets tab's loader.
+plugin receives it, `/fork-loader?type=` runs one Assets tab's loader (`check=1`: every listed figure's mesh resolved).
 With both plugins in one Blender, the fork's panels/operators replace
 upstream's same-named ones (Blender prints "registered before" infos).
 

@@ -144,8 +144,10 @@ public static class Figures
                 var slash = key.LastIndexOf('/');
                 if (slash < 5 || !key.AsSpan(0, slash).EndsWith("/Bake", StringComparison.OrdinalIgnoreCase)) continue;
                 var name = Path.GetFileNameWithoutExtension(key);
-                // the bake's materials and textures are named after the mesh: FigureBake_X_M_Figure_...
-                if (!name.Contains("FigureBake_", StringComparison.OrdinalIgnoreCase) || name.Contains("_M_", StringComparison.OrdinalIgnoreCase)) continue;
+                // the bake's materials and textures are named after the mesh: FigureBake_X_M_Figure_..., FigureBake_X_MI_...
+                // (some Bake folders hold only a material)
+                if (!name.Contains("FigureBake_", StringComparison.OrdinalIgnoreCase) || name.Contains("_M_", StringComparison.OrdinalIgnoreCase)
+                    || name.Contains("_MI_", StringComparison.OrdinalIgnoreCase)) continue;
                 var folder = key[..slash];
                 if (!bakes.TryGetValue(folder, out var list)) bakes[folder] = list = [];
                 list.Add(key[..^".uasset".Length]);
