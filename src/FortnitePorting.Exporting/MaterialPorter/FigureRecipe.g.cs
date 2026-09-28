@@ -239,8 +239,12 @@ public sealed class FigureRecipe
             var id = (face is null ? null : await ScalarAsync(provider, face, "Color Head ID"))
                      ?? (Ints.GetValueOrDefault("Head Standard Color") is { } std && std.Split('_') is { Length: > 1 } bits && int.TryParse(bits[1], out var n) ? n : 24);
             headPart.Textures["Tex Color-D"] = Grid("FigureHead", [(0, 0, 32, 32, Colour(id))]);
-            // character accents (a mustache, a beard) are placed by the face rig at run time
-            if (face is not null) await PlaceAccentsAsync(provider, face, headPart);
+            // an expression picked (the face rig's poses), and the character accents (a mustache, a
+            // beard) where the face rig places them for its mouth pose
+            foreach (var (k, v) in FaceScalars(FacePoses)) headPart.Scalars[k] = v;
+            if (face is not null)
+                foreach (var (k, v) in await AccentScalarsAsync(provider, SchemaPath ?? ConventionSchema(), face, FacePoses.TryGetValue("Mouth", out var mouth) ? mouth : null))
+                    headPart.Scalars[k] = v;
             parts.Add(headPart);
         }
 
@@ -300,6 +304,34 @@ public sealed class FigureRecipe
     /// </summary>
     public string? SchemaPath { get; set; }
 
+    string? ConventionSchema() => Instance.Split('/').FirstOrDefault(x => x.StartsWith("Figure_", StringComparison.OrdinalIgnoreCase)) is { } folder
+        ? $"/FigureCosmetics/AMS/AMS_{folder}.AMS_{folder}" : null;
+
+    /// <summary>
+    /// An expression: the face rig's pose of each feature ("Mouth", "Eyes", "Brows"), over the
+    /// face material's own. The rig's poses are its atlases' cells (DA_Figure_Face_Settings:
+    /// 46 mouths, 6 eyes, 12 brows).
+    /// </summary>
+    public Dictionary<string, int> FacePoses { get; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The face material's pose parameters for an expression's picks.</summary>
+    public static Dictionary<string, double> FaceScalars(IReadOnlyDictionary<string, int> poses)
+    {
+        var scalars = new Dictionary<string, double>();
+        foreach (var (feature, pose) in poses)
+        {
+            string[] names = feature.ToLowerInvariant() switch
+            {
+                "mouth" => ["MouthPose"],
+                "eyes" => ["EyeLeftPose", "EyeRightPose"],
+                "brows" => ["BrowLeftPose", "BrowRightPose"],
+                _ => [],
+            };
+            foreach (var name in names) scalars[name] = pose;
+        }
+        return scalars;
+    }
+
     /// <summary>Rig units (a registration's translation) to face UV units, fitted on the cooked figures' baked values.</summary>
     const double RigToFaceUv = 0.0413;
 
@@ -309,23 +341,24 @@ public sealed class FigureRecipe
     /// data gives that registration's transform and pose for each mouth pose. The accent sits at
     /// the mouth plus the transform's x/z in face UV (V = MouthV + z * 0.0413 matches the baked
     /// figures: -0.118 for a mustache's 1.993, -0.191 for a goatee's 0.215), unscaled.
+    /// The mouth pose is the face material's, or the one given (an expression picked).
+    /// Also for a cooked figure's face, whose baked values hold its own mouth pose's.
     /// </summary>
-    async Task PlaceAccentsAsync(IFileProvider provider, string face, Part head)
+    public static async Task<Dictionary<string, double>> AccentScalarsAsync(IFileProvider provider, string? schema, string face, int? mouthPose = null)
     {
-        var schema = SchemaPath ?? (Instance.Split('/').FirstOrDefault(x => x.StartsWith("Figure_", StringComparison.OrdinalIgnoreCase)) is { } folder
-            ? $"/FigureCosmetics/AMS/AMS_{folder}.AMS_{folder}" : null);
+        var scalars = new Dictionary<string, double>();
         var props = schema is null ? null : await PropertiesAsync(provider, schema);
         var maps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var data in props?["AdditionalData"] ?? new JArray())
         foreach (var kv in data["DataAssetMap"] ?? new JArray())
             if ((string?)kv["Key"] is { } key && ObjectPath(kv["Value"]) is { } path) maps[key] = path;
-        if (!maps.TryGetValue("CharacterAcc", out var accPath) || await PropertiesAsync(provider, accPath) is not { } acc) return;
+        if (!maps.TryGetValue("CharacterAcc", out var accPath) || await PropertiesAsync(provider, accPath) is not { } acc) return scalars;
         var registrations = (acc["Character Accent Registration"] as JArray)?.Select(x => (string?)x ?? "None").ToList() ?? [];
         var beard = maps.TryGetValue("BeardRegistration", out var beardPath) ? await PropertiesAsync(provider, beardPath) : null;
 
         var mouthU = await ScalarAsync(provider, face, "MouthU") ?? 0;
         var mouthV = await ScalarAsync(provider, face, "MouthV") ?? 0;
-        var mouthPose = (int)Math.Round(await ScalarAsync(provider, face, "MouthPose") ?? 0);
+        var pose = mouthPose ?? (int)Math.Round(await ScalarAsync(provider, face, "MouthPose") ?? 0);
         for (var i = 0; i < Math.Min(4, registrations.Count); i++)
         {
             var (transforms, poses) = registrations[i].ToLowerInvariant() switch
@@ -335,12 +368,13 @@ public sealed class FigureRecipe
                 _ => (null, null),
             };
             if (transforms is null || beard?[transforms] is not JArray list || list.Count == 0) continue;
-            var t = list[Math.Clamp(mouthPose, 0, list.Count - 1)]["Translation"];
+            var t = list[Math.Clamp(pose, 0, list.Count - 1)]["Translation"];
             var a = i + 1;
-            head.Scalars[$"CharacterAccent{a}U"] = mouthU + ((double?)t?["X"] ?? 0) * RigToFaceUv;
-            head.Scalars[$"CharacterAccent{a}V"] = mouthV + ((double?)t?["Z"] ?? 0) * RigToFaceUv;
-            if (beard[poses] is JArray p && p.Count > 0) head.Scalars[$"CharacterAccent{a}Pose"] = (double?)p[Math.Clamp(mouthPose, 0, p.Count - 1)] ?? 0;
+            scalars[$"CharacterAccent{a}U"] = mouthU + ((double?)t?["X"] ?? 0) * RigToFaceUv;
+            scalars[$"CharacterAccent{a}V"] = mouthV + ((double?)t?["Z"] ?? 0) * RigToFaceUv;
+            if (beard[poses] is JArray p && p.Count > 0) scalars[$"CharacterAccent{a}Pose"] = (double?)p[Math.Clamp(pose, 0, p.Count - 1)] ?? 0;
         }
+        return scalars;
     }
 
     /// <summary>An object's tagged properties as JSON, or null.</summary>

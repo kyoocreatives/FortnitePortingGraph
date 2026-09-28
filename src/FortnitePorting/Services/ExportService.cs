@@ -298,6 +298,8 @@ public class ExportService(
         {
             // Material Porter fork: a car channel's pick
             CarStyleData car => new Exporting.MaterialPorter.ExportCarStyle { Channel = car.Channel, Option = car.Option },
+            // Material Porter fork: a LEGO figure's expression pick
+            FigureFaceStyleData face => new Exporting.MaterialPorter.ExportFigureFaceStyle { Feature = face.Feature, Pose = face.Pose },
             AssetColorStyleData colorStyle => new ExportColorStyle
             {
                 StyleData = colorStyle.StyleData,

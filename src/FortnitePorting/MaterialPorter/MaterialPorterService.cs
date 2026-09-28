@@ -331,11 +331,14 @@ public class MaterialPorterService : IService
         }
         if (route == "fork-export-asset")
         {
-            // tests: FP's export of one asset (type=Car|Outfit|...; picks for a car) as the plugin receives it
+            // tests: FP's export of one asset (type=Car|Outfit|...; picks for a car, face=Mouth:12,Eyes:2 for a
+            // LEGO figure) as the plugin receives it
             var asset = await Game.Provider.LoadPackageObjectAsync(query["path"] ?? throw new ArgumentException("path missing"));
             var type = Enum.Parse<EExportType>(query["type"] ?? "Car");
             var carStyles = (query["picks"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))
                 .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportCarStyle { Channel = int.Parse(x[0]), Option = int.Parse(x[1]) })
+                .Concat((query["face"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))
+                    .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportFigureFaceStyle { Feature = x[0], Pose = int.Parse(x[1]) }))
                 .ToArray();
             using var assetMeta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
             var assetSession = new ExportSession(assetMeta);

@@ -279,8 +279,9 @@ public partial class ExportContext
     /// their baked materials; else its recipe (FigureRecipe): the shared Mutable object's
     /// body and the recipe's cooked parts, dressed with its materials, colours and decos.
     /// </summary>
-    public List<ExportMesh> MaterialPorterFigure(UObject item)
+    public List<ExportMesh> MaterialPorterFigure(UObject item, IReadOnlyDictionary<string, int>? face = null)
     {
+        face ??= new Dictionary<string, int>();
         var meshes = Figures.BakedMeshes(FileProvider, item);
         if (meshes.Count > 0)
         {
@@ -288,6 +289,7 @@ public partial class ExportContext
             // parts, the first one the body: the plugin merges them onto its armature
             var cooked = meshes.Select(m => Mesh<ExportPart>(m)).OfType<ExportPart>().ToList();
             for (var i = 0; i < cooked.Count; i++) cooked[i].Type = i == 0 ? EFortCustomPartType.Body : EFortCustomPartType.MiscOrTail;
+            if (face.Count > 0) FigureFace(item, cooked, face);
             return cooked.Cast<ExportMesh>().ToList();
         }
         if (Figures.RecipeInstance(FileProvider, item) is not { } instance)
@@ -297,6 +299,7 @@ public partial class ExportContext
         }
         var recipe = FigureRecipe.LoadAsync(FileProvider, instance).GetAwaiter().GetResult();
         if (recipe is null) return [];
+        foreach (var (feature, pose) in face) recipe.FacePoses[feature] = pose;
         var parts = recipe.PartsAsync(FileProvider).GetAwaiter().GetResult();
         Log.Information("[Material Porter] figure {Item}: recipe {Instance}, parts {Parts}", item.Name, instance, string.Join(", ", parts.Select(p => p.Name)));
 
@@ -339,6 +342,27 @@ public partial class ExportContext
             exports.Add(export);
         }
         return exports;
+    }
+
+    /// <summary>
+    /// A cooked figure's expression: its face material (the bake's RigDrivenFace instance) with the
+    /// picked poses, its character accents moved where the face rig puts them for the mouth picked.
+    /// </summary>
+    private void FigureFace(UObject item, List<ExportPart> parts, IReadOnlyDictionary<string, int> face)
+    {
+        var schema = Figures.Schema(item, FileProvider)?.GetPathName();
+        foreach (var part in parts)
+            for (var i = 0; i < part.Materials.Count; i++)
+            {
+                var material = part.Materials[i];
+                if (!material.Path.Contains("RigDrivenFace", StringComparison.OrdinalIgnoreCase)) continue;
+                var values = new ParamSet { Label = "expression" };
+                foreach (var (k, v) in FigureRecipe.FaceScalars(face)) values.Scalars[k] = v;
+                if (face.TryGetValue("Mouth", out var mouth))
+                    foreach (var (k, v) in FigureRecipe.AccentScalarsAsync(FileProvider, schema, material.Path, mouth).GetAwaiter().GetResult())
+                        values.Scalars[k] = v;
+                part.Materials[i] = new MaterialPorterMaterial(material) { MPValues = values, Hash = HashCode.Combine(material.Hash, values.Key()) };
+            }
     }
 
     /// <summary>A car part's slots: a decal's material where it goes, Mutable's values over each material they touch.</summary>

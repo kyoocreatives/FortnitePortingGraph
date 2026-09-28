@@ -40,6 +40,7 @@ public class MeshExport : BaseExport
     public ExportLightCollection Lights = new();
     public AnimExport? Animation;
     [Newtonsoft.Json.JsonIgnore] public Dictionary<int, int> CarPicks = [];
+    [Newtonsoft.Json.JsonIgnore] public Dictionary<string, int> FacePicks = [];
     
     public MeshExport(string name, UObject asset, ExportStyleBase[] styles, EExportType exportType, ExportDataMeta metaData, IExportFileMeta? fileMeta) : base(name, exportType, metaData)
     {
@@ -56,6 +57,8 @@ public class MeshExport : BaseExport
 
         // Material Porter fork: a car's style picks (channel -> option)
         CarPicks = styles.OfType<MaterialPorter.ExportCarStyle>().ToDictionary(s => s.Channel, s => s.Option);
+        // a LEGO figure's expression (feature -> rig pose)
+        FacePicks = styles.OfType<MaterialPorter.ExportFigureFaceStyle>().Where(s => s.Pose >= 0).ToDictionary(s => s.Feature, s => s.Pose);
         Export(asset, exportType);
 
         var assetStyles = styles.OfType<ExportStructStyle>();
@@ -568,8 +571,8 @@ public class MeshExport : BaseExport
             }
             case EExportType.LegoOutfit:
             {
-                // Material Porter fork: a LEGO figure as cooked baked (its Bake folder's mesh)
-                Meshes.AddRange(Context.MaterialPorterFigure(asset));
+                // Material Porter fork: a LEGO figure, cooked (its Bake folder's meshes) or from its recipe
+                Meshes.AddRange(Context.MaterialPorterFigure(asset, FacePicks));
                 break;
             }
             case EExportType.Vehicle:

@@ -67,6 +67,8 @@ public partial class AssetInfo : Base.BaseAssetInfo
 
         // Material Porter fork: a car's channels (tier, colours, decal, wheels), built in C#
         if (Asset.CreationData.ExportType is EExportType.Car) AddCarStyles();
+        // Material Porter fork: a LEGO figure's expression (the face rig's poses)
+        if (Asset.CreationData.ExportType is EExportType.LegoOutfit) AddFigureFaceStyles();
 
         if (Asset.CreationData.ExportType is EExportType.Emote)
         {
