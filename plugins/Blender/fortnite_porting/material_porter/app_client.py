@@ -11,6 +11,10 @@ class AppError(RuntimeError):
     pass
 
 
+CONNECT_TIMEOUT = 3.0     # seconds
+READ_TIMEOUT = 120.0      # a first texture may stream from Epic's CDN; past this the app is stuck
+
+
 def fetch_dir():
     """Where files fetched from the app are kept (Blender's own view of
     %LOCALAPPDATA%, so they last beyond the session)."""
@@ -35,7 +39,11 @@ class AppClient:
         for attempt in (0, 1):
             try:
                 if self._conn is None:
-                    self._conn = http.client.HTTPConnection(self._host, self._port, timeout=300)
+                    # a quick connect: an app that's there answers at once, a closed one
+                    # shouldn't hold the import; then long enough for a first texture
+                    self._conn = http.client.HTTPConnection(self._host, self._port, timeout=CONNECT_TIMEOUT)
+                    self._conn.connect()
+                    self._conn.sock.settimeout(READ_TIMEOUT)
                 self._conn.request("GET", target)
                 r = self._conn.getresponse()
                 body = r.read()
