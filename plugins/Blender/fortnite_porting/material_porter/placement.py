@@ -30,3 +30,15 @@ def after_import(mesh, obj, mesh_obj, scale):
         target["mp_pic"] = float(len(pic))
         for j, x in enumerate(pic):
             target["mp_pic%d" % j] = float(x)
+
+
+def after_world(objects):
+    """A world import's water surfaces measured: the depth under each
+    (Material Porter's water.bake_water), which their materials read."""
+    if bpy.app.version < (5, 0, 0):
+        return
+    try:
+        from .water import bake_water
+        bake_water(objects)
+    except Exception as e:
+        print("[Material Porter] water depth not measured (%s: %s)" % (type(e).__name__, e))

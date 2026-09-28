@@ -68,6 +68,10 @@ def register():
     drag_drop_op.register()
     ueformat_register()
 
+    # Material Porter fork: exact materials a world import left unarranged are laid out when shown
+    from .material_porter import build as material_porter_build
+    material_porter_build.ensure_layout_timer()
+
 
 def unregister():
     server.shutdown()

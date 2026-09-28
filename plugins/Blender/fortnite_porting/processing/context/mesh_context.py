@@ -41,8 +41,15 @@ class MeshImportContext:
             target_meshes = data.get("Meshes")
 
         self.meshes = target_meshes
+        # Material Porter fork: each mesh's index at hand (the log's `in` / index() were a scan per object)
+        self.mesh_index = {id(m): i for i, m in enumerate(target_meshes)}
         for mesh in target_meshes:
             self.import_model(mesh, can_spawn_at_3d_cursor=True)
+
+        # Material Porter fork: the depth under water surfaces, which their exact materials read
+        if self.type in [EExportType.WORLD, EExportType.PREFAB]:
+            from ...material_porter.placement import after_world
+            after_world(self.collection.all_objects)
 
         self.import_light_data(data.get("Lights"))
                 
@@ -139,8 +146,8 @@ class MeshImportContext:
                 
             return
         
-        if self.type in [EExportType.PREFAB, EExportType.WORLD] and mesh in self.meshes:
-            Log.info(f"Importing Actor: {name} {self.meshes.index(mesh)} / {len(self.meshes)}")
+        if self.type in [EExportType.PREFAB, EExportType.WORLD] and (index := getattr(self, "mesh_index", {}).get(id(mesh))) is not None:
+            Log.info(f"Importing Actor: {name} {index} / {len(self.meshes)}")
 
         mesh_name = path.split(".")[1]
         if self.type in [EExportType.PREFAB, EExportType.WORLD] and (existing_mesh_data := bpy.data.meshes.get(mesh_name + "_LOD0")):
@@ -158,11 +165,16 @@ class MeshImportContext:
             imported_mesh = get_armature_mesh(imported_object)
 
             if EPolygonType(self.options.get("PolygonType")) == EPolygonType.QUADS and imported_mesh is not None:
-                bpy.context.view_layer.objects.active = imported_mesh
-                bpy.ops.object.mode_set(mode='EDIT')
-                bpy.ops.mesh.tris_convert_to_quads(uvs=True)
-                bpy.ops.object.mode_set(mode='OBJECT')
-                bpy.context.view_layer.objects.active = imported_object
+                # Material Porter fork: Tris to Quads (its defaults, UVs compared) on the mesh data, no mode switches
+                import bmesh
+                bm = bmesh.new()
+                bm.from_mesh(imported_mesh.data)
+                bmesh.ops.join_triangles(bm, faces=bm.faces[:], cmp_seam=False, cmp_sharp=False, cmp_uvs=True,
+                                         cmp_vcols=False, cmp_materials=False,
+                                         angle_face_threshold=radians(40), angle_shape_threshold=radians(40))
+                bm.to_mesh(imported_mesh.data)
+                bm.free()
+                imported_mesh.data.update()
 
         if (override_vertex_colors := mesh.get("OverrideVertexColors")) and len(override_vertex_colors) > 0:
             imported_mesh.data = imported_mesh.data.copy()
@@ -224,8 +236,9 @@ class MeshImportContext:
         # metadata handling
         meta = self.gather_metadata("PoseAsset")
 
-        # pose asset
-        if imported_mesh is not None:
+        # pose asset (Material Porter fork: not for a world's meshes - making each one active
+        # resynced the view layer per object, slower with every object already placed)
+        if imported_mesh is not None and self.type not in [EExportType.WORLD, EExportType.PREFAB]:
             bpy.context.view_layer.objects.active = imported_mesh
             self.import_pose_asset_data(meta, get_selected_armature(), part_type)
 

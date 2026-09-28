@@ -133,6 +133,8 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
         for kind, values in overlay.items():
             entry[kind] = dict(entry.get(kind) or {}, **values)
         entry["variant"] = hashlib.sha1(json.dumps(overlay, sort_keys=True).encode("utf-8")).hexdigest()[:8]
+    # a world's hundreds of materials: each tree laid out when a node editor first shows it
+    build.LAZY_LAYOUT = getattr(getattr(context, "type", None), "name", "") in ("WORLD", "PREFAB")
     try:
         mat = _material(job, entry, obj)
     except Exception as e:
@@ -140,6 +142,8 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
         _log("%s: not built (%s: %s, at %s:%d) - FP's own material" % (
             material_data.get("Name"), type(e).__name__, e, os.path.basename(at.filename), at.lineno))
         return None
+    finally:
+        build.LAZY_LAYOUT = False
     for note in job["notes"]:
         _log(note)
     job["notes"].clear()

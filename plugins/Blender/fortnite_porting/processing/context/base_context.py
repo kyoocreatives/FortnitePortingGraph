@@ -55,6 +55,12 @@ class BaseImportContext:
         ensure_blend_data()
 
     def gather_metadata(self, *search_props):
+        # Material Porter fork: the meshes' metadata doesn't change during an import: read once per
+        # search (a scan of every mesh for every object was quadratic on big worlds); a copy each time
+        memo = self.__dict__.setdefault("_metadata_memo", {})
+        key = (id(self.meshes), search_props)
+        if key in memo:
+            return dict(memo[key])
         out_props = {}
         for mesh in self.meshes:
             meta = mesh.get("Meta")
@@ -71,6 +77,7 @@ class BaseImportContext:
                                      "which will be ignored")
                         continue
                     out_props[found_key] = meta.get(found_key)
+        memo[key] = dict(out_props)
         return out_props
 
     def get_metadata(self, search_prop):
