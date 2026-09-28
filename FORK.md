@@ -35,6 +35,13 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   export is the body (the decal's material when one is picked), the wheels
   as children on its wheel sockets, and the values the car's Mutable program
   gives each material (`Mutable.g.cs`), sent to Blender as a Vehicle.
+- **LEGO figures (cooked bakes).** Assets > Lego > Outfits lists the LEGO
+  outfits (`JunoAthenaCharacterItemOverrideDefinition`) whose figure is cooked
+  as a skeletal mesh: the one its AssembledMeshSchema lists (`SkeletalMeshes`),
+  or else the one in its figure's `Bake` folder beside its Mutable object
+  (`Exporting/MaterialPorter/Figures.cs`). The export is that mesh with its
+  baked materials, built exact. 348 of 2,480 figures are cooked this way; the
+  rest exist only as Mutable objects, not read yet, and stay hidden.
 - **Faster world imports.** Exact materials of a world are laid out when a
   node editor first shows them; FP's per-object metadata scan, active-object
   switch and edit-mode Tris to Quads were replaced (a Hera cell 214 s to 89 s;
@@ -51,7 +58,8 @@ single-instance pipe/mutex `FortnitePortingMP`, Blender plugin installed as
 `scripts/startup/fortnite_porting_mp`, listening on port 40010 (upstream 40000),
 bridge on 24320. `FORTNITEPORTING_MP_PROFILE=test` runs a separate instance
 (own folders, lock, bridge 24322) for tests; its bridge's `/fork-export-world`
-route returns one level's export as the plugin receives it.
+and `/fork-export-asset` routes return a level's or an asset's export as the
+plugin receives it, `/fork-loader?type=` runs one Assets tab's loader.
 With both plugins in one Blender, the fork's panels/operators replace
 upstream's same-named ones (Blender prints "registered before" infos).
 

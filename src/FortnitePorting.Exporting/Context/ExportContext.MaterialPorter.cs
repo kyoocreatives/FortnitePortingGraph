@@ -272,6 +272,20 @@ public partial class ExportContext
         return [export];
     }
 
+    /// <summary>A LEGO figure as cooked: its schema's skeletal meshes (or its Bake folder's), with their baked materials.</summary>
+    public List<ExportMesh> MaterialPorterFigure(UObject item)
+    {
+        var meshes = Figures.BakedMeshes(FileProvider, item);
+        if (meshes.Count == 0)
+        {
+            Log.Warning("[Material Porter] figure {Item}: no cooked mesh (only its Mutable object, not read yet): {Trace}",
+                item.Name, Figures.Trace(FileProvider, item));
+            return [];
+        }
+        Log.Information("[Material Porter] figure {Item}: {Meshes}", item.Name, string.Join(", ", meshes.Select(m => m.Name)));
+        return meshes.Select(m => Mesh(m)).OfType<ExportMesh>().ToList();
+    }
+
     /// <summary>A car part's slots: a decal's material where it goes, Mutable's values over each material they touch.</summary>
     private void CarMaterials(ExportMesh mesh, CarPlan plan, Dictionary<int, string>? overrides)
     {

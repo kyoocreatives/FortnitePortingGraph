@@ -284,6 +284,22 @@ public class MaterialPorterService : IService
                 @params = plan.Params.ToDictionary(kv => kv.Key, kv => new { kv.Value.Vectors, kv.Value.Scalars }),
             };
         }
+        if (route == "fork-loader")
+        {
+            // tests: run one asset tab's loader as the Assets page does, and say what it lists
+            var loader = AppServices.AssetLoading.Get(Enum.Parse<EExportType>(query["type"] ?? "LegoOutfit"));
+            var clock = Stopwatch.StartNew();
+            await loader.Load();
+            var names = loader.Source.Items.Select(a => a.CreationData is Models.Assets.Asset.AssetItemCreationArgs args
+                    ? $"{args.DisplayName} = {args.Object.GetPathName()}" : a.CreationData.DisplayName)
+                .OrderBy(n => n).ToList();
+            var filter = query["filter"] ?? "";
+            return JToken.FromObject(new
+            {
+                total = loader.TotalAssets, listed = names.Count, seconds = clock.Elapsed.TotalSeconds,
+                sample = names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(12)
+            });
+        }
         if (route == "fork-export-asset")
         {
             // tests: FP's export of one asset (type=Car|Outfit|...; picks for a car) as the plugin receives it

@@ -566,6 +566,12 @@ public class MeshExport : BaseExport
                 Type = EExportType.Vehicle;     // the plugins import it as a vehicle
                 break;
             }
+            case EExportType.LegoOutfit:
+            {
+                // Material Porter fork: a LEGO figure as cooked baked (its Bake folder's mesh)
+                Meshes.AddRange(Context.MaterialPorterFigure(asset));
+                break;
+            }
             case EExportType.Vehicle:
             {
                 var blueprint = asset.Get<UBlueprintGeneratedClass>("VehicleActorClass");
