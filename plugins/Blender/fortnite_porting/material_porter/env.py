@@ -146,13 +146,17 @@ class MaterialEnv:
         self.note("sky atmosphere read as a flat sky colour")
         return self.tr.const((0.4, 0.5, 0.7), 3)
 
+    # the game's clock is never near zero: what a material times from a moment (a hit's
+    # flash, a spawn's fade: GameTime + the hit time, against Time) is over, as at rest
+    TIME_OFFSET = 100.0
+
     def time(self):
         def make():
             with self.tr.at("Parameters"):
                 n = self.tr.node("ShaderNodeValue", "Time (s)")
             d = n.outputs[0].driver_add("default_value").driver
             d.type = 'SCRIPTED'
-            d.expression = "frame / %g" % (bpy.context.scene.render.fps / bpy.context.scene.render.fps_base)
+            d.expression = "frame / %g + %g" % (bpy.context.scene.render.fps / bpy.context.scene.render.fps_base, self.TIME_OFFSET)
             return Val(n.outputs[0], 1)
         return self.once("time", make)
 
@@ -507,6 +511,11 @@ class MaterialEnv:
         if normal:
             self.tex_normal.add(key)
         return self._image(key, self._record(key), "normal" if normal else None)
+
+    def texture_nearest(self, key):
+        """Whether UE samples the texture unfiltered (the app's record: its Filter TF_Nearest)."""
+        rec = self._record(key)
+        return bool(rec and rec.get("Nearest"))
 
     def cube(self, key):
         self.reusable = False

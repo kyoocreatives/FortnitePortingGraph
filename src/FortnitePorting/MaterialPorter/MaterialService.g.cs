@@ -75,6 +75,8 @@ public sealed class TextureFile
     public string Kind { get; set; } = "2d";
     public int Depth { get; set; } = 1;
     public bool Hdr { get; set; }
+    /// <summary>Sampled unfiltered (its Filter TF_Nearest, or the Pixels2D group): a LUT, a pixel grid.</summary>
+    public bool Nearest { get; set; }
 }
 
 public sealed class MaterialService
@@ -449,6 +451,7 @@ public sealed class MaterialService
                 if (rec?.Version == TextureCacheVersion && rec.Texture != null && File.Exists(rec.Texture.File) && rec.Texture.Width >= full)
                 {
                     Timing.Log($"texture {Bridge.ShortName(path)} (cached)", sw);
+                    rec.Texture.Nearest = Nearest(tex);
                     return rec.Texture;
                 }
             }
@@ -465,7 +468,7 @@ public sealed class MaterialService
                 {
                     var file = stem + ".dds";
                     WriteDds(file, mip.SizeX, mip.SizeY, dxgi, bytes);
-                    var rec = new TextureFile { File = file, Srgb = tex.SRGB, Width = mip.SizeX, Height = mip.SizeY };
+                    var rec = new TextureFile { File = file, Srgb = tex.SRGB, Width = mip.SizeX, Height = mip.SizeY, Nearest = Nearest(tex) };
                     await File.WriteAllTextAsync(meta, JsonConvert.SerializeObject(new CachedTexture { Version = TextureCacheVersion, Texture = rec }));
                     Timing.Log($"texture {Bridge.ShortName(path)} {mip.SizeX}x{mip.SizeY} {pd.PixelFormat} as DDS", sw);
                     return rec;
@@ -496,7 +499,7 @@ public sealed class MaterialService
             var result = new TextureFile
             {
                 File = file, Srgb = tex.SRGB, Width = ct.Width, Height = ct.Height, Kind = kind, Depth = depth,
-                Hdr = ext == "hdr",
+                Hdr = ext == "hdr", Nearest = Nearest(tex),
             };
             await File.WriteAllTextAsync(meta, JsonConvert.SerializeObject(new CachedTexture { Version = TextureCacheVersion, Texture = result }));
             Timing.Log($"texture {Bridge.ShortName(path)} {ct.Width}x{ct.Height} {ct.PixelFormat}: load {tLoad:0} decode {tDecode - tLoad:0} encode {tEncode - tDecode:0} ({data.Length / 1024} KB)", sw);
@@ -504,6 +507,15 @@ public sealed class MaterialService
         }
         finally { encoders.Release(); }
     }
+
+    /// <summary>
+    /// Whether UE samples a texture unfiltered: its Filter set to TF_Nearest (CUE4Parse's
+    /// UTexture.Filter says TF_Nearest when the property isn't stored, where UE's default is
+    /// TF_Default, so only the stored property counts), or TEXTUREGROUP_Pixels2D.
+    /// </summary>
+    static bool Nearest(UTexture tex) =>
+        tex.Properties.FirstOrDefault(p => p.Name.Text == "Filter")?.Tag?.GenericValue?.ToString()?.EndsWith("TF_Nearest", StringComparison.Ordinal) == true
+        || tex.LODGroup == global::CUE4Parse.UE4.Assets.Exports.Texture.TextureGroup.TEXTUREGROUP_Pixels2D;
 
     sealed class CachedTexture
     {

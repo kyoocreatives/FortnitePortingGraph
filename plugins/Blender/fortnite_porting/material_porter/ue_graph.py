@@ -92,6 +92,8 @@ geometry, camera), so an env only defines what it knows better:
     env.dynamic_parameter(index)      -> Val (4) or None
     env.texture_slices(name, sampler) -> [bpy.types.Image] a texture array
     env.texture_parameter(pname, default) -> the texture a parameter holds
+    env.texture_nearest(name)         -> bool      the texture samples unfiltered (its Filter
+                                                   TF_Nearest: a LUT, a pixel grid)
     env.primitive_index()             -> Val (1)
     env.water_depth()                 -> Val (1)   UE cm from a water surface down to the
                                                    ground (the water info texture's heights)
@@ -1403,7 +1405,10 @@ class Translator:
                 return self.sample_cube(tname, coords if coords is not None else self.reflection(), out)
             if coords is None:
                 coords = env.uv(0)
-            return self.sample(tname, coords, out, p.get("SamplerType", ""))
+            # its own sampler (the default source) filters as the texture says; a shared
+            # sampler (world group settings) as its group does
+            own = str(p.get("SamplerSource", "")).split("::")[-1] in ("", "SSM_FromTextureAsset")
+            return self.sample(tname, coords, out, p.get("SamplerType", ""), own)
         if t == "Convert":
             # UE 5's component shuffle: typed outputs, filled from input
             # components by explicit mappings, defaults elsewhere
@@ -3162,11 +3167,13 @@ class Translator:
             return alpha
         return self.mask(rgb, [out - 1])
 
-    def sample_node(self, tname, coords, sampler, img=None):
-        """An image node reading a 2D texture at UE UVs."""
+    def sample_node(self, tname, coords, sampler, img=None, own=True):
+        """An image node reading a 2D texture at UE UVs (unfiltered when the texture
+        is, read through its own sampler: a LUT sampled at a texel's centre stays exact)."""
         if img is None:
             img = self.env.texture(tname, sampler)
-        n = self.node("ShaderNodeTexImage", short_name(tname), interpolation='Linear', extension='REPEAT')
+        nearest = own and self._hook("texture_nearest", lambda: False, tname)
+        n = self.node("ShaderNodeTexImage", short_name(tname), interpolation='Closest' if nearest else 'Linear', extension='REPEAT')
         n.image = img
         if getattr(tname, "param", None):
             n["mp_tex_param"] = tname.param     # which parameter's texture this is (another instance swaps it)
@@ -3186,8 +3193,8 @@ class Translator:
         z = self.math('SQRT', self.saturate(self.binop('SUBTRACT', self.const(1.0), d)))
         return self.combine([x, y, z]), self.const(1.0)
 
-    def sample(self, tname, coords, out, sampler):
-        n = self.sample_node(tname, coords, sampler)
+    def sample(self, tname, coords, out, sampler, own=True):
+        n = self.sample_node(tname, coords, sampler, own=own)
         if "Normal" in (sampler or ""):
             return self.rgba_out(*self.unpack_normal(Val(n.outputs["Color"], 3)), out)
         rgb = Val(n.outputs["Color"], 3)
