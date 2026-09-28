@@ -25,9 +25,14 @@ public partial class SupabaseService : ObservableObject, IService
 {
     [ObservableProperty] private APIService _api;
 
+    // Material Porter fork: online accounts are stripped. The client is never created, nobody signs in,
+    // and nothing is posted (logins, exported paths, errors); features that need an account stay off.
+    public const bool Disabled = true;
+
     public SupabaseService(APIService api)
     {
         Api = api;
+        if (Disabled) return;
         
         TaskService.Run(async () =>
         {
@@ -91,6 +96,7 @@ public partial class SupabaseService : ObservableObject, IService
 
     public async Task SetSession(UserSessionInfo sessionInfo)
     {
+        if (Disabled) return;
         try
         {
             if (await Client.Auth.SetSession(sessionInfo.AccessToken, sessionInfo.RefreshToken) is { } session)
@@ -121,6 +127,7 @@ public partial class SupabaseService : ObservableObject, IService
 
     public async Task SignIn()
     {
+        if (Disabled) return;
         _currentAuthState = await Client.Auth.SignIn(Constants.Provider.Discord, new SignInOptions
         {
             FlowType = Constants.OAuthFlowType.PKCE,
@@ -147,11 +154,12 @@ public partial class SupabaseService : ObservableObject, IService
         UserInfo = null;
         IsLoggedIn = false;
         
-        await Client.Auth.SignOut();
+        if (Client is not null) await Client.Auth.SignOut();
     }
 
     public async Task ExchangeCode(string code)
     {
+        if (Disabled) return;
         var session = await Client.Auth.ExchangeCodeForSession(_currentAuthState!.PKCEVerifier!, code);
         if (session is null)
         {
@@ -161,6 +169,7 @@ public partial class SupabaseService : ObservableObject, IService
 
     public async Task PostExports(IEnumerable<string> objectPaths)
     {
+        if (Disabled) return;
         await Api.FortnitePorting.PostExports(objectPaths);
     }
 
@@ -211,7 +220,7 @@ public partial class SupabaseService : ObservableObject, IService
 
     public async Task<UserInfoResponse?> GetUserAsync(string? id)
     {
-        if (id is null) return null;
+        if (Disabled || id is null) return null;
         if (_userInfoCache.TryGetValue(id, out var cached)) return cached;
 
         var userInfo = await Api.FortnitePorting.UserInfo(id);

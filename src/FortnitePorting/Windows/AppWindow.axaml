@@ -86,16 +86,6 @@
 
                         <sidebar:SidebarItemSeparator />
 
-                        <sidebar:SidebarItemText Text="Online" />
-                        <sidebar:SidebarItemButton Text="Chat" Icon="Message" Tag="{x:Type views:ChatView}"
-                                                   IsEnabled="{Binding SupaBase.IsLoggedIn}"
-                                                   NotificationCount="{Binding Chat.UnseenMessageCount}"/>
-                        <sidebar:SidebarItemButton Text="Leaderboard" Icon="Trophy"
-                                                   Tag="{x:Type views:LeaderboardView}"
-                                                   IsEnabled="{Binding SupaBase.IsLoggedIn}"/>
-
-                        <sidebar:SidebarItemSeparator />
-
                         <sidebar:SidebarItemText Text="Settings" />
                         <sidebar:SidebarItemButton Text="Plugin" Icon="Plug" Tag="{x:Type views:PluginView}" />
                         <sidebar:SidebarItemButton Text="Export Options" Icon="FileCog"
