@@ -10,7 +10,7 @@ using FortnitePorting.Models.Assets.Loading;
 namespace FortnitePorting.Services;
 
 /// <summary>Material Porter fork: Rocket Racing cars (their bodies), assembled with their wheels and paint;
-/// LEGO figures (cooked ones and recipes), their emotes, building props and sets.</summary>
+/// LEGO figures (cooked ones and recipes), their emotes, building props and sets, creatures.</summary>
 public partial class AssetLoaderService
 {
     public AssetLoaderService()
@@ -57,9 +57,26 @@ public partial class AssetLoaderService
                     ClassNames = [..Figures.PropClasses],
                     HideRarity = true,
                     HidePredicate = (_, asset, _) => UEParse.Provider is not { } provider || !Figures.HasPropActor(provider, asset),
+                },
+                // creatures: each look of each species (its meshes from the LEGO Fortnite install)
+                new AssetLoader(EExportType.LegoWildlife)
+                {
+                    ClassNames = [Figures.CreatureClass],
+                    HideRarity = true,
+                    HidePredicate = (_, asset, _) => !Figures.IsCreature(asset) || UEParse.Provider is not { } provider || !Figures.HasCreatureMesh(provider, asset),
+                    DisplayNameHandler = asset => CreatureName(asset.Name),
+                    DescriptionHandler = _ => "",
                 }
             ]
         });
+    }
+
+    /// <summary>A creature look's name from its asset's (Juno_Cow_Highlands_LightBrown -> Cow Highlands LightBrown).</summary>
+    private static string CreatureName(string asset)
+    {
+        var name = asset.StartsWith("Juno_", StringComparison.OrdinalIgnoreCase) ? asset[5..] : asset;
+        if (name.EndsWith("_Customization", StringComparison.OrdinalIgnoreCase)) name = name[..^"_Customization".Length];
+        return name.Replace('_', ' ');
     }
 
     /// <summary>The Battle Royale outfit a LEGO figure stands for.</summary>

@@ -343,6 +343,44 @@ public partial class ExportContext
     }
 
     /// <summary>
+    /// A LEGO creature: its schema's skeletal meshes as parts (the first the body, whose armature takes
+    /// the others), each material with the textures the schema puts on it (its colour LUT); or its one
+    /// skeletal mesh with its override materials.
+    /// </summary>
+    public List<ExportMesh> MaterialPorterCreature(UObject item)
+    {
+        var meshes = Figures.BakedMeshes(FileProvider, item);
+        var single = false;
+        if (meshes.Count == 0 && item.GetOrDefault<USkeletalMesh?>("SkeletalMesh") is { } mesh)
+        {
+            meshes = [mesh];
+            single = true;
+        }
+        var parts = meshes.Select(m => Mesh<ExportPart>(m)).OfType<ExportPart>().ToList();
+        for (var i = 0; i < parts.Count; i++) parts[i].Type = i == 0 ? EFortCustomPartType.Body : EFortCustomPartType.MiscOrTail;
+        if (single && parts.Count == 1)
+        {
+            var overrides = item.GetOrDefault("OverrideMaterials", Array.Empty<FStructFallback>());
+            for (var slot = 0; slot < overrides.Length; slot++)
+                if (overrides[slot].GetOrDefault<UMaterialInterface?>("Material") is { } mi && Material(mi, slot) is { } material)
+                    parts[0].OverrideMaterials.Add(material with { Slot = slot });
+        }
+        var textures = Figures.SchemaTextures(FileProvider, item);
+        Log.Information("[Material Porter] creature {Item}: {Meshes}, textures {Textures}", item.Name,
+            string.Join(", ", parts.Select(p => p.Name)), string.Join(", ", textures.Select(kv => $"{kv.Key}={kv.Value}")));
+        if (textures.Count == 0) return parts.Cast<ExportMesh>().ToList();
+        var values = new ParamSet { Label = item.Name };
+        foreach (var (param, texture) in textures) values.Textures[param] = texture;
+        foreach (var part in parts)
+            for (var i = 0; i < part.Materials.Count; i++)
+                part.Materials[i] = new MaterialPorterMaterial(part.Materials[i])
+                {
+                    MPValues = values, Hash = HashCode.Combine(part.Materials[i].Hash, values.Key()),
+                };
+        return parts.Cast<ExportMesh>().ToList();
+    }
+
+    /// <summary>
     /// A cooked figure's face (its instance of M_Figure_RigDrivenFace): the expression picked (its poses,
     /// its character accents moved where the face rig puts them for the mouth picked), and where the
     /// rig puts those accents for every mouth pose, for an emote that animates the face.

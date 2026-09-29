@@ -75,9 +75,13 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   the reference pose (a face's print masks would slide as the figure sits).
 - **LEGO props.** Assets > Lego > Props: building props and building sets
   (`JunoBuilding{Prop,Set}AccountItemDefinition`), the meshes of the actor each previews.
-  LEGO wildlife isn't there: the creatures' packages (and most LEGO gameplay content) are in
-  pakchunk60, an optional download (install tag GFP_JunoRoot, about 9 GiB) that Fortnite
-  installs only for LEGO Fortnite; items whose actor isn't installed are hidden.
+  Items whose actor isn't installed are hidden: most LEGO gameplay content is pakchunk60, an
+  optional download (install tag GFP_JunoRoot, about 9 GiB) Fortnite installs for LEGO Fortnite.
+- **LEGO wildlife.** Assets > Lego > Wildlife: each look of each creature (the pawn
+  customizations under /JunoCreature_*, when the LEGO Fortnite content is installed). A look is
+  either an AssembledMeshSchema - its skeletal meshes (body, head) as parts on one armature, the
+  textures it puts on their materials (its colour LUT) as material values - or one skeletal mesh
+  with override materials by slot.
   Their colour is a vertex colour's index into the LEGO LUT: exact since the translator
   samples a TF_Nearest texture Closest and its Time starts at 100 s (a building piece's
   damage flash, timed from a hit, was full red at Time 0).

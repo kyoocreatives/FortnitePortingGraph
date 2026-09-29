@@ -22,6 +22,32 @@ public static class Figures
     public const string ItemClass = "JunoAthenaCharacterItemOverrideDefinition";
     /// <summary>A LEGO emote: its Battle Royale emote and the figure's montage ("Animation").</summary>
     public const string EmoteClass = "JunoAthenaDanceItemOverrideDefinition";
+    /// <summary>
+    /// A LEGO creature's look (a pawn customization under /JunoCreature_*): either an AssembledMeshSchema
+    /// listing its skeletal meshes (body, head) and the textures it puts on their materials (its colour
+    /// LUT), or one SkeletalMesh with OverrideMaterials by slot.
+    /// </summary>
+    public const string CreatureClass = "FortAIPawnCustomizationDefinition";
+
+    public static bool IsCreature(UObject item) => item.GetPathName().StartsWith("/JunoCreature", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>Whether a creature's meshes are installed (much of LEGO Fortnite is an optional download).</summary>
+    public static bool HasCreatureMesh(IFileProvider provider, UObject item) =>
+        HasBake(provider, item)
+        || item.TryGetValue(out FSoftObjectPath mesh, "SkeletalMesh") && mesh.AssetPathName.Text is { Length: > 0 } path && path != "None"
+           && provider.TryGetGameFile(path[..path.LastIndexOf('.')] + ".uasset", out _);
+
+    /// <summary>The textures a figure's or creature's schema puts on its meshes' materials (parameter -> texture path).</summary>
+    public static Dictionary<string, string> SchemaTextures(IFileProvider provider, UObject item)
+    {
+        var textures = new Dictionary<string, string>();
+        foreach (var entry in Schema(item, provider)?.GetOrDefault("OverrideTextures", Array.Empty<FStructFallback>()) ?? [])
+            if (entry.GetOrDefault<FName>("ParamName") is { IsNone: false } param
+                && entry.GetOrDefault<FSoftObjectPath>("Texture").AssetPathName.Text is { Length: > 0 } texture && texture != "None")
+                textures[param.Text] = texture;
+        return textures;
+    }
+
     /// <summary>LEGO building props and building sets: an actor class of meshes ("BuildingActorClassToPreview").</summary>
     public static readonly string[] PropClasses = ["JunoBuildingPropAccountItemDefinition", "JunoBuildingSetAccountItemDefinition"];
 

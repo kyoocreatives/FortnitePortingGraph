@@ -569,6 +569,12 @@ public class MeshExport : BaseExport
                 Type = EExportType.Vehicle;     // the plugins import it as a vehicle
                 break;
             }
+            case EExportType.LegoWildlife:
+            {
+                // Material Porter fork: a LEGO creature's meshes, their materials in its colours
+                Meshes.AddRange(Context.MaterialPorterCreature(asset));
+                break;
+            }
             case EExportType.LegoProp:
             {
                 // Material Porter fork: a LEGO building prop or set, the meshes of the actor its item previews
