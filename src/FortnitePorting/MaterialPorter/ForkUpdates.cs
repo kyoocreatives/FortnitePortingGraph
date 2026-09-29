@@ -15,7 +15,7 @@ namespace FortnitePorting.MaterialPorter;
 /// </summary>
 public static class ForkUpdates
 {
-    public const string Repository = "kyoocreatives/FortnitePortingGraph";
+    public const string Repository = "kyoocreatives/FortnitePortingMaterialPorter";
 
     public static async Task CheckAsync(InfoService info, AppService app)
     {
