@@ -14,7 +14,7 @@ import traceback
 
 import bpy
 
-from . import build
+from . import build, fallback
 from .app_client import AppClient, AppError
 from ..logger import Log
 
@@ -70,9 +70,11 @@ def _overlay(texture_data, override_parameters, values=None):
 
 
 def _built(path, variant):
+    # a fallback (an island's material, no graph) an older fallback builder made is built again
     return next((m for m in bpy.data.materials if m.get(build.KEY_PATH) == path
                  and m.get(build.KEY_VARIANT, "") == variant and build.KEY_REPLACES not in m
-                 and m.get(build.KEY_REV, 1) >= build.BUILD_REVISION), None)
+                 and m.get(build.KEY_REV, 1) >= build.BUILD_REVISION
+                 and m.get("mp_fallback", fallback.REVISION) >= fallback.REVISION), None)
 
 
 def _material(job, entry, obj):

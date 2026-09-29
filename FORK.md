@@ -46,7 +46,17 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   - *Fix FP Materials* (every build): FP's shader materials get the textures FP
     left in "Unused Textures" (BC / ORM / RMA / SRM / Unity masks, split
     roughness and metallic), foliage alpha, wrong links removed and colour
-    spaces set; only empty inputs are filled. *Preview Only* just reports.
+    spaces set; only empty inputs are filled. The fork's own island materials
+    (no graph to translate: `material_porter/fallback.py` builds them from the
+    cooked textures and values, `mp_fallback` = its revision) that an older
+    builder made are built again (with the app open) and take their slots.
+    *Preview Only* just reports.
+  - The fallback builder follows the FP Material Fixer's rules: a texture's role
+    from its name first (T_X_BC, a bare "BaseColor", "..._OcclusionRoughnessMetallic",
+    a Unity MaskMap), then its parameter's (islands name theirs "Param", "Param_1");
+    a lone unnamed texture is the base colour; the first base colour parameter
+    (Color, MainColor, Param...), one brighter than 1 as a glow, a "Black"
+    material black, a light's colour as emission, glass see-through.
   - *Recover Island Textures* (the owner's builds: shown only where the app's
     `fork-caps` says islands are on, and its routes refuse otherwise): a UEFN
     map's FP materials with no base colour. Where fpisland ran its own

@@ -5,6 +5,7 @@ builds, which read islands) gets a UEFN map's missing textures and flat colours 
 Both take the whole file's materials or only the selected objects'.
 """
 import time
+import types
 
 import bpy
 from bpy.props import BoolProperty, EnumProperty, FloatProperty, PointerProperty, StringProperty
@@ -84,21 +85,80 @@ class FPMP_FixerProps(bpy.types.PropertyGroup):
     progress: FloatProperty(default=0.0, min=0.0, max=1.0, subtype='FACTOR')
 
 
+def scope_objects(context, scope):
+    """The objects whose slots a fix may change: every one, or the selected (and their collection instances')."""
+    if scope == 'ALL':
+        return list(bpy.data.objects)
+    objs, seen = [], set()
+
+    def add(o):
+        if o.name in seen:
+            return
+        seen.add(o.name)
+        objs.append(o)
+        if o.instance_type == 'COLLECTION' and o.instance_collection:
+            for co in o.instance_collection.all_objects:
+                add(co)
+
+    for o in context.selected_objects:
+        add(o)
+    return objs
+
+
+def rebuild_fallbacks(context, scope, dry):
+    """The fork's own materials for an island's materials (no graph: built from the cooked textures and
+    values, mp_fallback) that an older fallback builder made, built again by the current one (the FP
+    Material Fixer's names and colour rules) and put in their slots. (count, notes)."""
+    from ...material_porter import fallback
+    users = {}
+    for o in scope_objects(context, scope):
+        for i, s in enumerate(getattr(o, 'material_slots', [])):
+            m = s.material
+            if m is not None and m.get('mp_fallback') and m.get('mp_fallback') < fallback.REVISION and m.get('mp_path'):
+                users.setdefault(m, []).append((o, i))
+    if dry or not users:
+        return len(users), []
+    job = types.SimpleNamespace(options={'RimLight': False}, type=types.SimpleNamespace(name='WORLD'))
+    done, notes = 0, []
+    for old, slots in users.items():
+        new = hook.build_exact(job, {'Path': old['mp_path'], 'Name': old.get('OriginalName', old.name)}, obj=slots[0][0])
+        if new is None or new is old:
+            notes.append(f"{old.name}: not rebuilt (is the FP app open with the island loaded?)")
+            continue
+        for key in ('Hash', 'OriginalName', 'MPRimLight'):
+            if key in old:
+                new[key] = old[key]
+        for o, i in slots:
+            o.material_slots[i].material = new
+        name = old.name
+        if old.users == 0:
+            bpy.data.materials.remove(old)
+            new.name = name
+        done += 1
+        notes.append(f"{name}: rebuilt")
+    return done, notes
+
+
 class FPMP_OT_FixMaterials(bpy.types.Operator):
     bl_idname = 'fpmp.fix_materials'
     bl_label = 'Fix FP Materials'
     bl_description = ('Wire textures FortnitePorting left unlinked (BC/ORM/RMA/SRM/Unity masks...), fix foliage alpha, '
-                      'wrong links and colour spaces. Only empty inputs are filled')
+                      'wrong links and colour spaces, and rebuild the fork\'s older island materials (with the app open). '
+                      'Only empty inputs are filled')
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
         props = context.scene.fpmp_fixer
         run = fixer.fix_materials(scope_materials(context, props.scope), dry=props.preview)
+        rebuilt, notes = rebuild_fallbacks(context, props.scope, props.preview)
         write_report('Fix FP Materials' + (' (preview)' if props.preview else ''), [
             ('Material fixes', [f"{m}: {msg}" for m, msgs in run.report.items() for msg in msgs]),
-            ('Colour spaces', [f"{n}: {a} -> {b}" for n, a, b in run.cs_changes])])
+            ('Colour spaces', [f"{n}: {a} -> {b}" for n, a, b in run.cs_changes]),
+            ("The fork's island materials", notes if notes else ([f"{rebuilt} would be rebuilt"] if props.preview and rebuilt else []))])
         n = len([m for m, v in run.report.items() if v])
-        props.status = f"{'would change' if props.preview else 'changed'} {n} materials, {len(run.cs_changes)} colour spaces"
+        verb = 'would change' if props.preview else 'changed'
+        props.status = f"{verb} {n} materials, {len(run.cs_changes)} colour spaces" + (
+            f", {'would rebuild' if props.preview else 'rebuilt'} {rebuilt} island materials" if rebuilt else "")
         self.report({'INFO'}, f"FP Fixer: {props.status}. Details in Text Editor > '{REPORT_TEXT}'")
         return {'FINISHED'}
 
