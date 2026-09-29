@@ -67,6 +67,12 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
 - **LEGO emotes.** Assets > Lego > Emotes (`JunoAthenaDanceItemOverrideDefinition`): the BR
   emote's name and icon, the figure's montage exported as an emote (sections, sounds, props)
   onto the selected figure's armature; its skeleton from its sequences (the montage names none).
+  The face moves too: the sequences' face-rig curves (mouth, teeth, tongue, eyes, lashes, brows,
+  accents) are keyed on the exact face material's inputs (`material_porter/face_anim.py`, an NLA
+  track "MP Face" beside the body's strips; pose keys step as UE's do, `MPCurveModes`), and a
+  mustache or beard follows the mouth by the rig's registration per mouth pose (`MPFaceRig`).
+  Skinned meshes keep Blender's `rest_position`: UE's LocalPosition/PreSkinnedPosition on them is
+  the reference pose (a face's print masks would slide as the figure sits).
 - **LEGO props.** Assets > Lego > Props: building props and building sets
   (`JunoBuilding{Prop,Set}AccountItemDefinition`), the meshes of the actor each previews.
   LEGO wildlife isn't there: the creatures' packages (and most LEGO gameplay content) are in
