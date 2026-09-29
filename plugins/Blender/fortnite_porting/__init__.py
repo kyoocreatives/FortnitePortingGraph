@@ -6,6 +6,7 @@ from .processing.importer import Importer
 from .operator.tasty_op import TASTY_PT_RigSettings
 from .operator import drag_drop_op
 from .operator import convert_op
+from .operator import fixer as material_fixer
 
 from .ueformat import register as ueformat_register, unregister as ueformat_unregister
 
@@ -74,6 +75,8 @@ def register():
     material_porter_build.ensure_layout_timer()
     # Material Porter fork: FP imports converted to exact materials (sidebar, Fortnite Porting tab)
     convert_op.register()
+    # Material Porter fork: the FP Material Fixer (unlinked textures, UEFN islands' missing ones)
+    material_fixer.register()
 
 
 def unregister():
@@ -84,4 +87,5 @@ def unregister():
     bpy.utils.unregister_class(TASTY_PT_RigSettings)
     drag_drop_op.unregister()
     convert_op.unregister()
+    material_fixer.unregister()
     ueformat_unregister()

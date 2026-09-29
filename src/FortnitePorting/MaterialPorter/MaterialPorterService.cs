@@ -270,6 +270,21 @@ public class MaterialPorterService : IService
 
     private async Task<object?> ExtraRouteAsync(string route, NameValueCollection query)
     {
+        // what this build does: the Blender plugin's Material Fixer shows island recovery only where islands are
+        if (route == "fork-caps") return new { islands = Fork.Islands };
+        if (route.StartsWith("fork-island-"))
+        {
+            // the Material Fixer's island texture recovery (IslandMaterials): island content, the owner's builds only
+            if (!Fork.Islands) throw new InvalidOperationException("island texture recovery is only in the owner's builds");
+            var asked = query["path"] ?? throw new ArgumentException("path missing");
+            return route switch
+            {
+                "fork-island-find" => IslandMaterials.Find(Game.Provider, asked.Split(',')),
+                "fork-island-mesh" => await IslandMaterials.MeshSlotsAsync(Game.Provider, asked),
+                "fork-island-material" => await IslandMaterials.MaterialAsync(Game.Provider, asked),
+                _ => throw new KeyNotFoundException("no route " + route),
+            };
+        }
         if (route == "fork-car")
         {
             // tests: a car body's channels and what the picks ("0:1,5:3") give

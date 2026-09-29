@@ -39,6 +39,25 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   slots. What a style put over the material (a colour swap, a building's
   texture data) isn't kept on FP's material, so the exact one has the asset's own.
   Needs the app running with the game loaded.
+- **Material Fixer.** Same tab, "Material Fixer" (also in the Shader Editor's
+  sidebar); All Materials or Selected Objects; the report goes to Text Editor >
+  "FP Fixer Report". It is the FP Material Fixer extension (fpisland) moved in
+  (`operator/fixer/`):
+  - *Fix FP Materials* (every build): FP's shader materials get the textures FP
+    left in "Unused Textures" (BC / ORM / RMA / SRM / Unity masks, split
+    roughness and metallic), foliage alpha, wrong links removed and colour
+    spaces set; only empty inputs are filled. *Preview Only* just reports.
+  - *Recover Island Textures* (the owner's builds: shown only where the app's
+    `fork-caps` says islands are on, and its routes refuse otherwise): a UEFN
+    map's FP materials with no base colour. Where fpisland ran its own
+    CUE4Parse tool with keys read from FP's logs, the app answers from what it
+    has mounted (`IslandMaterials.cs`, routes `fork-island-find`, `-mesh`,
+    `-material`): the material each was made from (islands this file has
+    textures from first, then other islands, then the game's; same-named ones
+    told apart by the meshes' slots, then by FP's leftover values), its
+    instance parameters, its master's cooked ReferencedTextures and parameter
+    defaults. Its textures come over the bridge's texture route; flat colours,
+    roughness, glass opacity and light colours are set from the defaults.
 - **Maps through Material Porter's map reader.** FP's world export hands each
   level to the reader (`src/FortnitePorting.Exporting/MaterialPorter/MapReader.g.cs`):
   every component of an actor from the level's exports over its class's
