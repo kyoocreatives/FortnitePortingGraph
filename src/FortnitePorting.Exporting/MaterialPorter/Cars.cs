@@ -46,10 +46,27 @@ public sealed class CarPlan
     /// <summary>Body material index -> a decal's material.</summary>
     public Dictionary<int, string> BodyOverrides { get; } = [];
     public string? WheelMesh { get; set; }
+    /// <summary>The body when its tier names no skeletal mesh (a newer car's): the mesh Mutable builds it of.</summary>
+    public BuiltCarMesh? BuiltBody { get; set; }
+    /// <summary>The wheel when its item names no mesh: the mesh Mutable builds it of.</summary>
+    public BuiltCarMesh? BuiltWheel { get; set; }
+    /// <summary>What Mutable couldn't follow while building a part (a surface's material, an error).</summary>
+    public List<string> BuildNotes { get; } = [];
     /// <summary>Each wheel's place in the body's space (UE, row vectors) and its label.</summary>
     public List<(string Label, Matrix4x4 Transform)> Wheels { get; } = [];
     /// <summary>A material (by its asset name) -> the values Mutable gives it on this car.</summary>
     public Dictionary<string, ParamSet> Params { get; } = new(StringComparer.OrdinalIgnoreCase);
+}
+
+/// <summary>A car part Mutable builds: its surfaces' constant meshes as one mesh on a skeleton, a slot per surface.</summary>
+public sealed class BuiltCarMesh
+{
+    /// <summary>The part's name, with a hash of what it's built of (the same parts, the same file).</summary>
+    public string Name { get; init; } = "";
+    public RawSkinnedMesh Mesh { get; init; } = new();
+    public string Skeleton { get; init; } = "";
+    /// <summary>Each slot's name and material path.</summary>
+    public List<(string Name, string Path)> Slots { get; } = [];
 }
 
 /// <summary>
@@ -58,7 +75,9 @@ public sealed class CarPlan
 /// default material and wheels; a decal (CarSkin_*) swaps the body material
 /// for its own; wheels sit on the body's wheel sockets through the wheel's
 /// per-corner offset, turn and mirror; the colours come from the car's
-/// Mutable program (CO_VehicleCosmeticsRoot) run with the car's values.
+/// Mutable program (CO_VehicleCosmeticsRoot) run with the car's values. A
+/// newer car's tier (or wheel) names no mesh: the program builds it, of its
+/// constant meshes (BuiltCarMesh).
 /// A port of Material Porter's Vehicles.cs to the fork (its catalog and
 /// style types replaced by CarItem/CarChannel/CarPlan).
 /// </summary>
@@ -85,8 +104,13 @@ public sealed class Cars(IFileProvider provider)
     /// <summary>The registry's decal and wheel items (the app sets it once the game is mounted).</summary>
     public static Func<Task<(List<CarItem> Skins, List<CarItem> Wheels)>>? Items;
 
+    /// <summary>The skeleton a wheel Mutable builds is on (every wheel's bones are the base wheel's).</summary>
+    public const string WheelSkeleton = "/VehicleCosmetics/Wheels/SK_Wheel_Base_Skeleton.SK_Wheel_Base_Skeleton";
+
     private static readonly JsonSerializerSettings Ser = new() { ReferenceLoopHandling = ReferenceLoopHandling.Ignore };
     private readonly Dictionary<string, Task<MutableProgram>> _programs = new(StringComparer.OrdinalIgnoreCase);
+    // a program's mesh data (its streamed files, read as needed): kept for the app's run
+    private static readonly Dictionary<(IFileProvider, string), Task<MutableMeshes>> _meshData = new();
 
     private sealed record Tier(string Name, string? Icon, string Vcid, List<string> Tags);
     /// <summary>A decal; Locked*: the body and decal colours it fixes (no colour choice, as the game has it).</summary>
@@ -188,6 +212,69 @@ public sealed class Cars(IFileProvider provider)
             if (!_programs.TryGetValue(pkg, out var t)) _programs[pkg] = t = MutableProgram.LoadAsync(provider, pkg);
             return t;
         }
+    }
+
+    private Task<MutableMeshes> MeshDataAsync(string co)
+    {
+        var pkg = co.Split('.')[0];
+        lock (_meshData)
+        {
+            if (!_meshData.TryGetValue((provider, pkg), out var t)) _meshData[(provider, pkg)] = t = MutableMeshes.LoadAsync(provider, pkg);
+            return t;
+        }
+    }
+
+    /// <summary>
+    /// A component's surfaces (a body's, a wheel's) as one mesh on a skeleton, a slot per surface
+    /// name and material (a material parameter the values don't set: `unset`); null if it has none.
+    /// A surface on a constant already built is a second pass over it (a toon car's outline, an
+    /// overlay material): left out, as FortnitePorting leaves overlay materials out.
+    /// </summary>
+    private async Task<BuiltCarMesh?> BuildAsync(MutableMeshes data, List<MutableProgram.MeshSurface> surfaces, string component,
+                                                 string? skeletonPath, string name, string? unset)
+    {
+        var constants = new HashSet<int>();
+        var mine = surfaces.Where(s => s.Component == component && constants.Add(s.Constant)).ToList();
+        if (mine.Count == 0 || skeletonPath == null || await provider.LoadPackageObjectAsync(skeletonPath) is not USkeleton skeleton) return null;
+        var bones = skeleton.ReferenceSkeleton.FinalRefBoneInfo.Select(b => b.Name.Text).ToList();
+        var slots = new List<(string Name, string Path)>();
+        var parts = new List<(RawSkinnedMesh Mesh, int Slot)>();
+        lock (data)       // its files are read in place
+        {
+            foreach (var s in mine)
+            {
+                var material = s.Material?.Asset ?? (s.Material?.MaterialParam != null ? unset : null) ?? "";
+                var slot = slots.IndexOf((s.Name, material));
+                if (slot < 0)
+                {
+                    slot = slots.Count;
+                    slots.Add((s.Name, material));
+                }
+                if (data.Skinned(s.Constant, bones) is { } raw) parts.Add((raw, slot));
+            }
+        }
+        if (parts.Count == 0) return null;
+        // FNV-1a over what the file holds
+        var hash = 2166136261u;
+        foreach (var c in $"{UEModelWriter.Revision}|{skeletonPath}|{string.Join(",", mine.Select(s => s.Constant))}|{string.Join(",", slots)}")
+            hash = (hash ^ c) * 16777619u;
+        var built = new BuiltCarMesh { Name = $"{name}_{hash:x8}", Mesh = RawSkinnedMesh.Combine(parts), Skeleton = skeletonPath };
+        built.Slots.AddRange(slots);
+        return built;
+    }
+
+    /// <summary>A surface's values Mutable gives its material, kept for that material (the first surface's win).</summary>
+    private static void AddValues(CarPlan plan, string target, MutableProgram.Surface s, string label)
+    {
+        if (s.Vectors.Count + s.Scalars.Count == 0) return;
+        if (!plan.Params.TryGetValue(Tail(target)!, out var ps))
+        {
+            ps = new ParamSet { Label = label };
+            ps.Materials.Add(target);
+            plan.Params[Tail(target)!] = ps;
+        }
+        foreach (var kv in s.Vectors) ps.Vectors.TryAdd(kv.Key, kv.Value);
+        foreach (var kv in s.Scalars) ps.Scalars.TryAdd(kv.Key, kv.Value);
     }
 
     private async Task<List<(string Slot, string? Material)>> SlotsAsync(string meshPath)
@@ -373,11 +460,11 @@ public sealed class Cars(IFileProvider provider)
             }
         }
 
-        // ---- the body, its material (the tier's, or the decal's)
+        // ---- the body, its material (the tier's, or the decal's); a tier naming no skeletal mesh
+        // is one Mutable builds (below)
         var mesh = RefPath(vc["SkeletalMeshInfo"]?["ParameterValue"]);
-        if (mesh == null) return plan;
         plan.BodyMesh = mesh;
-        var bodySlots = await SlotsAsync(mesh);
+        var bodySlots = mesh == null ? [] : await SlotsAsync(mesh);
         var bodyMaterial = RefPath(vc["DefaultSkinMaterial"]);
         if (decal != null)
         {
@@ -402,9 +489,9 @@ public sealed class Cars(IFileProvider provider)
         }
         var wv = wheelVcid == null ? null : await PropsAsync(wheelVcid);
         var wheelMesh = wv == null ? null : RefPath(wv["WheelSkeletalMeshInfo"]?["ParameterValue"]) ?? RefPath(wv["WheelStaticMeshInfo"]?["ParameterValue"]);
-        if (wheelMesh != null)
+        plan.WheelMesh = wheelMesh;
+        if (wv != null)     // a wheel naming no mesh is one Mutable builds (below)
         {
-            plan.WheelMesh = wheelMesh;
             var setups = (wv!["WheelSetupInfos"] ?? new JArray()).ToDictionary(s => (string?)s["WheelLocation"] ?? "", s => s, StringComparer.OrdinalIgnoreCase);
             var sockets = await SocketsAsync(mesh, RefPath(vc["WheelAttachSkeletonReference"]));
             foreach (var at in vc["WheelAttachInfos"] ?? new JArray())
@@ -440,18 +527,42 @@ public sealed class Cars(IFileProvider provider)
         if (decalColor != null && mp.Has("SkinColor")) vals["SkinColor"] = decalColor;
         var paintedParam = (string?)vc["PaintedDataTableParameterName"] ?? "BodyPainted";
         if (paintedRow != null && mp.EnumValue(paintedParam, paintedRow) is { } pv) vals[paintedParam] = pv;
-        if (decal?.Vcid != null && (string?)vc["SkinDataTableParameterName"] is { } skinTable)
+        if (decal?.Vcid != null)
         {
-            var row = (string?)(await PropsAsync(decal.Vcid))["SkinRowName"];
-            if (mp.EnumValue(skinTable, row) is { } sv) vals[skinTable] = sv;
+            var sp = await PropsAsync(decal.Vcid);
+            Put(mp, vals, sp, "Body_");     // the decal's own values (a body's skin switch: its trim, chassis and interior materials)
+            if ((string?)vc["SkinDataTableParameterName"] is { } skinTable && mp.EnumValue(skinTable, (string?)sp["SkinRowName"]) is { } sv)
+                vals[skinTable] = sv;
         }
         if (bodyMaterial != null && mp.Has("BodyMaterial")) vals["BodyMaterial"] = bodyMaterial;
+        var label = string.Join(", ", plan.Styles.Select(x => x.Split(": ").Last()));
+
+        // ---- a body or wheel naming no mesh: the component (the item's ComponentIndex) Mutable builds
+        // of its surfaces' constant meshes, on the tier's skeleton (a wheel on the base wheel's)
+        if (mesh == null || wv != null && wheelMesh == null)
+        {
+            try
+            {
+                var built = mp.MeshSurfaces(vals, 0, plan.BuildNotes);
+                var data = await MeshDataAsync(coPath);
+                if (mesh == null)
+                    plan.BuiltBody = await BuildAsync(data, built, ((int?)vc["ComponentIndex"] ?? 0).ToString(),
+                                                      RefPath(vc["WheelAttachSkeletonReference"]), bodyName, bodyMaterial);
+                if (wv != null && wheelMesh == null)
+                    plan.BuiltWheel = await BuildAsync(data, built, ((int?)wv["ComponentIndex"] ?? 1).ToString(), WheelSkeleton,
+                                                       Tail(wheelVcid)!.Split('.')[0].Replace("VCID_", ""), null);
+                foreach (var s in built)
+                    if (s.Material is { Asset: { } asset } m
+                        && (plan.BuiltBody?.Slots.Contains((s.Name, asset)) == true || plan.BuiltWheel?.Slots.Contains((s.Name, asset)) == true))
+                        AddValues(plan, asset, m, label);
+            }
+            catch (Exception e) { plan.BuildNotes.Add(e.Message); }
+        }
 
         List<MutableProgram.Surface> surfaces;
         try { surfaces = mp.Evaluate(vals); }
         catch { return plan; }
         var wheelSlots = wheelMesh == null ? [] : await SlotsAsync(wheelMesh);
-        var label = string.Join(", ", plan.Styles.Select(x => x.Split(": ").Last()));
         foreach (var s in surfaces)
         {
             if (s.Vectors.Count + s.Scalars.Count == 0) continue;
@@ -469,24 +580,21 @@ public sealed class Cars(IFileProvider provider)
             // the surface's material must be the one the mesh has there (its own slot, the body
             // material, or the same asset): another (a mode's glass) isn't this car's
             if (s.Slot == null && !Same(s.Asset, target)) continue;
-            if (!plan.Params.TryGetValue(Tail(target)!, out var ps))
-            {
-                ps = new ParamSet { Label = label };
-                ps.Materials.Add(target);
-                plan.Params[Tail(target)!] = ps;
-            }
-            foreach (var kv in s.Vectors) ps.Vectors.TryAdd(kv.Key, kv.Value);
-            foreach (var kv in s.Scalars) ps.Scalars.TryAdd(kv.Key, kv.Value);
+            AddValues(plan, target, s, label);
         }
         return plan;
     }
 
-    /// <summary>A mesh's sockets (its own, else its skeleton's) in the mesh's space, UE units, row-vector matrices.</summary>
-    private async Task<Dictionary<string, Matrix4x4>> SocketsAsync(string meshPath, string? skeletonPath)
+    /// <summary>
+    /// A mesh's sockets (its own, else its skeleton's) in the mesh's space, UE units, row-vector
+    /// matrices; with no mesh (one Mutable builds), the skeleton's on its reference pose.
+    /// </summary>
+    private async Task<Dictionary<string, Matrix4x4>> SocketsAsync(string? meshPath, string? skeletonPath)
     {
         var result = new Dictionary<string, Matrix4x4>(StringComparer.OrdinalIgnoreCase);
-        if (await provider.LoadPackageObjectAsync(meshPath) is not USkeletalMesh mesh) return result;
-        var rs = mesh.ReferenceSkeleton;
+        var mesh = meshPath == null ? null : await provider.LoadPackageObjectAsync(meshPath) as USkeletalMesh;
+        var skeleton = skeletonPath == null ? null : await provider.LoadPackageObjectAsync(skeletonPath) as USkeleton;
+        if ((mesh?.ReferenceSkeleton ?? skeleton?.ReferenceSkeleton) is not { } rs) return result;
         var global = new Matrix4x4[rs.FinalRefBonePose.Length];
         for (var i = 0; i < global.Length; i++)
         {
@@ -495,11 +603,10 @@ public sealed class Cars(IFileProvider provider)
             global[i] = parent >= 0 && parent < i ? l * global[parent] : l;
         }
         var socketObjs = new List<USkeletalMeshSocket>();
-        foreach (var s in mesh.Sockets ?? [])
+        foreach (var s in mesh?.Sockets ?? [])
             if (s.Load<USkeletalMeshSocket>() is { } so) socketObjs.Add(so);
-        if (skeletonPath != null && await provider.LoadPackageObjectAsync(skeletonPath) is USkeleton sk)
-            foreach (var s in sk.Sockets ?? [])
-                if (s.Load<USkeletalMeshSocket>() is { } so) socketObjs.Add(so);
+        foreach (var s in skeleton?.Sockets ?? [])
+            if (s.Load<USkeletalMeshSocket>() is { } so) socketObjs.Add(so);
         foreach (var so in socketObjs)
         {
             var name = so.SocketName.Text;

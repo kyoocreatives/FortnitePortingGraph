@@ -246,12 +246,15 @@ public partial class ExportContext
         var plan = new Cars(FileProvider).PlanAsync(package, body.Name, skins, wheels, picks).GetAwaiter().GetResult();
         Log.Information("[Material Porter] car {Body}: {Styles} (options: {Channels})", body.Name, string.Join(", ", plan.Styles),
             string.Join(", ", plan.Channels.Select(c => $"{c.Name} {c.Options.Count}")));
-        if (plan.BodyMesh is null || LoadMaterialPorterObject(plan.BodyMesh) is not USkeletalMesh bodyMesh) return [];
-        if (Mesh(bodyMesh) is not { } export) return [];
+        if (plan.BuildNotes.Count > 0) Log.Warning("[Material Porter] car {Body}: building it, Mutable couldn't follow: {Notes}", body.Name, string.Join("; ", plan.BuildNotes));
+        var export = plan.BodyMesh is not null
+            ? LoadMaterialPorterObject(plan.BodyMesh) is USkeletalMesh bodyMesh ? Mesh(bodyMesh) : null
+            : plan.BuiltBody is { } builtBody ? BuiltCarMesh(builtBody) : null;
+        if (export is null) return [];
         export.Name = body.Name;
         CarMaterials(export, plan, plan.BodyOverrides);
 
-        var wheel = plan.WheelMesh is null ? null : LoadMaterialPorterObject(plan.WheelMesh) switch
+        var wheel = plan.WheelMesh is null ? plan.BuiltWheel is { } builtWheel ? BuiltCarMesh(builtWheel) : null : LoadMaterialPorterObject(plan.WheelMesh) switch
         {
             USkeletalMesh sk => Mesh(sk),
             UStaticMesh sm => Mesh(sm),
@@ -267,6 +270,21 @@ public partial class ExportContext
                 export.Children.Add(child);
             }
         return [export];
+    }
+
+    /// <summary>A car part Mutable builds, written once as a UEFormat model on its skeleton, with its slots' materials.</summary>
+    private ExportMesh? BuiltCarMesh(BuiltCarMesh built)
+    {
+        if (LoadMaterialPorterObject(built.Skeleton) is not global::CUE4Parse.UE4.Assets.Exports.Animation.USkeleton skeleton) return null;
+        var path = $"/MaterialPorter/Cars/{built.Name}.{built.Name}";
+        var file = BuildExportPath(path, "uemodel");
+        if (!File.Exists(file)) UEModelWriter.Write(file, built.Name, built.Mesh, skeleton, built.Slots);
+        var export = new ExportMesh { Name = built.Name, Path = path, NumLods = 1 };
+        for (var slot = 0; slot < built.Slots.Count; slot++)
+            if (built.Slots[slot].Path.Length > 0 && LoadMaterialPorterObject(built.Slots[slot].Path) is UMaterialInterface mi
+                && Material(mi, slot) is { } material)
+                export.Materials.Add(material with { Slot = slot });
+        return export;
     }
 
     /// <summary>

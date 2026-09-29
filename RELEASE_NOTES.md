@@ -2,7 +2,7 @@ An unofficial fork of [FortnitePorting](https://github.com/h4lfheart/FortnitePor
 
 **Install:** download `FortnitePortingMP.exe` below and run it (Windows x64, no installer). Windows may warn about an unsigned app: *More info > Run anyway*. It runs beside an installed FortnitePorting, with its own settings (`%APPDATA%\FortnitePorting MP`) and its own Blender plugin (`fortnite_porting_mp`), installed from the Plugins page as in FortnitePorting. Exact materials need Blender 5.0 or newer; older Blender gets FortnitePorting's shaders.
 
-**This release:** Rocket Racing's newest cars (named "Blank" in the game) get their body colours and real names; a new *Settings > Blender > Rim Light* (off by default) turns off the rim light Fortnite's character materials add at the edges.
+**This release:** the 39 Rocket Racing cars whose bodies exist only in the game's car builder (the Pizza Planet Delivery Truck among them) now export, built from its data with their decals, and so do the wheels made the same way; decals that change a car's trim, chassis or interior (the Pizza Planet truck's rusty livery) now do.
 
 **What it adds**
 - Exact materials, rebuilt from each material's Unreal graph. *Settings > Blender > Prefer FP Shaders for Characters* keeps FortnitePorting's shaders for character materials it has one for.

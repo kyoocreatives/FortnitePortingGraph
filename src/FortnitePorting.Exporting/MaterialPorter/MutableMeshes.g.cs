@@ -373,6 +373,39 @@ public sealed class RawSkinnedMesh
         merged.Sections.Add((0, 0, merged.Indices.Length / 3));
         return merged;
     }
+
+    /// <summary>
+    /// Meshes as one, each part's faces a section of its slot (a car body: a constant per
+    /// surface). UV channels a part lacks are zeros; colours a part lacks are white.
+    /// </summary>
+    public static RawSkinnedMesh Combine(IReadOnlyList<(RawSkinnedMesh Mesh, int Slot)> parts)
+    {
+        var uvs = parts.Count == 0 ? 0 : parts.Max(x => x.Mesh.Uvs.Count);
+        var colors = parts.Any(x => x.Mesh.Colors is not null);
+        var combined = new RawSkinnedMesh
+        {
+            VertexCount = parts.Sum(x => x.Mesh.VertexCount),
+            Positions = parts.SelectMany(x => x.Mesh.Positions).ToArray(),
+            Normals = parts.SelectMany(x => x.Mesh.Normals).ToArray(),
+            Tangents = parts.SelectMany(x => x.Mesh.Tangents).ToArray(),
+            Colors = colors ? parts.SelectMany(x => x.Mesh.Colors ?? Enumerable.Repeat((byte)255, x.Mesh.VertexCount * 4)).ToArray() : null,
+            UnknownBones = parts.Sum(x => x.Mesh.UnknownBones),
+        };
+        for (var k = 0; k < uvs; k++)
+            combined.Uvs.Add(parts.SelectMany(x => k < x.Mesh.Uvs.Count ? x.Mesh.Uvs[k] : new float[x.Mesh.VertexCount * 2]).ToArray());
+        var indices = new List<int>();
+        var vertex = 0;
+        foreach (var (mesh, slot) in parts)
+        {
+            var first = indices.Count;
+            indices.AddRange(mesh.Indices.Select(i => i + vertex));
+            foreach (var (_, start, faces) in mesh.Sections) combined.Sections.Add((slot, first + start, faces));
+            combined.Weights.AddRange(mesh.Weights.Select(w => (w.Bone, w.Vertex + vertex, w.Weight)));
+            vertex += mesh.VertexCount;
+        }
+        combined.Indices = indices.ToArray();
+        return combined;
+    }
 }
 
 /// <summary>Google's CityHash32: Mutable's bone ids are CityHash32 of the bone name's UTF-16 bytes.</summary>

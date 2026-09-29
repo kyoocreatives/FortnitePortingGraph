@@ -43,6 +43,15 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   export is the body (the decal's material when one is picked), the wheels
   as children on its wheel sockets, and the values the car's Mutable program
   gives each material (`Mutable.g.cs`), sent to Blender as a Vehicle.
+  A newer car's tier names no skeletal mesh (39 of the 120 bodies, the Pizza
+  Planet truck among them), nor do some wheels: the program builds them.
+  `MutableProgram.MeshSurfaces` follows the component (the item's
+  `ComponentIndex`) to its surfaces op, whose LOD 0 list names each surface's
+  constant mesh and, by surface id, its material; `MutableMeshes.g.cs` decodes
+  the constants onto the tier's skeleton (a wheel onto `SK_Wheel_Base_Skeleton`),
+  written once per build as `Assets/MaterialPorter/Cars/<item>_<hash>.uemodel`.
+  A decal's own values (a body's skin switch: its trim, chassis and interior
+  materials) go into the program too.
 - **LEGO figures.** Assets > Lego > Outfits lists the LEGO outfits
   (`JunoAthenaCharacterItemOverrideDefinition`), all 2,480
   (`Exporting/MaterialPorter/Figures.cs`):
