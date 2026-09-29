@@ -238,14 +238,14 @@ public class MaterialPorterService : IService
                     var list = new List<CarItem>();
                     foreach (var a in AppServices.UEParse.AssetRegistry.Where(a => a.AssetClass.Text == cls))
                     {
-                        var title = a.AssetName.Text;
+                        string? name = null;
                         try
                         {
-                            if (await Game.Provider.LoadPackageObjectAsync(a.ObjectPath) is { } item
-                                && item.GetOrDefault<FText?>("ItemName")?.Text is { Length: > 0 } name)
-                                title = name;
+                            if (await Game.Provider.LoadPackageObjectAsync(a.ObjectPath) is { } item)
+                                name = item.GetOrDefault<FText?>("ItemName")?.Text;
                         }
                         catch { /* its asset name, then */ }
+                        var title = Cars.ItemTitle(name, a.AssetName.Text);
                         list.Add(new CarItem(a.AssetName.Text, title, a.PackageName.Text, a.ObjectPath));
                     }
                     return list;

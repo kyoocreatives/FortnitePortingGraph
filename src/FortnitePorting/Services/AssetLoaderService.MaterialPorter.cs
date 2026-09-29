@@ -23,6 +23,10 @@ public partial class AssetLoaderService
                 {
                     ClassNames = [Cars.BodyClass],
                     HideRarity = true,
+                    // the newest bodies are named "Blank": their asset's name instead
+                    DisplayNameHandler = asset => Cars.ItemTitle(asset.GetOrDefault<FText?>("ItemName")?.Text, asset.Name),
+                    DescriptionHandler = asset => asset.GetOrDefault<FText?>("ItemDescription")?.Text is { } description
+                                                  && !Cars.IsPlaceholder(description) ? description.TrimEnd() : "",
                 }
             ]
         });

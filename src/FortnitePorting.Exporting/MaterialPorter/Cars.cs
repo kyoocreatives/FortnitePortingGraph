@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Numerics;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets.Exports.Animation;
@@ -66,6 +67,20 @@ public sealed class Cars(IFileProvider provider)
     public const string BodyClass = "FortVehicleCosmeticsItemDefinition_Body";
     public const string SkinClass = "FortVehicleCosmeticsItemDefinition_Skin";
     public const string WheelClass = "FortVehicleCosmeticsItemDefinition_Wheel";
+
+    /// <summary>The placeholder names newer items ship with.</summary>
+    public static bool IsPlaceholder(string? text) => text?.Trim() is not { Length: > 0 } t
+                                                       || t.Equals("Blank", StringComparison.OrdinalIgnoreCase)
+                                                       || t.Equals("TBD", StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>An item's title: its name, else its asset's (CarBody_UmbraGenesis -> Umbra Genesis, CarSkin_UmbraGenesis01 -> Umbra Genesis 01).</summary>
+    public static string ItemTitle(string? itemName, string assetName)
+    {
+        if (!IsPlaceholder(itemName)) return itemName!.Trim();
+        var name = Regex.Replace(assetName, "^(CarBody|Body|CarSkin|Skin|Wheel)_", "", RegexOptions.IgnoreCase);
+        name = Regex.Replace(name, "(?<=[a-z])(?=[A-Z0-9])|(?<=[0-9])(?=[A-Za-z])|_", " ");
+        return Regex.Replace(name, " +", " ").Trim();
+    }
 
     /// <summary>The registry's decal and wheel items (the app sets it once the game is mounted).</summary>
     public static Func<Task<(List<CarItem> Skins, List<CarItem> Wheels)>>? Items;
@@ -192,6 +207,9 @@ public sealed class Cars(IFileProvider provider)
         string? N(string? n) => n == null ? null : mp.Has(n) ? n : mp.Has(prefix + n) ? prefix + n : null;
         foreach (var g in new[] { def["BodyGroup"], def["WheelGroup"] })
             if (N((string?)g?["ParameterName"]) is { } gn && mp.EnumValue(gn, (string?)g!["ParameterValue"]) is { } gv) vals[gn] = gv;
+        // a newer item's group ("Dataless": its meshes are the item's own) names no parameter: the component's
+        if (def["CustomizableObjectGroup"] is { } cg && N((string?)cg["ParameterName"] ?? prefix.TrimEnd('_') + "COType") is { } cn
+            && mp.EnumValue(cn, (string?)cg["ParameterValue"]) is { } cv) vals[cn] = cv;
         foreach (var a in def["AdditionalParametersInfos"] ?? new JArray())
         {
             foreach (var i in a["IntParameters"] ?? new JArray())
