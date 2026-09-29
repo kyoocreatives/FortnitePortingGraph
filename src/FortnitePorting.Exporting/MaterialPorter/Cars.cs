@@ -74,7 +74,9 @@ public sealed class Cars(IFileProvider provider)
     private readonly Dictionary<string, Task<MutableProgram>> _programs = new(StringComparer.OrdinalIgnoreCase);
 
     private sealed record Tier(string Name, string? Icon, string Vcid, List<string> Tags);
-    private sealed record Decal(string Name, string? Icon, string Tier, string Material, JObject? Color, string? Vcid);
+    /// <summary>A decal; Locked*: the body and decal colours it fixes (no colour choice, as the game has it).</summary>
+    private sealed record Decal(string Name, string? Icon, string Tier, string Material, JObject? Color, string? Vcid,
+                                double[]? LockedBody, double[]? LockedSkin);
     private sealed record Painted(string Name, string? Icon, string Row);
 
     // ------------------------------------------------------------ JSON helpers (Material Porter's)
@@ -246,24 +248,42 @@ public sealed class Cars(IFileProvider provider)
             tiers.Add(new Tier("Default", null, only, []));
         if (tiers.Count == 0) return plan;
 
-        // decals: CarSkin_* beside each tier's folder (/Skins/<Body>/<Tier>/)
+        // decals: CarSkin_* under /Skins/<Body>/ (in it, a tier's folder, or a folder of their own): a
+        // tier's folder's for that tier, the others for the tier they require by body item or by its
+        // tag (a single-tier body's when they name another body's neither)
         var decals = new List<Decal>();
         var bodyFolder = bodyPackage.Split('/').Reverse().Skip(1).FirstOrDefault();
+        var bodySkins = $"/VehicleCosmetics/Mutable/Skins/{bodyFolder}/";
         foreach (var t in tiers)
         {
             var tierFolder = t.Vcid.Split('/').Reverse().Skip(1).FirstOrDefault();
-            var prefix = $"/VehicleCosmetics/Mutable/Skins/{bodyFolder}/{tierFolder}/";
-            foreach (var s in skins.Where(a => a.Package.StartsWith(prefix, StringComparison.OrdinalIgnoreCase)))
+            var prefix = $"{bodySkins}{tierFolder}/";
+            var tierTag = (string?)(await PropsAsync(t.Vcid))["MeshSchemaTag"]?["TagName"];
+            foreach (var s in skins.Where(a => a.Package.StartsWith(bodySkins, StringComparison.OrdinalIgnoreCase)))
             {
                 try
                 {
                     var (sp, sx) = await PackageAsync(s.Package, s.Name);
+                    if (!s.Package.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                    {
+                        var restrictions = sp["RestrictionDefinitions"] ?? new JArray();
+                        var required = restrictions.Select(r => RefPath(r["RequiredBodyItem"])).FirstOrDefault(x => x != null);
+                        var tags = restrictions.SelectMany(r => r["RequiredTagQuery"]?["TagDictionary"] ?? new JArray())
+                            .Select(x => (string?)x["TagName"]).OfType<string>();
+                        var mine = required != null
+                            ? Same(required, t.Vcid)
+                            : tiers.Count == 1 || tierTag != null && tags.Contains(tierTag, StringComparer.OrdinalIgnoreCase);
+                        if (!mine) continue;
+                    }
                     var vcid = RefPath(sp["VehicleCosmeticsItemDef"]);
-                    var mat = vcid == null ? null : RefPath((await PropsAsync(vcid))["SkinMaterial"]);
+                    var skin = vcid == null ? null : await PropsAsync(vcid);
+                    var mat = RefPath(skin?["SkinMaterial"]);
                     if (mat == null) continue;
                     var color = (sp["ItemVariants"] ?? new JArray()).Select(r => ExportOf(r, sx)).FirstOrDefault(v => v?["InlineVariant"]?["RichColorVar"] != null);
                     var icon = (sp["DataList"] ?? new JArray()).Select(d => RefPath(d["Icon"])).FirstOrDefault(x => x != null);
-                    decals.Add(new Decal(s.Title + (tiers.Count > 1 ? $" ({t.Name})" : ""), icon, t.Vcid, mat, color, vcid));
+                    var lockedBody = (bool?)skin!["bLockBodyColor"] == true ? Rgba(skin["LockedBodyColor"]) : null;
+                    decals.Add(new Decal(s.Title + (tiers.Count > 1 ? $" ({t.Name})" : ""), icon, t.Vcid, mat, color, vcid,
+                                         lockedBody, Rgba(skin["LockedSkinColor"])));
                 }
                 catch { /* a decal that won't read isn't offered */ }
             }
@@ -313,8 +333,8 @@ public sealed class Cars(IFileProvider provider)
                                ?? colorVariants.FirstOrDefault(v => ((string?)v["VariantChannelTag"]?["TagName"] ?? "").Contains("Body.Color"));
         bodyCh.Options.AddRange(ColorChannel("Body Color", bodyColorVariant).Options);
         var bodyPick = Pick(bodyCh, 0);
-        var bodyColor = SwatchColor(bodyColorVariant, bodyPick);
-        if (bodyPick > 0 && bodyPick < bodyCh.Options.Count) plan.Styles.Add("Body Color: " + bodyCh.Options[bodyPick].Name);
+        var bodyColor = decal?.LockedBody ?? SwatchColor(bodyColorVariant, bodyPick);
+        if (decal?.LockedBody == null && bodyPick > 0 && bodyPick < bodyCh.Options.Count) plan.Styles.Add("Body Color: " + bodyCh.Options[bodyPick].Name);
 
         string? paintedRow = null;
         if (paintedCh != null)
@@ -331,7 +351,7 @@ public sealed class Cars(IFileProvider provider)
             if (decal != null)
             {
                 plan.Styles.Add("Decal: " + decal.Name);
-                decalColor = SwatchColor(decal.Color, Pick(decalColorCh, 0));
+                decalColor = decal.Color == null ? decal.LockedSkin : SwatchColor(decal.Color, Pick(decalColorCh, 0));
             }
         }
 

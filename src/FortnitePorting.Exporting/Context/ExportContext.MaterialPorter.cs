@@ -244,7 +244,8 @@ public partial class ExportContext
         if (Cars.Items is null || body.Owner?.Name is not { } package) return [];
         var (skins, wheels) = Cars.Items().GetAwaiter().GetResult();
         var plan = new Cars(FileProvider).PlanAsync(package, body.Name, skins, wheels, picks).GetAwaiter().GetResult();
-        Log.Information("[Material Porter] car {Body}: {Styles}", body.Name, string.Join(", ", plan.Styles));
+        Log.Information("[Material Porter] car {Body}: {Styles} (options: {Channels})", body.Name, string.Join(", ", plan.Styles),
+            string.Join(", ", plan.Channels.Select(c => $"{c.Name} {c.Options.Count}")));
         if (plan.BodyMesh is null || LoadMaterialPorterObject(plan.BodyMesh) is not USkeletalMesh bodyMesh) return [];
         if (Mesh(bodyMesh) is not { } export) return [];
         export.Name = body.Name;

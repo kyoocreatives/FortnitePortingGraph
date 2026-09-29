@@ -2,7 +2,7 @@ An unofficial fork of [FortnitePorting](https://github.com/h4lfheart/FortnitePor
 
 **Install:** download `FortnitePortingMP.exe` below and run it (Windows x64, no installer). Windows may warn about an unsigned app: *More info > Run anyway*. It runs beside an installed FortnitePorting, with its own settings (`%APPDATA%\FortnitePorting MP`) and its own Blender plugin (`fortnite_porting_mp`), installed from the Plugins page as in FortnitePorting. Exact materials need Blender 5.0 or newer; older Blender gets FortnitePorting's shaders.
 
-**This release:** fixes the crash on cosmetics' video previews (the single exe didn't find its video player); the exe is 150 MB instead of 240.
+**This release:** Rocket Racing cars offer about three times as many decals (most cars keep theirs outside the folders FortnitePorting MP looked in), with the colours a decal fixes; fixes the crash on cosmetics' video previews; the exe is 150 MB instead of 240.
 
 **What it adds**
 - Exact materials, rebuilt from each material's Unreal graph. *Settings > Blender > Prefer FP Shaders for Characters* keeps FortnitePorting's shaders for character materials it has one for.
