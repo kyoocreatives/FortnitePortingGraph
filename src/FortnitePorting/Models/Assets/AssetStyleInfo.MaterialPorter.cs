@@ -32,6 +32,15 @@ public partial class AssetStyleInfo
     partial void OnPickerSearchChanged(string value) => RefreshPicker();
     partial void OnSelectedStyleIndexChanged(int value) => OnPropertyChanged(nameof(PickerSelection));
 
+    // a list clearing its selection (its items or pop-up going away) doesn't unpick a channel that needs a
+    // pick: the export read StyleDatas[-1]
+    partial void OnSelectedStyleIndexChanged(int oldValue, int newValue)
+    {
+        if (RequiredSelection && !MultiSelect && (newValue < 0 || newValue >= StyleDatas.Count)
+            && oldValue >= 0 && oldValue < StyleDatas.Count)
+            SelectedStyleIndex = oldValue;
+    }
+
     private void RefreshPicker()
     {
         PickerItems.Clear();
