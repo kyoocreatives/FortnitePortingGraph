@@ -577,9 +577,16 @@ public class MeshExport : BaseExport
             }
             case EExportType.LegoProp:
             {
-                // Material Porter fork: a LEGO building prop or set, the meshes of the actor its item previews
-                if (asset.GetOrDefault<UBlueprintGeneratedClass?>("BuildingActorClassToPreview") is { } actorClass)
+                // Material Porter fork: a LEGO building prop or set, the meshes of the actor its item previews;
+                // a LEGO build (wall, station...), its DataList's actor class
+                if (MaterialPorter.Figures.PropActor(asset) is { } actorClass)
+                {
                     AddObjects(Context.Blueprint(actorClass));
+                    AddObjects(Context.NativeGeometryCollections(actorClass));
+                }
+                // a LEGO cave room: its level
+                else if (asset.GetOrDefault<FSoftObjectPath>("World").TryLoad<UWorld>(out var caveWorld))
+                    Meshes.AddRange(Context.World(caveWorld));
                 break;
             }
             case EExportType.LegoOutfit:

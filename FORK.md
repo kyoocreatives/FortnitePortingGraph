@@ -142,7 +142,15 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   Skinned meshes keep Blender's `rest_position`: UE's LocalPosition/PreSkinnedPosition on them is
   the reference pose (a face's print masks would slide as the figure sits).
 - **LEGO props.** Assets > Lego > Props: building props and building sets
-  (`JunoBuilding{Prop,Set}AccountItemDefinition`), the meshes of the actor each previews.
+  (`JunoBuilding{Prop,Set}AccountItemDefinition`), the meshes of the actor each previews;
+  everything LEGO Fortnite builds (`JunoBuildInstructionsItemDefinition`, about 9,300: walls,
+  floors, roofs, doors, furniture as JBID_, crafting stations, chests as PBID_), its DataList's
+  `ActorClass`; and cave rooms (`PDA_Juno_ProcCave_ShellData_C`), their level. A filter
+  category (Props & Sets, Building Pieces, Stations & Placeables, Caves) splits them; a build
+  without a display name shows its asset's, and its description its theme and size. LEGO
+  builds are Geometry Collections (bricks that break apart): `ExportContext.GeometryCollection.cs`
+  draws one whole from its collection's root proxy meshes (the piece and its "_CP" common parts),
+  for SCS components and a class's native ones (a chest's).
   Items whose actor isn't installed are hidden: most LEGO gameplay content is pakchunk60, an
   optional download (install tag GFP_JunoRoot, about 9 GiB) Fortnite installs for LEGO Fortnite.
 - **LEGO wildlife.** Assets > Lego > Wildlife: each look of each creature (the pawn
@@ -202,7 +210,8 @@ a commit's) ask neither.
   `InstallationSetupViewModel.cs`, `AppWindow.axaml`, `AppService.cs`,
   `SettingsService.cs`, `Program.cs`, `BlenderInstallation.cs`,
   `ExportClientService.cs`, `AppWindowModel.cs`, `AssetVideoPreview.axaml.cs` (libvlc in a
-  single-file build), `FortnitePorting.csproj`, `build-release.yml`, `README.md`, plugin
+  single-file build), `ExportContext.Unreal.cs` and `MeshExport.cs` (Geometry Collections, LEGO
+  props), `FortnitePorting.csproj`, `build-release.yml`, `build-commit.yml`, `README.md`, plugin
   `server.py` and `material_context.py`.
 
 Generated files come from Material Porter (`Documents/Claude/materialporter`):

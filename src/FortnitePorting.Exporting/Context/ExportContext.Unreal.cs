@@ -317,6 +317,11 @@ public partial class ExportContext
             {
                 objects.AddIfNotNull(LightComponent(pointLightComponent));
             }
+            else if (componentTemplate is UGeometryCollectionComponent geometryCollectionComponent)
+            {
+                // Material Porter fork: a destructible (LEGO builds), drawn whole
+                objects.AddRange(GeometryCollectionComponent(geometryCollectionComponent));
+            }
         }
 
         return objects;
@@ -343,6 +348,11 @@ public partial class ExportContext
             else if (componentTemplate is ULightComponentBase pointLightComponent)
             {
                 objects.AddIfNotNull(LightComponent(pointLightComponent));
+            }
+            else if (componentTemplate is UGeometryCollectionComponent geometryCollectionComponent)
+            {
+                // Material Porter fork: a destructible (LEGO builds), drawn whole
+                objects.AddRange(GeometryCollectionComponent(geometryCollectionComponent));
             }
         }
 

@@ -145,12 +145,49 @@ public static class Figures
     public static readonly string[] PropClasses = ["JunoBuildingPropAccountItemDefinition", "JunoBuildingSetAccountItemDefinition"];
 
     /// <summary>
+    /// What LEGO Fortnite builds: walls, floors, roofs, doors, furniture (JBID_), crafting
+    /// stations, chests (PBID_)... Its actor class is its DataList's "ActorClass".
+    /// </summary>
+    public const string BuildClass = "JunoBuildInstructionsItemDefinition";
+
+    /// <summary>A LEGO Fortnite cave room (its entrances, dens, treasure rooms...): a level ("World").</summary>
+    public const string CaveClass = "PDA_Juno_ProcCave_ShellData_C";
+
+    /// <summary>A cave room's level path, or null.</summary>
+    public static string? CaveWorldPath(UObject item) =>
+        item.GetOrDefault<FSoftObjectPath>("World").AssetPathName.Text is { Length: > 0 } path && path != "None" ? path : null;
+
+    /// <summary>A LEGO prop's or build's actor class path: the preview actor, else its DataList's.</summary>
+    public static string? PropActorPath(UObject item)
+    {
+        if (item.GetOrDefault<FSoftObjectPath>("BuildingActorClassToPreview").AssetPathName.Text is { Length: > 0 } preview && preview != "None")
+            return preview;
+        if (!item.TryGetValue(out FInstancedStruct[] dataList, "DataList")) return null;
+        foreach (var entry in dataList)
+            if (entry.NonConstStruct is FStructFallback fields && fields.TryGetValue(out FSoftObjectPath actor, "ActorClass")
+                && actor.AssetPathName.Text is { Length: > 0 } path && path != "None")
+                return path;
+        return null;
+    }
+
+    /// <summary>A LEGO prop's or build's actor class, loaded.</summary>
+    public static UBlueprintGeneratedClass? PropActor(UObject item)
+    {
+        if (item.GetOrDefault<UBlueprintGeneratedClass?>("BuildingActorClassToPreview") is { } preview) return preview;
+        if (!item.TryGetValue(out FInstancedStruct[] dataList, "DataList")) return null;
+        foreach (var entry in dataList)
+            if (entry.NonConstStruct is { } fields && fields.TryGetValue(out UBlueprintGeneratedClass actor, "ActorClass"))
+                return actor;
+        return null;
+    }
+
+    /// <summary>
     /// Whether a LEGO prop's actor class can be read: much of LEGO Fortnite's gameplay content
     /// (its creatures among it) is an optional download (install tag GFP_JunoRoot) that may be absent.
     /// </summary>
     public static bool HasPropActor(IFileProvider provider, UObject item) =>
-        item.GetOrDefault<FSoftObjectPath>("BuildingActorClassToPreview").AssetPathName.Text is { Length: > 0 } path && path != "None"
-        && provider.TryGetGameFile(path[..path.LastIndexOf('.')] + ".uasset", out _);
+        PropActorPath(item) is { } path && provider.TryGetGameFile(path[..path.LastIndexOf('.')] + ".uasset", out _)
+        || CaveWorldPath(item) is { } world && provider.TryGetGameFile(world[..world.LastIndexOf('.')] + ".umap", out _);
 
     private static readonly object Lock = new();
     private static IFileProvider? _indexed;

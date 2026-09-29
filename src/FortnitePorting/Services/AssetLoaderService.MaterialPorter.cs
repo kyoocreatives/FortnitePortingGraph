@@ -1,10 +1,12 @@
 using System;
+using System.Linq;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.i18N;
 using FortnitePorting.CUE4Parse.Extensions;
 using FortnitePorting.Exporting.MaterialPorter;
+using FortnitePorting.Models.Assets.Filters;
 using FortnitePorting.Models.Assets.Loading;
 
 namespace FortnitePorting.Services;
@@ -55,12 +57,31 @@ public partial class AssetLoaderService
                     DisplayNameHandler = asset => BaseDance(asset)?.GetAnyOrDefault<FText?>("DisplayName", "ItemName")?.Text ?? asset.Name,
                     DescriptionHandler = asset => BaseDance(asset)?.GetAnyOrDefault<FText?>("Description", "ItemDescription")?.Text.TrimEnd() ?? "",
                 },
-                // building props and sets: their preview actor's meshes (the ones whose actor can be read)
+                // building props and sets, what LEGO Fortnite builds (walls, roofs, doors, furniture, crafting
+                // stations, chests...): their actor's meshes (the ones whose actor can be read); cave rooms: their level
                 new AssetLoader(EExportType.LegoProp)
                 {
-                    ClassNames = [..Figures.PropClasses],
+                    ClassNames = [..Figures.PropClasses, Figures.BuildClass, Figures.CaveClass],
                     HideRarity = true,
                     HidePredicate = (_, asset, _) => UEParse.Provider is not { } provider || !Figures.HasPropActor(provider, asset),
+                    DisplayNameHandler = asset => asset.GetAnyOrDefault<FText?>("DisplayName", "ItemName")?.Text is { Length: > 0 } name
+                        ? name : BuildName(asset.Name),
+                    DescriptionHandler = BuildDescription,
+                    FilterCategories =
+                    {
+                        new FilterCategory("LEGO", [EExportType.LegoProp])
+                        {
+                            Filters =
+                            [
+                                new FilterItem("Props & Sets", asset => Figures.PropClasses.Contains(asset.CreationData.Object.ExportType)),
+                                new FilterItem("Building Pieces", asset => asset.CreationData.Object.ExportType == Figures.BuildClass
+                                                                           && asset.CreationData.Object.Name.StartsWith("JBID_")),
+                                new FilterItem("Stations & Placeables", asset => asset.CreationData.Object.ExportType == Figures.BuildClass
+                                                                                 && !asset.CreationData.Object.Name.StartsWith("JBID_")),
+                                new FilterItem("Caves", asset => asset.CreationData.Object.ExportType == Figures.CaveClass),
+                            ]
+                        }
+                    }
                 },
                 // creatures: each look of each species (its meshes from the LEGO Fortnite install)
                 new AssetLoader(EExportType.LegoWildlife)
@@ -75,6 +96,31 @@ public partial class AssetLoaderService
                 }
             ]
         });
+    }
+
+    /// <summary>A LEGO build's name from its asset's (JBID_BS_Wall_Door_02x16x12_01_A -> BS Wall Door 02x16x12 01 A).</summary>
+    private static string BuildName(string asset)
+    {
+        foreach (var prefix in (string[]) ["JBID_", "PBID_", "PPID_"])
+            if (asset.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+                return asset[prefix.Length..].Replace('_', ' ');
+        return asset.Replace('_', ' ');
+    }
+
+    /// <summary>A LEGO prop's description, else a build's theme (its plugin: JunoTheme_OsirisTown -> OsirisTown) and size.</summary>
+    private static string BuildDescription(UObject asset)
+    {
+        if (asset.GetAnyOrDefault<FText?>("Description", "ItemDescription")?.Text is { Length: > 0 } description)
+            return description.TrimEnd();
+        var plugin = asset.GetPathName().TrimStart('/').Split('/')[0];
+        foreach (var prefix in (string[]) ["JunoTheme_", "JunoTG_", "Juno"])
+            if (plugin.StartsWith(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                plugin = plugin[prefix.Length..];
+                break;
+            }
+        var size = asset.GetOrDefault<FText?>("SizeDescription")?.Text;
+        return string.Join(" · ", new[] { plugin, size }.Where(s => !string.IsNullOrEmpty(s)));
     }
 
     /// <summary>A creature look's name from its asset's (Juno_Cow_Highlands_LightBrown -> Cow Highlands LightBrown).</summary>
