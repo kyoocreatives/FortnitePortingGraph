@@ -2,7 +2,7 @@ An unofficial fork of [FortnitePorting](https://github.com/h4lfheart/FortnitePor
 
 **Install:** download `FortnitePortingMP.exe` below and run it (Windows x64, no installer). Windows may warn about an unsigned app: *More info > Run anyway*. It runs beside an installed FortnitePorting, with its own settings (`%APPDATA%\FortnitePorting MP`) and its own Blender plugin (`fortnite_porting_mp`), installed from the Plugins page as in FortnitePorting. Exact materials need Blender 5.0 or newer; older Blender gets FortnitePorting's shaders.
 
-**This release:** sky domes and baked clouds get the colours the game's day sequence gives them at noon (cloud light, shadow and haze, the dome's clouds, halo and sun bloom, the sun and moon) instead of black placeholders.
+**This release:** a *Convert to Exact Materials* button (3D View sidebar > Fortnite Porting > Exact Materials) rebuilds the materials of anything you imported before with FortnitePorting as this fork's exact materials, for the selected objects or the whole scene (the app must be open with the game loaded). Sky domes and baked clouds also get the colours the game's day sequence gives them at noon instead of black placeholders.
 
 **What it adds**
 - Exact materials, rebuilt from each material's Unreal graph. *Settings > Blender > Prefer FP Shaders for Characters* keeps FortnitePorting's shaders for character materials it has one for.

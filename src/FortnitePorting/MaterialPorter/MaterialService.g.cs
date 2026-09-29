@@ -712,6 +712,43 @@ public sealed class MaterialService
         }
     }
 
+    /// <summary>
+    /// The material assets with these names (an FP import keeps only its materials'
+    /// names): name -> their object paths. One pass over the file table; a package
+    /// counts when its main export is a material or a material instance.
+    /// </summary>
+    public Task<JObject> FindMaterialsAsync(IEnumerable<string> names) => Locked(async () =>
+    {
+        var wanted = new HashSet<string>(names.Where(n => !string.IsNullOrWhiteSpace(n)), StringComparer.OrdinalIgnoreCase);
+        var found = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var key in game.Provider.Files.Keys)
+        {
+            if (!key.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase) || key.EndsWith(".o.uasset", StringComparison.OrdinalIgnoreCase)) continue;
+            var name = System.IO.Path.GetFileNameWithoutExtension(key);
+            if (!wanted.Contains(name)) continue;
+            if (!found.TryGetValue(name, out var l)) found[name] = l = new List<string>();
+            if (!l.Contains(key)) l.Add(key);
+        }
+        var result = new JObject();
+        foreach (var (name, keys) in found)
+        {
+            var paths = new JArray();
+            foreach (var key in keys)
+            {
+                try
+                {
+                    var pkg = await game.Provider.LoadPackageAsync(key);
+                    var main = pkg.GetExports().FirstOrDefault(e => e.Name.Equals(name, StringComparison.OrdinalIgnoreCase));
+                    if (main is global::CUE4Parse.UE4.Assets.Exports.Material.UMaterialInterface)
+                        paths.Add(pkg.Name + "." + main.Name);
+                }
+                catch { /* a package that won't load isn't offered */ }
+            }
+            if (paths.Count > 0) result[name] = paths;
+        }
+        return result;
+    });
+
     /// <summary>A package's main export as JSON (the details view shows it raw).</summary>
     public Task<JObject> RawAsync(string path) => Locked(() => MainExportAsync(path));
 }

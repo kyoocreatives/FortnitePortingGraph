@@ -29,6 +29,16 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   ("SunMoon"). What the sky and baked clouds read from the renderer (the sky
   atmosphere, the dome at infinity, the clouds' altitude) is still stubbed:
   fpv4_clouds builds those.
+- **Convert to Exact Materials.** 3D View sidebar > Fortnite Porting > Exact
+  Materials > Selected / Scene (`operator/convert_op.py`): materials an FP import
+  made before (FortnitePorting's own, or the fork's FP shaders) become exact.
+  An FP material keeps only its asset's name (`OriginalName`); the bridge's
+  `find-materials` route gives the material assets with that name (where two
+  share it, the one whose textures the FP material shows) and the material
+  import's `build_exact` makes the exact one, which takes the FP material's
+  slots. What a style put over the material (a colour swap, a building's
+  texture data) isn't kept on FP's material, so the exact one has the asset's own.
+  Needs the app running with the game loaded.
 - **Maps through Material Porter's map reader.** FP's world export hands each
   level to the reader (`src/FortnitePorting.Exporting/MaterialPorter/MapReader.g.cs`):
   every component of an actor from the level's exports over its class's

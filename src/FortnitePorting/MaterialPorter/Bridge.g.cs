@@ -18,6 +18,7 @@ namespace FortnitePorting.MaterialPorter;
 ///   GET /texture?path=/Game/.../T_X  {"file", "srgb", "kind", "depth", ...}
 ///   GET /collection?path=...         {"scalars", "vectors"}
 ///   GET /material?path=...           the instance, described
+///   GET /find-materials?path=A,B     {"A": [object path, ...]}  material assets by name
 ///   GET /file?path=C:\...            the bytes of a file the app exported
 ///
 /// /file is for a Blender that can't see the app's files where the app sees
@@ -82,6 +83,7 @@ public sealed class Bridge : IDisposable
                 "texture" => await materials.BlenderTextureAsync(Need(path)),
                 "collection" => await materials.CollectionAsync(Need(path)),
                 "material" => (await materials.DescribeAsync(Need(path))).ToJson(),
+                "find-materials" => await materials.FindMaterialsAsync(Need(path).Split(',')),
                 _ => Extra != null && await Extra(route, q) is { } extra ? extra : throw new KeyNotFoundException("no route " + route),
             };
             if (route is not ("ping" or "log")) Log?.Invoke($"Blender asked for {route} {ShortName(path)}");   // "log": Blender telling what it does
