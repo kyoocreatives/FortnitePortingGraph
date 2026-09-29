@@ -289,7 +289,7 @@ public partial class ExportContext
             // parts, the first one the body: the plugin merges them onto its armature
             var cooked = meshes.Select(m => Mesh<ExportPart>(m)).OfType<ExportPart>().ToList();
             for (var i = 0; i < cooked.Count; i++) cooked[i].Type = i == 0 ? EFortCustomPartType.Body : EFortCustomPartType.MiscOrTail;
-            if (face.Count > 0) FigureFace(item, cooked, face);
+            FigureFace(item, cooked, face);
             return cooked.Cast<ExportMesh>().ToList();
         }
         if (Figures.RecipeInstance(FileProvider, item) is not { } instance)
@@ -334,9 +334,14 @@ public partial class ExportContext
                 for (var slot = 0; slot < slots; slot++)
                 {
                     if (Material(mi, slot) is not { } material) continue;
-                    export.Materials.Add(values.Textures.Count + values.Scalars.Count == 0
+                    var hasValues = values.Textures.Count + values.Scalars.Count > 0;
+                    export.Materials.Add(!hasValues && part.FaceRig is null
                         ? material with { Slot = slot }
-                        : new MaterialPorterMaterial(material with { Slot = slot }) { MPValues = values, Hash = HashCode.Combine(material.Hash, values.Key()) });
+                        : new MaterialPorterMaterial(material with { Slot = slot })
+                        {
+                            MPValues = hasValues ? values : null, MPFaceRig = part.FaceRig,
+                            Hash = hasValues ? HashCode.Combine(material.Hash, values.Key()) : material.Hash,
+                        });
                 }
             }
             exports.Add(export);
@@ -345,23 +350,40 @@ public partial class ExportContext
     }
 
     /// <summary>
-    /// A cooked figure's expression: its face material (an instance of M_Figure_RigDrivenFace) with the
-    /// picked poses, its character accents moved where the face rig puts them for the mouth picked.
+    /// A cooked figure's face (its instance of M_Figure_RigDrivenFace): the expression picked (its poses,
+    /// its character accents moved where the face rig puts them for the mouth picked), and where the
+    /// rig puts those accents for every mouth pose, for an emote that animates the face.
     /// </summary>
     private void FigureFace(UObject item, List<ExportPart> parts, IReadOnlyDictionary<string, int> face)
     {
         var schema = Figures.Schema(item, FileProvider)?.GetPathName();
+        string? rig = null;
+        var rigRead = false;
         foreach (var part in parts)
             for (var i = 0; i < part.Materials.Count; i++)
             {
                 var material = part.Materials[i];
                 if (!material.BaseMaterialPath.Contains("RigDrivenFace", StringComparison.OrdinalIgnoreCase)) continue;
-                var values = new ParamSet { Label = "expression" };
-                foreach (var (k, v) in FigureRecipe.FaceScalars(face)) values.Scalars[k] = v;
-                if (face.TryGetValue("Mouth", out var mouth))
-                    foreach (var (k, v) in FigureRecipe.AccentScalarsAsync(FileProvider, schema, material.Path, mouth).GetAwaiter().GetResult())
-                        values.Scalars[k] = v;
-                part.Materials[i] = new MaterialPorterMaterial(material) { MPValues = values, Hash = HashCode.Combine(material.Hash, values.Key()) };
+                if (!rigRead)
+                {
+                    rig = FigureRecipe.AccentRigAsync(FileProvider, schema).GetAwaiter().GetResult();
+                    rigRead = true;
+                }
+                ParamSet? values = null;
+                if (face.Count > 0)
+                {
+                    values = new ParamSet { Label = "expression" };
+                    foreach (var (k, v) in FigureRecipe.FaceScalars(face)) values.Scalars[k] = v;
+                    if (face.TryGetValue("Mouth", out var mouth))
+                        foreach (var (k, v) in FigureRecipe.AccentScalarsAsync(FileProvider, schema, material.Path, mouth).GetAwaiter().GetResult())
+                            values.Scalars[k] = v;
+                }
+                if (values is null && rig is null) continue;
+                part.Materials[i] = new MaterialPorterMaterial(material)
+                {
+                    MPValues = values, MPFaceRig = rig,
+                    Hash = values is null ? material.Hash : HashCode.Combine(material.Hash, values.Key()),
+                };
             }
     }
 

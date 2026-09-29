@@ -85,6 +85,11 @@ public class AnimExport : BaseExport
                 if (montage is null) break;
                 
                 AnimMontage(montage);
+                // Material Porter fork: a LEGO emote animates the figure's face with its curves
+                // (the face material's parameters); their keys' interpolation goes along
+                if (exportType is EExportType.LegoEmote)
+                    foreach (var section in Sections)
+                        section.MPCurveModes = CurveModes(section.AssetRef);
                 break;
             }
         }
@@ -210,6 +215,25 @@ public class AnimExport : BaseExport
                 break;
             }
         }
+    }
+
+    /// <summary>Material Porter fork: a sequence's float curves' key interpolation (see ExportAnimSection.MPCurveModes).</summary>
+    private static Dictionary<string, string>? CurveModes(UAnimSequence? sequence)
+    {
+        if (sequence?.CompressedCurveData?.FloatCurves is not { Length: > 0 } curves) return null;
+        var modes = new Dictionary<string, string>();
+        foreach (var curve in curves)
+        {
+            var letters = string.Concat(curve.FloatCurve.Keys.Select(key => key.InterpMode switch
+            {
+                global::CUE4Parse.UE4.Objects.Engine.Curves.ERichCurveInterpMode.RCIM_Constant => 'C',
+                global::CUE4Parse.UE4.Objects.Engine.Curves.ERichCurveInterpMode.RCIM_Cubic => 'Q',
+                _ => 'L',
+            }));
+            if (letters.Length == 0) continue;
+            modes[curve.CurveName.Text] = letters.Distinct().Count() == 1 ? letters[..1] : letters;
+        }
+        return modes;
     }
 
     private List<ExportCurveMapping> CurveMappings(UCurveExpressionsDataAsset curveExpressions)

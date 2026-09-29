@@ -64,6 +64,9 @@ class AnimImportContext:
             mesh_track = active_mesh.data.shape_keys.animation_data.nla_tracks.new(prev=None)
             mesh_track.name = "Sections"
 
+        # Material Porter fork: the main skeleton's sections, for a LEGO emote's face curves
+        face_sections = []
+
         def import_sections(sections, skeleton, track, is_main_skeleton = False):
             total_frames = 0
             anim_fps = 30
@@ -89,6 +92,9 @@ class AnimImportContext:
 
                 strip = track.strips.new(section_name, frame, action)
                 strip.repeat = loop_count
+                if is_main_skeleton:
+                    face_sections.append({"name": section_name, "dto": anim_data, "frame": strip.frame_start, "repeat": loop_count,
+                                          "range": tuple(action.frame_range), "modes": section.get("MPCurveModes")})
 
                 if len(anim_data.curves) > 0 and active_mesh.data.shape_keys is not None and is_main_skeleton:
                     key_blocks = active_mesh.data.shape_keys.key_blocks
@@ -257,6 +263,15 @@ class AnimImportContext:
             return total_frames
 
         total_frames = import_sections(data.get("Sections"), target_skeleton, target_track, True)
+
+        # Material Porter fork: a LEGO figure's face moves with the emote (its curves on the face material)
+        if self.type == EExportType.LEGO_EMOTE:
+            try:
+                from ...material_porter import face_anim
+                animated = face_anim.apply(target_skeleton, face_sections)
+                Log.info("[Material Porter] %d face material(s) animated by the emote" % animated)
+            except Exception as e:
+                Log.error("[Material Porter] the emote's face animation failed: %s: %s" % (type(e).__name__, e))
         if self.options.get("UpdateTimelineLength"):
             bpy.context.scene.frame_end = total_frames
 

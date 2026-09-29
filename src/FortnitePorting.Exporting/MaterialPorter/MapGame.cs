@@ -28,4 +28,6 @@ public record MaterialPorterMaterial : ExportMaterial
 {
     public MaterialPorterMaterial(ExportMaterial material) : base(material) { }
     public ParamSet? MPValues;
+    /// <summary>A LEGO figure's face: where its rig puts the character accents for each mouth pose (FigureRecipe.AccentRigAsync).</summary>
+    public string? MPFaceRig;
 }

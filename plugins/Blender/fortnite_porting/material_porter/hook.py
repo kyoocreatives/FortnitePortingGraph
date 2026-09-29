@@ -152,4 +152,7 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
     for note in job["notes"]:
         _log(note)
     job["notes"].clear()
+    # a LEGO figure's face: where its rig puts the character accents for each mouth pose (face_anim.py)
+    if rig := material_data.get("MPFaceRig"):
+        mat["mp_face_rig"] = rig
     return mat

@@ -82,6 +82,8 @@ public sealed class FigureRecipe
         public string? Material { get; init; }
         public Dictionary<string, string> Textures { get; } = new(StringComparer.OrdinalIgnoreCase);
         public Dictionary<string, double> Scalars { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>The head's character-accent placement for every mouth pose (<see cref="AccentRigAsync"/>), or null.</summary>
+        public string? FaceRig { get; set; }
     }
 
     static readonly JsonSerializerSettings Ser = new() { ReferenceLoopHandling = ReferenceLoopHandling.Ignore };
@@ -248,6 +250,8 @@ public sealed class FigureRecipe
             if (face is not null)
                 foreach (var (k, v) in await AccentScalarsAsync(provider, SchemaPath ?? ConventionSchema(), face, FacePoses.TryGetValue("Mouth", out var mouth) ? mouth : null))
                     headPart.Scalars[k] = v;
+            // and for every mouth pose, for a face an emote animates
+            headPart.FaceRig = await AccentRigAsync(provider, SchemaPath ?? ConventionSchema());
             parts.Add(headPart);
         }
 
@@ -350,18 +354,49 @@ public sealed class FigureRecipe
     public static async Task<Dictionary<string, double>> AccentScalarsAsync(IFileProvider provider, string? schema, string face, int? mouthPose = null)
     {
         var scalars = new Dictionary<string, double>();
+        var accents = await AccentRegistrationsAsync(provider, schema);
+        if (accents.Count == 0) return scalars;
+        var mouthU = await ScalarAsync(provider, face, "MouthU") ?? 0;
+        var mouthV = await ScalarAsync(provider, face, "MouthV") ?? 0;
+        var pose = mouthPose ?? (int)Math.Round(await ScalarAsync(provider, face, "MouthPose") ?? 0);
+        foreach (var (a, byPose) in accents)
+        {
+            var (x, z, accentPose) = byPose[Math.Clamp(pose, 0, byPose.Count - 1)];
+            scalars[$"CharacterAccent{a}U"] = mouthU + x * RigToFaceUv;
+            scalars[$"CharacterAccent{a}V"] = mouthV + z * RigToFaceUv;
+            scalars[$"CharacterAccent{a}Pose"] = accentPose;
+        }
+        return scalars;
+    }
+
+    /// <summary>
+    /// The face rig's character-accent placement for every mouth pose, for a face animated later
+    /// (an emote's mouth curves move the accents with the mouth): JSON
+    /// {"k": rig units to face UV, "accents": {"1": [[x, z, accent pose] for each mouth pose], ...}},
+    /// the accent at the mouth's U/V + (x, z) * k; null when the figure has no registered accent.
+    /// </summary>
+    public static async Task<string?> AccentRigAsync(IFileProvider provider, string? schema)
+    {
+        var accents = await AccentRegistrationsAsync(provider, schema);
+        if (accents.Count == 0) return null;
+        var table = new JObject();
+        foreach (var (a, byPose) in accents)
+            table[a.ToString()] = new JArray(byPose.Select(e => new JArray(e.X, e.Z, e.Pose)));
+        return new JObject { ["k"] = RigToFaceUv, ["accents"] = table }.ToString(Formatting.None);
+    }
+
+    /// <summary>Each registered character accent (1..4): its offset from the mouth (x, z) and pose, by mouth pose.</summary>
+    static async Task<List<(int Accent, List<(double X, double Z, double Pose)> ByPose)>> AccentRegistrationsAsync(IFileProvider provider, string? schema)
+    {
+        var accents = new List<(int, List<(double, double, double)>)>();
         var props = schema is null ? null : await PropertiesAsync(provider, schema);
         var maps = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var data in props?["AdditionalData"] ?? new JArray())
         foreach (var kv in data["DataAssetMap"] ?? new JArray())
             if ((string?)kv["Key"] is { } key && ObjectPath(kv["Value"]) is { } path) maps[key] = path;
-        if (!maps.TryGetValue("CharacterAcc", out var accPath) || await PropertiesAsync(provider, accPath) is not { } acc) return scalars;
+        if (!maps.TryGetValue("CharacterAcc", out var accPath) || await PropertiesAsync(provider, accPath) is not { } acc) return accents;
         var registrations = (acc["Character Accent Registration"] as JArray)?.Select(x => (string?)x ?? "None").ToList() ?? [];
         var beard = maps.TryGetValue("BeardRegistration", out var beardPath) ? await PropertiesAsync(provider, beardPath) : null;
-
-        var mouthU = await ScalarAsync(provider, face, "MouthU") ?? 0;
-        var mouthV = await ScalarAsync(provider, face, "MouthV") ?? 0;
-        var pose = mouthPose ?? (int)Math.Round(await ScalarAsync(provider, face, "MouthPose") ?? 0);
         for (var i = 0; i < Math.Min(4, registrations.Count); i++)
         {
             var (transforms, poses) = registrations[i].ToLowerInvariant() switch
@@ -371,13 +406,13 @@ public sealed class FigureRecipe
                 _ => (null, null),
             };
             if (transforms is null || beard?[transforms] is not JArray list || list.Count == 0) continue;
-            var t = list[Math.Clamp(pose, 0, list.Count - 1)]["Translation"];
-            var a = i + 1;
-            scalars[$"CharacterAccent{a}U"] = mouthU + ((double?)t?["X"] ?? 0) * RigToFaceUv;
-            scalars[$"CharacterAccent{a}V"] = mouthV + ((double?)t?["Z"] ?? 0) * RigToFaceUv;
-            if (beard[poses] is JArray p && p.Count > 0) scalars[$"CharacterAccent{a}Pose"] = (double?)p[Math.Clamp(pose, 0, p.Count - 1)] ?? 0;
+            var p = beard[poses] as JArray;
+            accents.Add((i + 1, list.Select((t, n) => (
+                (double?)t["Translation"]?["X"] ?? 0,
+                (double?)t["Translation"]?["Z"] ?? 0,
+                p is { Count: > 0 } ? (double?)p[Math.Min(n, p.Count - 1)] ?? 0 : 0)).ToList()));
         }
-        return scalars;
+        return accents;
     }
 
     /// <summary>An object's tagged properties as JSON, or null.</summary>
