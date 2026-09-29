@@ -196,8 +196,8 @@ public sealed class Cars(IFileProvider provider)
         var list = new List<Painted>();
         foreach (var o in variant?["GenericPropertyOptions"] ?? new JArray())
         {
-            var row = (o["CosmeticProperties"] ?? new JArray()).Select(cp => (string?)cp["TableRow"]?["RowName"]).FirstOrDefault(r => r != null);
-            if (row == null) continue;
+            // an option naming no row is the unpainted one (a body's "None" without its table row)
+            var row = (o["CosmeticProperties"] ?? new JArray()).Select(cp => (string?)cp["TableRow"]?["RowName"]).FirstOrDefault(r => r != null) ?? "None";
             if ((bool?)o["bIsDefault"] == true) dflt = list.Count;
             list.Add(new Painted(Text(o["VariantName"]) ?? row, RefPath(o["PreviewImage"]), row));
         }
@@ -313,6 +313,31 @@ public sealed class Cars(IFileProvider provider)
             foreach (var m in a["MaterialParameters"] ?? new JArray())
                 if (N((string?)m["ParameterName"]) is { } n && RefPath(m["ParameterValue"]) is { } path) vals[n] = path;
         }
+    }
+
+    /// <summary>
+    /// An item definition's values for the painted row picked (AdditionalVariantInfos, by the row's
+    /// property tag): the Patty Wagon's unpainted row has its burger keep its own textures.
+    /// </summary>
+    private static void PutVariant(MutableProgram mp, Dictionary<string, object> vals, JObject def, string prefix, string? paintedRow)
+    {
+        if (paintedRow == null) return;
+        var tag = "Cosmetics.Variant.Property.Vehicle.Painted." + paintedRow;
+        foreach (var e in def["AdditionalVariantInfos"] ?? new JArray())
+            if (string.Equals((string?)e["Key"]?["TagName"], tag, StringComparison.OrdinalIgnoreCase) && e["Value"] is JObject v)
+                Put(mp, vals, new JObject { ["AdditionalParametersInfos"] = new JArray(v) }, prefix);
+    }
+
+    /// <summary>An item's default painted row (its painted variant's default option), or null.</summary>
+    private async Task<string?> PaintedRowAsync(CarItem item)
+    {
+        var (p, exports) = await PackageAsync(item.Package, item.Name);
+        foreach (var r in p["ItemVariants"] ?? new JArray())
+        {
+            var rows = PaintedOf(ExportOf(r, exports), out var dflt);
+            if (rows.Count > 0) return rows[dflt].Row;
+        }
+        return null;
     }
 
     // ------------------------------------------------------------ the car
@@ -441,7 +466,7 @@ public sealed class Cars(IFileProvider provider)
         var bodyColor = decal?.LockedBody ?? SwatchColor(bodyColorVariant, bodyPick);
         if (decal?.LockedBody == null && bodyPick > 0 && bodyPick < bodyCh.Options.Count) plan.Styles.Add("Body Color: " + bodyCh.Options[bodyPick].Name);
 
-        string? paintedRow = null;
+        string? paintedRow = defaultPainted.Count == 1 ? defaultPainted[0].Row : null;
         if (paintedCh != null)
         {
             var k = Math.Clamp(Pick(paintedCh, paintedDefault), 0, defaultPainted.Count - 1);
@@ -480,6 +505,7 @@ public sealed class Cars(IFileProvider provider)
         wheelCh.Options.Add(new CarOption { Name = "Stock" + (stockItem != null ? " (" + stockItem.Title + ")" : ""), IconItem = stockItem });
         wheelCh.Options.AddRange(wheelItems.Select(w => new CarOption { Name = w.Title, IconItem = w }));
         var wheelPick = Pick(wheelCh, 0);
+        var wheelItem = wheelPick > 0 && wheelPick <= wheelItems.Count ? wheelItems[wheelPick - 1] : stockItem;
         var wheelVcid = stockVcid;
         if (wheelPick > 0 && wheelPick <= wheelItems.Count)
         {
@@ -527,10 +553,21 @@ public sealed class Cars(IFileProvider provider)
         if (decalColor != null && mp.Has("SkinColor")) vals["SkinColor"] = decalColor;
         var paintedParam = (string?)vc["PaintedDataTableParameterName"] ?? "BodyPainted";
         if (paintedRow != null && mp.EnumValue(paintedParam, paintedRow) is { } pv) vals[paintedParam] = pv;
+        PutVariant(mp, vals, vc, "Body_", paintedRow);
+        if (wv != null && wheelItem != null && await PaintedRowAsync(wheelItem) is { } wheelRow)
+        {
+            if ((string?)wv["PaintedDataTableParameterName"] is { } wheelParam && mp.EnumValue(wheelParam, wheelRow) is { } wpv) vals[wheelParam] = wpv;
+            PutVariant(mp, vals, wv, "Wheel_", wheelRow);
+        }
+        // the windows outside a mode (a mode's query picks its own)
+        if ((vc["WindowQueryInfos"] ?? new JArray()).FirstOrDefault(w => !(w["VehicleTagQuery"]?["TagDictionary"] ?? new JArray()).Any())?["WindowInfo"] is { } window
+            && (string?)window["WindowDataTableParameterName"] is { } windowParam && mp.EnumValue(windowParam, (string?)window["WindowRow"]?["RowName"]) is { } wnv)
+            vals[windowParam] = wnv;
         if (decal?.Vcid != null)
         {
             var sp = await PropsAsync(decal.Vcid);
             Put(mp, vals, sp, "Body_");     // the decal's own values (a body's skin switch: its trim, chassis and interior materials)
+            PutVariant(mp, vals, sp, "Body_", paintedRow);
             if ((string?)vc["SkinDataTableParameterName"] is { } skinTable && mp.EnumValue(skinTable, (string?)sp["SkinRowName"]) is { } sv)
                 vals[skinTable] = sv;
         }

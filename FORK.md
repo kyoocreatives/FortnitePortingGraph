@@ -51,7 +51,11 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   the constants onto the tier's skeleton (a wheel onto `SK_Wheel_Base_Skeleton`),
   written once per build as `Assets/MaterialPorter/Cars/<item>_<hash>.uemodel`.
   A decal's own values (a body's skin switch: its trim, chassis and interior
-  materials) go into the program too.
+  materials) go into the program too, as do the item's values for the painted
+  row picked (`AdditionalVariantInfos`, keyed by the row's
+  `Cosmetics.Variant.Property.Vehicle.Painted.<row>` tag: the Patty Wagon's
+  "None" row keeps its burger's textures), the wheel's own default painted row,
+  and the windows of the tier's mode-less `WindowQueryInfos` entry.
 - **LEGO figures.** Assets > Lego > Outfits lists the LEGO outfits
   (`JunoAthenaCharacterItemOverrideDefinition`), all 2,480
   (`Exporting/MaterialPorter/Figures.cs`):
