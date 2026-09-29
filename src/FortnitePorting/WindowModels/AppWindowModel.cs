@@ -116,6 +116,8 @@ public partial class AppWindowModel(
 
     public async Task CheckForUpdate()
     {
+        // Material Porter fork: the fork's own releases (its versions are dev builds to FP's updater)
+        await MaterialPorter.ForkUpdates.CheckAsync(_info, _app);
         if (Globals.IsDevBuild) return;
 
         var repositoryInfo = await _api.FortnitePorting.Repository();

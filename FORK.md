@@ -116,17 +116,28 @@ plugin receives it, `/fork-loader?type=` runs one Assets tab's loader (`check=1`
 With both plugins in one Blender, the fork's panels/operators replace
 upstream's same-named ones (Blender prints "registered before" infos).
 
+## Releases
+
+Pushing a tag `v<FP version>-mp.<N>` (`v4.0.0-mp.1`, then `-mp.2`...; after an
+upstream merge `v4.0.1-mp.1`) runs `.github/workflows/build-release.yml`: a
+single-file `FortnitePortingMP.exe`, released with `RELEASE_NOTES.md` as its
+text (edit it before tagging). The `-mp.N` makes a release a dev build to FP's
+updater, which would install upstream FP over it; `MaterialPorter/ForkUpdates.cs`
+asks the fork's latest GitHub release instead, and builds without it (`-dev`,
+a commit's) ask neither.
+
 ## Where the code lives
 
-- `src/FortnitePorting/MaterialPorter/`: `MaterialPorterService.cs`, `Fork.cs`
-  (fork-only) and `*.g.cs` (generated).
+- `src/FortnitePorting/MaterialPorter/`: `MaterialPorterService.cs`, `Fork.cs`,
+  `ForkUpdates.cs` (fork-only) and `*.g.cs` (generated).
 - `plugins/Blender/fortnite_porting/material_porter/`: `hook.py`, `__init__.py`
   (fork-only) and the builder/translator modules (generated).
 - Small edits in upstream files, each marked "Material Porter fork":
   `CUE4ParseService.cs` (bridge start, `ResolvedVersion`), `SupabaseService.cs`,
   `InstallationSetupViewModel.cs`, `AppWindow.axaml`, `AppService.cs`,
   `SettingsService.cs`, `Program.cs`, `BlenderInstallation.cs`,
-  `ExportClientService.cs`, plugin `server.py` and `material_context.py`.
+  `ExportClientService.cs`, `AppWindowModel.cs`, `build-release.yml`, `README.md`, plugin
+  `server.py` and `material_context.py`.
 
 Generated files come from Material Porter (`Documents/Claude/materialporter`):
 edit there, then `python tools/sync_fork.py`.

@@ -1,0 +1,56 @@
+using System;
+using System.Net.Http;
+using System.Threading.Tasks;
+using FortnitePorting.Models;
+using FortnitePorting.Models.Information;
+using FortnitePorting.Services;
+using Newtonsoft.Json.Linq;
+using Serilog;
+
+namespace FortnitePorting.MaterialPorter;
+
+/// <summary>
+/// The fork's releases (GitHub, tagged v4.0.0-mp.N). FP's updater would install upstream FP over the
+/// fork; a release's "-mp.N" makes it a dev build to FP, so FP's never asks and this one does.
+/// </summary>
+public static class ForkUpdates
+{
+    public const string Repository = "kyoocreatives/FortnitePortingGraph";
+
+    public static async Task CheckAsync(InfoService info, AppService app)
+    {
+        // builds that aren't releases (-dev, a commit's) don't ask
+        if (Release(Globals.Version) is not (var currentBase, var currentBuild)) return;
+        try
+        {
+            using var client = new HttpClient();
+            client.DefaultRequestHeaders.UserAgent.ParseAdd("FortnitePortingMP");
+            var release = JObject.Parse(await client.GetStringAsync($"https://api.github.com/repos/{Repository}/releases/latest"));
+            if (release.Value<string>("tag_name") is not { } tag || release.Value<string>("html_url") is not { } page) return;
+            if (Release(new FPVersion(tag)) is not (var latestBase, var latestBuild)
+                || latestBase < currentBase || latestBase == currentBase && latestBuild <= currentBuild) return;
+            info.Dialog($"Update {tag}", "A new version of FortnitePorting MP is out.", buttons: [
+                new DialogButton
+                {
+                    Text = "Download",
+                    IsPrimary = true,
+                    Action = () => app.Launch(page)
+                },
+                new DialogButton
+                {
+                    Text = "Cancel"
+                }
+            ]);
+        }
+        catch (Exception e)
+        {
+            Log.Warning("[Material Porter] update check failed: {Error}", e.Message);
+        }
+    }
+
+    /// <summary>A release's FP version and build (N of "mp.N"); identifiers compare as text, so mp.10 would sort before mp.9.</summary>
+    private static (FPVersion Base, int Build)? Release(FPVersion version) =>
+        version.Identifier.StartsWith("mp.") && int.TryParse(version.Identifier[3..], out var build)
+            ? (new FPVersion(version.Release, version.Major, version.Minor, version.Patch), build)
+            : null;
+}

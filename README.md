@@ -13,6 +13,11 @@
 
 </div>
 
+<!-- Material Porter fork -->
+> **FortnitePorting MP** is an unofficial fork: materials rebuilt from their Unreal graphs, LEGO Fortnite and
+> Rocket Racing content. Download it from [Releases](../../releases/latest); what it changes is in [FORK.md](FORK.md).
+> FortnitePorting's Discord and repository don't support it.
+
 ## Features
 
 - **Browse Fortnite assets** - Explore cosmetics, props, gameplay items, and more through a purpose-built interface.

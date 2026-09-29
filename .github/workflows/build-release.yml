@@ -4,11 +4,16 @@ run-name: Release ${{ github.ref_name }}
 on:
   push:
     tags:
-      - '*'
+      # Material Porter fork: its releases (v4.0.0-mp.1, ...); "-mp.N" keeps FP's updater, which would install
+      # upstream FP over the fork, off
+      - 'v*-mp.*'
 
 jobs:
   build:
     runs-on: windows-latest
+    # Material Porter fork: creates the release (a fork's token is read-only by default)
+    permissions:
+      contents: write
 
     steps:
       - name: GIT Checkout
@@ -40,13 +45,16 @@ jobs:
             -p:IncludeNativeLibrariesForSelfExtract=true `
             -p:Version=${{ env.FP_VERSION }}
 
+      - name: Name Executable
+        run: Rename-Item ./Release/FortnitePorting.exe FortnitePortingMP.exe
+
       - name: Create GitHub Release
         uses: softprops/action-gh-release@v2
         with:
-          name: "FortnitePorting ${{ github.ref_name }}"
-          files: ./Release/FortnitePorting.exe
+          name: "FortnitePorting MP ${{ github.ref_name }}"
+          files: ./Release/FortnitePortingMP.exe
+          body_path: RELEASE_NOTES.md
           draft: false
           prerelease: false
-          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
