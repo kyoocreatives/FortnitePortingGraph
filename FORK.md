@@ -208,6 +208,15 @@ a commit's) ask neither.
 Generated files come from Material Porter (`Documents/Claude/materialporter`):
 edit there, then `python tools/sync_fork.py`.
 
+- `patches/CUE4Parse/`: whole files laid over the `external/CUE4Parse`
+  submodule (upstream's, which the fork can't push to). Both workflows copy them
+  in after the submodule checkout; locally, copy them into the submodule the
+  same way. Today: `FSpline.cs`, which reads UE 5.6's new spline format
+  (positions, then Rotation/Scale attribute channels: control values, knots,
+  interp modes) where upstream throws, so SplineComponents and
+  WaterSplineComponents lost everything after it. After updating the submodule,
+  check whether upstream now reads it and drop the overlay if so.
+
 ## Merging upstream
 
     git fetch upstream

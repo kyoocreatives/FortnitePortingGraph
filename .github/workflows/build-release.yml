@@ -24,6 +24,10 @@ jobs:
       - name: Fetch Submodules Recursively
         run: git submodule update --init --recursive
 
+      # Material Porter fork: the fixes it carries for FP's CUE4Parse (whole files, laid over the submodule)
+      - name: Apply CUE4Parse Overlay
+        run: Copy-Item -Path ./patches/CUE4Parse/* -Destination ./external/CUE4Parse -Recurse -Force
+
       - name: .NET 10 Setup
         uses: actions/setup-dotnet@v4
         with:
