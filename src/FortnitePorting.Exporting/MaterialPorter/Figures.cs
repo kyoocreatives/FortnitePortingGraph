@@ -2,9 +2,12 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using CUE4Parse.FileProvider;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
+using CUE4Parse.UE4.Assets.Exports.Texture;
+using CUE4Parse.UE4.Objects.Engine;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.CUE4Parse.Extensions;
@@ -36,6 +39,96 @@ public static class Figures
         HasBake(provider, item)
         || item.TryGetValue(out FSoftObjectPath mesh, "SkeletalMesh") && mesh.AssetPathName.Text is { Length: > 0 } path && path != "None"
            && provider.TryGetGameFile(path[..path.LastIndexOf('.')] + ".uasset", out _);
+
+    /// <summary>
+    /// A creature look's icon (large: the _L one where there is one). The game's creature icons
+    /// (T_UI_Juno_Icon_[Creature_]...) aren't tied to the looks by any asset: one named with the
+    /// look's words (Juno_Cow_Default_Holstein_A -> ..._Cow_HolsteinA) is its own; else its species'
+    /// icon, the one its pawn blueprint shows on the map (MarkerDisplay.Icon) - its own folder's, or
+    /// for a look whose folder's pawns show none (Juno_PigCowboy), the species its name starts with.
+    /// </summary>
+    public static UTexture2D? CreatureIcon(IFileProvider provider, UObject item, bool large)
+    {
+        var (icons, pawns) = CreatureIndex(provider);
+        // its words, or its words but the species' first (Juno_Cow_Default_Simmental_A -> ..._SimmentalA)
+        var look = item.Name.StartsWith("Juno_", StringComparison.OrdinalIgnoreCase) ? item.Name[5..] : item.Name;
+        var species = Regex.Match(look, "^[A-Z][a-z]+").Value;
+        foreach (var key in (string[]) [IconKey(look), IconKey(look[species.Length..])])
+            if (icons.TryGetValue(key, out var match) && Texture(provider, large && match.Large is { } l ? l : match.Small) is { } texture)
+                return texture;
+        string file;
+        try { file = provider.FixPath(item.GetPathName().Split('.')[0]); }
+        catch { return null; }
+        var content = file.IndexOf("/Content/", StringComparison.OrdinalIgnoreCase);
+        if (content >= 0 && pawns.TryGetValue(file[..(content + "/Content/".Length)], out var own) && MarkerIcon(provider, own) is { } icon)
+            return icon;
+        var speciesRoot = $"/JunoCreature_{species}/Content/";
+        return species.Length > 0 && pawns.FirstOrDefault(kv => kv.Key.EndsWith(speciesRoot, StringComparison.OrdinalIgnoreCase)).Value is { } theirs
+            ? MarkerIcon(provider, theirs) : null;
+    }
+
+    /// <summary>The first of these pawn blueprints that shows an icon on the map.</summary>
+    private static UTexture2D? MarkerIcon(IFileProvider provider, List<string> pawns)
+    {
+        foreach (var pawn in pawns)
+            if (provider.TryLoadPackageObject<UBlueprintGeneratedClass>($"{pawn}.{Path.GetFileName(pawn)}_C", out var cls)
+                && cls.ClassDefaultObject.Load() is { } defaults
+                && defaults.GetOrDefault<FStructFallback?>("MarkerDisplay")?.GetOrDefault<UTexture2D?>("Icon") is { } icon)
+                return icon;
+        return null;
+    }
+
+    private static UTexture2D? Texture(IFileProvider provider, string key) =>
+        provider.TryLoadPackageObject<UTexture2D>($"{key}.{Path.GetFileName(key)}", out var texture) ? texture : null;
+
+    /// <summary>A look's or icon's name as the words that tell it, in any order (Juno_, Creature_, Default, Customization, T_UI_Juno_Icon_ left out).</summary>
+    private static string IconKey(string name)
+    {
+        var words = Regex.Replace(name, "([a-z])([A-Z])", "$1_$2").Split('_', StringSplitOptions.RemoveEmptyEntries);
+        return string.Join(" ", words.Select(w => w.ToLowerInvariant())
+            .Where(w => w is not ("t" or "ui" or "juno" or "icon" or "creature" or "default" or "customization")).Order());
+    }
+
+    private static IFileProvider? _creaturesIndexed;
+    private static Dictionary<string, (string Small, string? Large)> _creatureIcons = new();
+    private static Dictionary<string, List<string>> _creaturePawns = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>The creature icons by key, and each plugin's pawn blueprints (shortest name first: the species' own), made once per provider.</summary>
+    private static (Dictionary<string, (string Small, string? Large)> Icons, Dictionary<string, List<string>> Pawns) CreatureIndex(IFileProvider provider)
+    {
+        lock (Lock)
+        {
+            if (ReferenceEquals(_creaturesIndexed, provider)) return (_creatureIcons, _creaturePawns);
+            var icons = new Dictionary<string, (string Small, string? Large)>();
+            var pawns = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var file in provider.Files.Keys)
+            {
+                if (!file.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase) || file.EndsWith(".o.uasset", StringComparison.OrdinalIgnoreCase)) continue;
+                var key = file[..^".uasset".Length];
+                var name = Path.GetFileName(key);
+                if (name.StartsWith("T_UI_Juno_Icon_", StringComparison.OrdinalIgnoreCase) && !name.Contains("Portrait", StringComparison.OrdinalIgnoreCase)
+                    && !name.StartsWith("T_UI_Juno_Icon_Minifig", StringComparison.OrdinalIgnoreCase) && !name.EndsWith("_S", StringComparison.OrdinalIgnoreCase))
+                {
+                    var large = name.EndsWith("_L", StringComparison.OrdinalIgnoreCase);
+                    var iconKey = IconKey(large ? name[..^2] : name);
+                    icons.TryGetValue(iconKey, out var entry);
+                    icons[iconKey] = large ? (entry.Small ?? key, key) : (key, entry.Large);
+                }
+                var pawnsAt = key.IndexOf("/Content/Pawns/BP_", StringComparison.OrdinalIgnoreCase);
+                if (pawnsAt > 0 && key.Contains("/JunoCreature", StringComparison.OrdinalIgnoreCase))
+                {
+                    var root = key[..(pawnsAt + "/Content/".Length)];
+                    if (!pawns.TryGetValue(root, out var list)) pawns[root] = list = [];
+                    list.Add(key);
+                }
+            }
+            foreach (var list in pawns.Values) list.Sort((a, b) => a.Length.CompareTo(b.Length));
+            _creatureIcons = icons;
+            _creaturePawns = pawns;
+            _creaturesIndexed = provider;
+            return (icons, pawns);
+        }
+    }
 
     /// <summary>The textures a figure's or creature's schema puts on its meshes' materials (parameter -> texture path).</summary>
     public static Dictionary<string, string> SchemaTextures(IFileProvider provider, UObject item)

@@ -300,12 +300,13 @@ public class MaterialPorterService : IService
         }
         if (route == "fork-loader")
         {
-            // tests: run one asset tab's loader as the Assets page does, and say what it lists
+            // tests: run one asset tab's loader as the Assets page does, and say what it lists (icons=1: with each one's icon)
             var loader = AppServices.AssetLoading.Get(Enum.Parse<EExportType>(query["type"] ?? "LegoOutfit"));
             var clock = Stopwatch.StartNew();
             await loader.Load();
             var names = loader.Source.Items.Select(a => a.CreationData is Models.Assets.Asset.AssetItemCreationArgs args
-                    ? $"{args.DisplayName} = {args.Object.GetPathName()}" : a.CreationData.DisplayName)
+                    ? $"{args.DisplayName} = {args.Object.GetPathName()}" + (query["icons"] == "1" ? $" [{args.IconPath?.Split('/').Last()}]" : "")
+                    : a.CreationData.DisplayName)
                 .OrderBy(n => n).ToList();
             var filter = query["filter"] ?? "";
             // check=1 (LEGO): every listed figure resolved to a cooked mesh or a recipe; the ones with neither named

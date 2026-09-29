@@ -64,6 +64,8 @@ public partial class AssetLoaderService
                     ClassNames = [Figures.CreatureClass],
                     HideRarity = true,
                     HidePredicate = (_, asset, _) => !Figures.IsCreature(asset) || UEParse.Provider is not { } provider || !Figures.HasCreatureMesh(provider, asset),
+                    LowResIconHandler = asset => UEParse.Provider is { } provider ? Figures.CreatureIcon(provider, asset, large: false) : null,
+                    HighResIconHandler = asset => UEParse.Provider is { } provider ? Figures.CreatureIcon(provider, asset, large: true) : null,
                     DisplayNameHandler = asset => CreatureName(asset.Name),
                     DescriptionHandler = _ => "",
                 }
