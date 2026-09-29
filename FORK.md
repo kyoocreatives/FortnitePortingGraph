@@ -136,7 +136,8 @@ a commit's) ask neither.
   `CUE4ParseService.cs` (bridge start, `ResolvedVersion`), `SupabaseService.cs`,
   `InstallationSetupViewModel.cs`, `AppWindow.axaml`, `AppService.cs`,
   `SettingsService.cs`, `Program.cs`, `BlenderInstallation.cs`,
-  `ExportClientService.cs`, `AppWindowModel.cs`, `build-release.yml`, `README.md`, plugin
+  `ExportClientService.cs`, `AppWindowModel.cs`, `AssetVideoPreview.axaml.cs` (libvlc in a
+  single-file build), `FortnitePorting.csproj`, `build-release.yml`, `README.md`, plugin
   `server.py` and `material_context.py`.
 
 Generated files come from Material Porter (`Documents/Claude/materialporter`):

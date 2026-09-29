@@ -1,4 +1,7 @@
 using System;
+using System.Diagnostics;
+using System.IO;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Avalonia;
@@ -177,7 +180,16 @@ public partial class AssetVideoPreview : UserControl
 
     private static LibVLC CreateLibVLC()
     {
-        Core.Initialize();
+        // Material Porter fork: a single-file build extracts libvlc with its other native libraries (Skia's,
+        // already loaded), not beside the exe where LibVLCSharp looks; the runtime doesn't say where
+        var directory = Process.GetCurrentProcess().Modules.Cast<ProcessModule>()
+            .Select(module => Path.GetDirectoryName(module.FileName))
+            .Prepend(AppContext.BaseDirectory)
+            .OfType<string>().Distinct(StringComparer.OrdinalIgnoreCase)
+            .Select(path => Path.Combine(path, "libvlc", "win-x64"))
+            .FirstOrDefault(path => File.Exists(Path.Combine(path, "libvlc.dll")));
+        if (directory is not null) Core.Initialize(directory);
+        else Core.Initialize();
         return new LibVLC(false,
             "--quiet",
             "--verbose=-1",
