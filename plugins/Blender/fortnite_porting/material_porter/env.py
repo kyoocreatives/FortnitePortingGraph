@@ -512,6 +512,32 @@ class MaterialEnv:
             self.tex_normal.add(key)
         return self._image(key, self._record(key), "normal" if normal else None)
 
+    # a skinned mesh's importer turns on Object.add_rest_position_attribute: its vertices before
+    # the armature (and shape keys) moved them, as the "rest_position" attribute
+    REST_POSITION = "rest_position"
+
+    def local_position(self):
+        """UE's LocalPosition, and its PreSkinnedPosition: on a skinned mesh both are the vertex in
+        the reference pose (the GPU skin vertex factory's unskinned position; a LEGO face's
+        front/back and left/right print masks, saturate(position + 0.5), stay on the head while
+        the figure sits or leans) - the "rest_position" attribute its importer keeps. Elsewhere
+        (a static mesh, an object imported without it) the object-space position."""
+        tr = self.tr
+
+        def make():
+            tc = tr.shared("texcoord", lambda: tr.node("ShaderNodeTexCoord", "texture coordinate"))
+            local = tr.from_blender(Val(tc.outputs["Object"], 3), point=True)
+            n = tr.node("ShaderNodeAttribute", "rest position")
+            n.attribute_type = 'GEOMETRY'
+            n.attribute_name = self.REST_POSITION
+            raw = Val(n.outputs["Vector"], 3)
+            has = tr.binop('GREATER_THAN', tr.vmath('LENGTH', raw), tr.const(1e-9), label="has rest position")
+            return tr.lerp(local, tr.from_blender(raw, point=True), has, label="local position (reference pose)")
+        return self.once("local position", make)
+
+    def preskinned_position(self):
+        return self.local_position()
+
     def texture_nearest(self, key):
         """Whether UE samples the texture unfiltered (the app's record: its Filter TF_Nearest)."""
         rec = self._record(key)

@@ -92,6 +92,7 @@ geometry, camera), so an env only defines what it knows better:
     env.dynamic_parameter(index)      -> Val (4) or None
     env.texture_slices(name, sampler) -> [bpy.types.Image] a texture array
     env.texture_parameter(pname, default) -> the texture a parameter holds
+    env.preskinned_position()         -> Val (3)   UE cm, object space, before skinning
     env.texture_nearest(name)         -> bool      the texture samples unfiltered (its Filter
                                                    TF_Nearest: a LUT, a pixel grid)
     env.primitive_index()             -> Val (1)
@@ -2211,6 +2212,12 @@ class Translator:
             return self.shared("local position", lambda: self.from_blender(Val(n.outputs["Object"], 3), point=True))
         return self._hook("local_position", fallback)
 
+    def preskinned_position(self):
+        """UE's PreSkinnedPosition: the vertex where it is before skinning, which an animation
+        doesn't move (a LEGO face's prints are projected from it). An env that knows the rest
+        pose says; otherwise the local position (a static mesh's is the same)."""
+        return self._hook("preskinned_position", self.local_position)
+
     def local_bounds(self):
         """(min, max), UE cm. Blender's shader nodes can't see an object's
         bounds: an env that knows the object says; otherwise +-1 m."""
@@ -2564,8 +2571,10 @@ class Translator:
         if t == "ObjectPositionWS":
             rel = "CameraRelative" in str(p.get("OriginType", ""))
             return self._hook("object_position", lambda: env.actor_position(rel), rel)
-        if t in ("LocalPosition", "PreSkinnedPosition"):
+        if t == "LocalPosition":
             return self.local_position()
+        if t == "PreSkinnedPosition":
+            return self.preskinned_position()
         if t == "PreSkinnedNormal":
             return self.vmath('NORMALIZE', self.from_world(self.vertex_normal(), "local", False), out_w=3)
         if t in ("PreSkinnedLocalBounds", "ObjectLocalBounds", "Bounds", "ObjectBounds"):

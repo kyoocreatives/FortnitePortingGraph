@@ -40,6 +40,11 @@ class Importer:
             failed = e
             raise
         finally:
+            # skinned meshes keep their rest positions for the shaders (UE's PreSkinnedPosition:
+            # a LEGO face's prints stay put while the figure moves)
+            for o in bpy.data.objects:
+                if o.name not in objects0 and o.type == 'MESH' and any(m.type == 'ARMATURE' for m in o.modifiers):
+                    o.add_rest_position_attribute = True
             # the imported meshes (not FP's bone-shape widgets, which carry no material)
             meshes = [o for o in bpy.data.objects if o.name not in objects0 and o.type == 'MESH' and len(o.material_slots) > 0]
             used = {s.material.name: s.material for o in meshes for s in o.material_slots if s.material is not None}
