@@ -1,23 +1,24 @@
 using System;
 using System.Collections.Generic;
 using System.Collections.Specialized;
-using System.Linq;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Threading.Tasks;
-using CUE4Parse.UE4.Objects.Engine;
-using FortnitePorting.Exporting;
-using FortnitePorting.Exporting.MaterialPorter;
-using CUE4Parse.UE4.Assets.Exports;
-using Newtonsoft.Json;
-using Newtonsoft.Json.Linq;
+using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
 using CUE4Parse.FileProvider.Vfs;
-using CUE4Parse.Encryption.Aes;
+using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Objects.Core.i18N;
 using CUE4Parse.UE4.Objects.Core.Misc;
+using CUE4Parse.UE4.Objects.Engine;
 using FortnitePorting.Application;
+using FortnitePorting.Exporting;
+using FortnitePorting.Exporting.MaterialPorter;
 using FortnitePorting.Services;
 using Microsoft.Extensions.DependencyInjection;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 using Serilog;
 
 namespace FortnitePorting.MaterialPorter;
@@ -111,12 +112,13 @@ public class MaterialPorterService : IService
     public async Task SubmitIslandKeysAsync(AbstractVfsFileProvider provider)
     {
         var opened = 0;
-        foreach (var k in LoadIslandKeys())
+        var keys = LoadIslandKeys();
+        foreach (var k in keys)
         {
             try { opened += await provider.SubmitKeyAsync(new FGuid(NormalGuid(k.Guid)), new FAesKey(k.Key)); }
             catch (Exception e) { Log.Warning("[Material Porter] island {Code}: {Message}", k.Code, e.Message); }
         }
-        Log.Information("[Material Porter] islands: {Opened} archives opened with {Keys} saved keys", opened, LoadIslandKeys().Count);
+        Log.Information("[Material Porter] islands: {Opened} archives opened with {Keys} saved keys", opened, keys.Count);
     }
 
     /// <summary>The user's island key tool (Material Porter's setting, else Documents\UEFN-AES-grabber-main).</summary>
@@ -217,11 +219,6 @@ public class MaterialPorterService : IService
         return (guid, key);
     }
 
-    /// <summary>
-    /// GET /fork-export-world?path=&lt;level package&gt;[&amp;landscape=1][&amp;actor=name part]: FP's world export of that one
-    /// level (actors and instances, as the Map page sends it to Blender) as the JSON the plugin
-    /// receives - for tests that import it headless.
-    /// </summary>
     // ------------------------------------------------------------ cars
     private List<CarItem>? _carSkins, _carWheels;
     private readonly System.Threading.SemaphoreSlim _carGate = new(1, 1);
@@ -243,7 +240,7 @@ public class MaterialPorterService : IService
                         try
                         {
                             if (await Game.Provider.LoadPackageObjectAsync(a.ObjectPath) is { } item
-                                && item.GetOrDefault<global::CUE4Parse.UE4.Objects.Core.i18N.FText?>("ItemName")?.Text is { Length: > 0 } name)
+                                && item.GetOrDefault<FText?>("ItemName")?.Text is { Length: > 0 } name)
                                 title = name;
                         }
                         catch { /* its asset name, then */ }
@@ -343,10 +340,6 @@ public class MaterialPorterService : IService
             using var assetMeta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
             var assetSession = new ExportSession(assetMeta);
             var assetData = await assetSession.RunAsync(() => [assetSession.CreateExport(asset.Name, asset, type, carStyles)]);
-            // what Blender would find the moment the export is handed over: every mesh file there
-            var missingNow = assetData.Exports.OfType<Exporting.Types.MeshExport>().SelectMany(e => e.Meshes)
-                .Select(m => m.Path).Where(p => !File.Exists(System.IO.Path.Combine(assetMeta.AssetsRoot, p.TrimStart('/').Split('.')[0] + ".uemodel"))).ToList();
-            if (missingNow.Count > 0) Log.Warning("[Material Porter] export handed over before its mesh files: {Missing}", string.Join(", ", missingNow));
             return new JRaw(JsonConvert.SerializeObject(new
             {
                 MetaData = new
@@ -358,12 +351,14 @@ public class MaterialPorterService : IService
                 assetData.Exports,
             }));
         }
+        // tests: /fork-export-world?path=<level package>[&landscape=1][&actor=name part], FP's world export of that
+        // one level (actors and instances, as the Map page sends it to Blender) as the plugin receives it
         if (route != "fork-export-world") return null;
         var path = query["path"] ?? throw new ArgumentException("path missing");
         // a World Partition cell's world is named after its map, not its file
         var package = await Game.Provider.LoadPackageAsync(path);
         var world = package.GetExports().OfType<UWorld>().FirstOrDefault()
-                    ?? throw new System.IO.FileNotFoundException("no world in " + path);
+                    ?? throw new FileNotFoundException("no world in " + path);
         using var meta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
         meta.WorldFlags = EWorldFlags.Actors | EWorldFlags.InstancedFoliage | (query["landscape"] == "1" ? EWorldFlags.Landscape : 0);
         var session = new ExportSession(meta);

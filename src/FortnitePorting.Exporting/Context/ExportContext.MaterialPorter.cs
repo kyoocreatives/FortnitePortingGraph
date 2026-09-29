@@ -34,7 +34,6 @@ namespace FortnitePorting.Exporting.Context;
 /// </summary>
 public partial class ExportContext
 {
-    public static bool UseMaterialPorterMaps = true;
     /// <summary>Tests: only actors whose name holds this (null: all).</summary>
     public static string? MaterialPorterActorFilter;
 
@@ -42,7 +41,7 @@ public partial class ExportContext
 
     public List<ExportMesh>? MaterialPorterLevel(ULevel level)
     {
-        if (!UseMaterialPorterMaps || level.Owner?.Name is not { } package) return null;
+        if (level.Owner?.Name is not { } package) return null;
 
         var meshes = new List<ExportMesh>();
         var actors = Meta.WorldFlags.HasFlag(EWorldFlags.Actors);
@@ -151,33 +150,28 @@ public partial class ExportContext
     private static Dictionary<string, string> LandscapeLayerNames(ALandscapeProxy proxy)
     {
         var names = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        int components = 0, allocations = 0;
-        var errors = new List<string>();
         foreach (var componentLazy in proxy.LandscapeComponents ?? [])
         {
             ULandscapeComponent? component;
             try { component = componentLazy.Load<ULandscapeComponent>(); }
-            catch (Exception e) { errors.Add("component: " + e.Message); continue; }
+            catch { continue; }
             if (component is null) continue;
-            components++;
             foreach (var allocation in component.GetWeightmapLayerAllocations() ?? [])
             {
-                allocations++;
                 var asset = allocation.GetLayerName();
                 if (asset is null || names.ContainsKey(asset)) continue;
                 try
                 {
                     // the property, read as tagged (this CUE4Parse's LayerName field stays None)
-                    var info = allocation.LayerInfo.Load();
-                    var layer = info?.GetOrDefault<FName>("LayerName") ?? default;
+                    var layer = allocation.LayerInfo.Load()?.GetOrDefault<FName>("LayerName") ?? default;
                     if (!layer.IsNone && !string.IsNullOrEmpty(layer.Text)) names[asset] = layer.Text;
-                    else errors.Add(asset + ": no LayerName (" + string.Join(",", info?.Properties.Select(p => p.Name.Text) ?? []) + ")");
                 }
-                catch (Exception e) { errors.Add(asset + ": " + e.Message); }
+                catch
+                {
+                    // an unreadable layer info keeps FP's name
+                }
             }
         }
-        Log.Information("[Material Porter] {Landscape}: {Components} components, {Allocations} layer allocations, layers {Layers}; {Errors}",
-            proxy.Name, components, allocations, string.Join(", ", names.Select(kv => kv.Key + "=" + kv.Value)), string.Join("; ", errors.Distinct().Take(4)));
         return names;
     }
 
@@ -279,9 +273,8 @@ public partial class ExportContext
     /// their baked materials; else its recipe (FigureRecipe): the shared Mutable object's
     /// body and the recipe's cooked parts, dressed with its materials, colours and decos.
     /// </summary>
-    public List<ExportMesh> MaterialPorterFigure(UObject item, IReadOnlyDictionary<string, int>? face = null)
+    public List<ExportMesh> MaterialPorterFigure(UObject item, IReadOnlyDictionary<string, int> face)
     {
-        face ??= new Dictionary<string, int>();
         var meshes = Figures.BakedMeshes(FileProvider, item);
         if (meshes.Count > 0)
         {

@@ -37,8 +37,7 @@ def face_materials(armature):
                 if n.type != 'GROUP':
                     continue
                 # the exact material's parameters are its group node's inputs, by their UE names
-                inputs = {(i.name[3:] if i.name.startswith("P: ") else i.name).lower(): i
-                          for i in n.inputs if i.type == 'VALUE'}
+                inputs = {i.name.lower(): i for i in n.inputs if i.type == 'VALUE'}
                 if "mouthpose" in inputs or "eyeleftpose" in inputs or "browleftpose" in inputs:
                     found[mat.name] = (mat, inputs)
                     break
@@ -53,9 +52,6 @@ def _mode(modes, name, index):
 
 
 def _evaluate(keys, modes, name, frame):
-    """A curve's value at a frame, as UE interpolates its keys."""
-    if not keys:
-        return None
     if frame <= keys[0].frame:
         return keys[0].value
     for i in range(len(keys) - 1):
@@ -69,10 +65,7 @@ def _evaluate(keys, modes, name, frame):
 
 
 def _fcurve(action, tree, socket):
-    path = socket.path_from_id("default_value")
-    if hasattr(action, "fcurve_ensure_for_datablock"):
-        return action.fcurve_ensure_for_datablock(tree, path)
-    return action.fcurves.new(path)
+    return action.fcurve_ensure_for_datablock(tree, socket.path_from_id("default_value"))
 
 
 def _keys(fc, points, interpolations):
@@ -107,11 +100,7 @@ def apply(armature, sections):
     for mat, inputs in face_materials(armature):
         tree = mat.node_tree
         ad = tree.animation_data or tree.animation_data_create()
-        rig = None
-        try:
-            rig = json.loads(mat.get("mp_face_rig") or "null")
-        except ValueError:
-            pass
+        rig = json.loads(mat["mp_face_rig"]) if "mp_face_rig" in mat else None
         track = None
         for sec in sections:
             curves = {c.name.lower(): c for c in sec["dto"].curves}
@@ -130,24 +119,21 @@ def apply(armature, sections):
 
             # the character accents, where the rig puts them for the mouth's pose, every frame
             if rig and "mouthpose" in curves and curves["mouthpose"].keys:
-                k = float(rig.get("k", 0.0413))
+                k = rig["k"]
                 start, end = int(sec["range"][0]), int(sec["range"][1])
                 pose_keys = curves["mouthpose"].keys
-                mouth = {}
-                for axis in ("u", "v"):
-                    c = curves.get("mouth" + axis)
-                    base = inputs["mouth" + axis].default_value if ("mouth" + axis) in inputs else 0.0
-                    mouth[axis] = (c.keys if c else None, base)
-                for accent, table in (rig.get("accents") or {}).items():
+                (u_keys, u0), (v_keys, v0) = [
+                    (curves["mouth" + axis].keys if "mouth" + axis in curves else None,
+                     inputs["mouth" + axis].default_value if "mouth" + axis in inputs else 0.0)
+                    for axis in ("u", "v")]
+                for accent, table in rig["accents"].items():
                     targets = {axis: inputs.get("characteraccent%s%s" % (accent, axis)) for axis in ("u", "v", "pose")}
-                    if not table or targets["u"] is None or targets["v"] is None:
+                    if targets["u"] is None or targets["v"] is None:
                         continue
                     values = {"u": [], "v": [], "pose": []}
                     for f in range(start, end + 1):
                         pose = int(round(_evaluate(pose_keys, modes, "mouthpose", f)))
                         x, z, accent_pose = table[max(0, min(pose, len(table) - 1))]
-                        u_keys, u0 = mouth["u"]
-                        v_keys, v0 = mouth["v"]
                         u = _evaluate(u_keys, modes, "mouthu", f) if u_keys else u0
                         v = _evaluate(v_keys, modes, "mouthv", f) if v_keys else v0
                         values["u"].append((f, u + x * k))
@@ -164,8 +150,6 @@ def apply(armature, sections):
                 track = ad.nla_tracks.new(prev=None)
                 track.name = TRACK
             strip = track.strips.new(sec["name"], int(sec["frame"]), action)
-            if getattr(strip, "action_slot", False) is None and len(getattr(action, "slots", [])) > 0:
-                strip.action_slot = action.slots[0]
             strip.repeat = sec["repeat"]
         if track is not None:
             animated += 1

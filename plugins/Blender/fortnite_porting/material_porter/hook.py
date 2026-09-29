@@ -16,6 +16,7 @@ import bpy
 
 from . import build
 from .app_client import AppClient, AppError
+from ..logger import Log
 
 URL = os.environ.get("MATERIAL_PORTER_BRIDGE", "http://localhost:24320")
 
@@ -33,18 +34,14 @@ def _session(context):
 
 
 def _log(message):
-    try:
-        from ..logger import Log
-        Log.info("[Material Porter] " + message)
-    except Exception:
-        print("[Material Porter] " + message)
+    Log.info("[Material Porter] " + message)
 
 
 def _texture_path(texture):
     return (texture or {}).get("Path")
 
 
-def _overlay(texture_data, override_parameters, slot, values=None):
+def _overlay(texture_data, override_parameters, values=None):
     """What FP puts over the material's own values: a building's texture data
     (by layer, like FP), a style's parameter overrides, and the fork map
     reader's values (a dynamic instance's, a building's texture data)."""
@@ -73,7 +70,6 @@ def _overlay(texture_data, override_parameters, slot, values=None):
 
 
 def _built(path, variant):
-    """A material an earlier import already built this way."""
     return next((m for m in bpy.data.materials if m.get(build.KEY_PATH) == path
                  and m.get(build.KEY_VARIANT, "") == variant and build.KEY_REPLACES not in m
                  and m.get(build.KEY_REV, 1) >= build.BUILD_REVISION), None)
@@ -133,7 +129,7 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
         else:
             _log("%s: %s - FP's own material" % (material_data.get("Name"), e))
         return None
-    overlay = _overlay(texture_data, override_parameters, material_data.get("Slot"), material_data.get("MPValues"))
+    overlay = _overlay(texture_data, override_parameters, material_data.get("MPValues"))
     if overlay:
         for kind, values in overlay.items():
             entry[kind] = dict(entry.get(kind) or {}, **values)

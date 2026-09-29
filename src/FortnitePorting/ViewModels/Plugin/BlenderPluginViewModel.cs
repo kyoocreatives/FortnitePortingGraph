@@ -2,13 +2,13 @@ using System.Diagnostics;
 using System.Diagnostics.CodeAnalysis;
 using System.IO;
 using System.Linq;
-using Serilog;
 using System.Threading.Tasks;
 using CommunityToolkit.Mvvm.ComponentModel;
 using FluentAvalonia.UI.Controls;
 using FortnitePorting.Models.Information;
 using FortnitePorting.Models.Plugin;
 using FortnitePorting.Services;
+using Serilog;
 
 namespace FortnitePorting.ViewModels.Plugin;
 
@@ -111,9 +111,8 @@ public partial class BlenderPluginViewModel : PluginInstallationViewModelBase<Bl
 
             if (TryGetBlenderProcess(installation.BlenderPath, out var blenderProcess))
             {
-                // Material Porter fork: the plugin's files are updated all the same (an open Blender
-                // keeps what it loaded; upstream skipped them, so the next start still ran the old
-                // plugin, silently when the app synced at launch) and Blender is told to restart
+                // Material Porter fork: an open Blender's plugin files are updated too (it keeps what it
+                // loaded until it restarts, which it's told to do)
                 if (installation.PluginDiffers())
                 {
                     installation.Install(verbose: false);

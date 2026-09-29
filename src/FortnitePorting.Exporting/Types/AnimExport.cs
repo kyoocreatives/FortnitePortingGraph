@@ -8,6 +8,7 @@ using CUE4Parse.UE4.Assets.Exports.Animation.CurveExpression;
 using CUE4Parse.UE4.Assets.Exports.MetaSound;
 using CUE4Parse.UE4.Assets.Exports.Sound;
 using CUE4Parse.UE4.Assets.Objects;
+using CUE4Parse.UE4.Objects.Engine.Curves;
 using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.CUE4Parse.Extensions;
 using FortnitePorting.CUE4Parse.Models.Fortnite;
@@ -226,8 +227,8 @@ public class AnimExport : BaseExport
         {
             var letters = string.Concat(curve.FloatCurve.Keys.Select(key => key.InterpMode switch
             {
-                global::CUE4Parse.UE4.Objects.Engine.Curves.ERichCurveInterpMode.RCIM_Constant => 'C',
-                global::CUE4Parse.UE4.Objects.Engine.Curves.ERichCurveInterpMode.RCIM_Cubic => 'Q',
+                ERichCurveInterpMode.RCIM_Constant => 'C',
+                ERichCurveInterpMode.RCIM_Cubic => 'Q',
                 _ => 'L',
             }));
             if (letters.Length == 0) continue;

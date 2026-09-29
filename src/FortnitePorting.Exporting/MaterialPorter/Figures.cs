@@ -27,7 +27,7 @@ public static class Figures
 
     /// <summary>
     /// Whether a LEGO prop's actor class can be read: much of LEGO Fortnite's gameplay content
-    /// (its creatures among it) is in chunks whose keys aren't published.
+    /// (its creatures among it) is an optional download (install tag GFP_JunoRoot) that may be absent.
     /// </summary>
     public static bool HasPropActor(IFileProvider provider, UObject item) =>
         item.GetOrDefault<FSoftObjectPath>("BuildingActorClassToPreview").AssetPathName.Text is { Length: > 0 } path && path != "None"
@@ -106,7 +106,6 @@ public static class Figures
         return Index(provider).TryGetValue(folder, out var found) ? found : [];
     }
 
-    /// <summary>Whether the figure has cooked meshes (listed by its schema, or in its Bake folder), without loading them.</summary>
     /// <summary>
     /// The figure's recipe: its schema's CustomizableObjectInstance (Figure_X/Mutable/Dataless/COI_...,
     /// or Figure_X/Mutable/COI_... for the newer ones), all on the shared recipe object that
@@ -127,6 +126,7 @@ public static class Figures
     /// <summary>Whether the figure can be exported: cooked, or a recipe.</summary>
     public static bool HasFigure(IFileProvider provider, UObject item) => HasBake(provider, item) || RecipeInstance(provider, item) is not null;
 
+    /// <summary>Whether the figure has cooked meshes (listed by its schema, or in its Bake folder), without loading them.</summary>
     public static bool HasBake(IFileProvider provider, UObject item) =>
         Schemas(item, provider).Any(schema => SchemaMeshRefs(schema).Any() || BakeCandidates(provider, schema).Count > 0);
 

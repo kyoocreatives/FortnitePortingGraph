@@ -1,6 +1,5 @@
 using System;
 using System.Collections.ObjectModel;
-using System.Diagnostics;
 using Avalonia.Threading;
 using CommunityToolkit.Mvvm.ComponentModel;
 using CommunityToolkit.Mvvm.Input;
@@ -30,7 +29,6 @@ public partial class StatusLog : ObservableObject, ILogEventSink
 
     int _exports;
     bool _blender;
-    readonly Stopwatch _blenderClock = new();
 
     [RelayCommand]
     private void Clear() => Lines.Clear();
@@ -63,7 +61,6 @@ public partial class StatusLog : ObservableObject, ILogEventSink
         if (state == "begin")
         {
             _blender = true;
-            _blenderClock.Restart();
             Update("Blender importing");
         }
         else if (state == "end")

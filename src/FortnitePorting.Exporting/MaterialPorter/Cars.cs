@@ -301,7 +301,7 @@ public sealed class Cars(IFileProvider provider)
             ch != null && picks != null && picks.TryGetValue(plan.Channels.IndexOf(ch), out var s) && s >= 0 ? s : dflt;
 
         // ---- the picks
-        var dp = decalCh == null ? 0 : Pick(decalCh, 0);
+        var dp = Pick(decalCh, 0);
         var decal = dp > 0 && dp <= decals.Count ? decals[dp - 1] : null;
         var tierPick = Math.Clamp(Pick(tierCh, tierDefault), 0, tiers.Count - 1);
         if (decal != null) tierPick = Math.Max(0, tiers.FindIndex(t => t.Vcid == decal.Tier));    // a decal fits its own tier's mesh

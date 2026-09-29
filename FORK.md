@@ -76,7 +76,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
 - **LEGO props.** Assets > Lego > Props: building props and building sets
   (`JunoBuilding{Prop,Set}AccountItemDefinition`), the meshes of the actor each previews.
   LEGO wildlife isn't there: the creatures' packages (and most LEGO gameplay content) are in
-  pakchunks whose keys aren't published; items whose actor is in one are hidden.
+  pakchunk60, an optional download (install tag GFP_JunoRoot, about 9 GiB) that Fortnite
+  installs only for LEGO Fortnite; items whose actor isn't installed are hidden.
   Their colour is a vertex colour's index into the LEGO LUT: exact since the translator
   samples a TF_Nearest texture Closest and its Time starts at 100 s (a building piece's
   damage flash, timed from a hit, was full red at Time 0).
