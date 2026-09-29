@@ -278,7 +278,7 @@ public sealed class MaterialService
             {
                 var list = new List<global::CUE4Parse.UE4.Assets.Exports.Material.UUnrealMaterial>();
                 m.AppendReferencedTextures(list, false);
-                foreach (var t in list.OfType<UTexture>())
+                foreach (var t in list.OfType<UTexture>().Concat(ImportedTextures(m)))
                     if (t.GetPathName() is { } tp && !info.ReferencedTextures.Contains(tp)) info.ReferencedTextures.Add(tp);
             }
         }
@@ -286,6 +286,29 @@ public sealed class MaterialService
         foreach (var t in info.Textures.Values)
             if (!info.ReferencedTextures.Contains(t)) info.ReferencedTextures.Add(t);
         return true;
+    }
+
+    /// <summary>
+    /// The textures a cooked material's package imports: the ones its graph samples
+    /// directly. CUE4Parse fills ReferencedTextures this way only when the provider
+    /// allows it (FortnitePorting's skips it), and an island's masters have no others.
+    /// </summary>
+    public static List<UTexture> ImportedTextures(global::CUE4Parse.UE4.Assets.Exports.UObject material)
+    {
+        var found = new List<UTexture>();
+        if (material.Owner is not global::CUE4Parse.UE4.Assets.AbstractUePackage pkg) return found;
+        for (var i = 0; i < pkg.ImportMapLength; i++)
+        {
+            try
+            {
+                var r = pkg.ResolvePackageIndex(new global::CUE4Parse.UE4.Objects.UObject.FPackageIndex(pkg, -i - 1));
+                if (r?.Class?.Name.Text.StartsWith("Texture", StringComparison.OrdinalIgnoreCase) == true
+                    && r.TryLoad(out var tex) && tex is UTexture t)
+                    found.Add(t);
+            }
+            catch { /* an import this build can't resolve */ }
+        }
+        return found;
     }
 
     async Task<SubsurfaceInfo> ProfileAsync(string path)

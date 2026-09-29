@@ -16,7 +16,8 @@ import re
 import bpy
 
 # 2: the FP Material Fixer's texture names and colour rules
-REVISION = 2
+# 3: the textures an island master's graph samples (its package's imports), which came through empty
+REVISION = 3
 
 # a texture's name -> its role (the FP Material Fixer's img_class)
 def _role_of_texture(path):
@@ -163,9 +164,11 @@ def build_fallback(entry, app, objects, env_cls, settings, keys):
 
     colour = vector(_BASE_COLOURS)
     glow = None
-    if colour is not None and max(colour[:3]) > 1.001:
-        glow, colour = colour, None         # brighter than a surface colour: light
     base = roles.get("base")
+    if colour is not None and max(colour[:3]) > 1.001:
+        # brighter than a surface colour: a flat material's light; beside a base texture it's
+        # something else (an unnamed "Param" vector, an offset...)
+        glow, colour = (None if base else colour), None
     if base:
         img = image(base[1], label=base[0])
         col = img.outputs["Color"]

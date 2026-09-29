@@ -101,8 +101,10 @@ public static class IslandMaterials
             }
             if (cur is UMaterial um)
             {
-                foreach (var tex in um.ReferencedTextures)
-                    if (tex is not null) Texture(tex, "(referenced)", um.Name);
+                // the provider skips ReferencedTextures' import scan (FortnitePorting's setting): scan here
+                var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                foreach (var tex in um.ReferencedTextures.Concat(MaterialService.ImportedTextures(um)))
+                    if (tex is not null && seen.Add(tex.GetPathName())) Texture(tex, "(referenced)", um.Name);
                 // the master's parameter defaults: each runtime parameter type's names beside its values
                 if (um.CachedExpressionData is { } ced && JToken.Parse(JsonConvert.SerializeObject(ced, Ser)) is JObject ce)
                 {
