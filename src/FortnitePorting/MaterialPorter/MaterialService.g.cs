@@ -188,6 +188,7 @@ public sealed class MaterialService
     {
         var sw = System.Diagnostics.Stopwatch.StartNew();
         var info = await Locked(() => ChainAsync(path));
+        await Locked(async () => { SkyValues(info, await DayValuesAsync()); return true; });
         if (info.Master != null && ResolveKey(info.Master, ".o.uasset") == null)
         {
             info.Fallback = true;
@@ -196,6 +197,21 @@ public sealed class MaterialService
         else if (info.Master != null) info.Graph = await GraphAsync(info.Master);
         Timing.Log("describe " + Bridge.ShortName(path), sw);
         return info;
+    }
+
+    /// <summary>
+    /// A sky dome's material (a master named M_Sky*) and its sun and moon's (a master
+    /// naming a moon) get what the day sequence gives the sky mesh's "Skydome" and "SunMoon"
+    /// slots: the season's dome, whose parameters every M_Sky master shares.
+    /// </summary>
+    static void SkyValues(MaterialInfo info, DayValues day)
+    {
+        var master = (info.Master ?? "").Split('/').Last().Split('.')[0];
+        var slot = master.StartsWith("M_Sky", StringComparison.OrdinalIgnoreCase) ? "Skydome"
+                   : master.Contains("Moon", StringComparison.OrdinalIgnoreCase) ? "SunMoon" : null;
+        if (slot == null || !day.Slots.TryGetValue(slot, out var set)) return;
+        foreach (var (k, v) in set.Scalars) info.Scalars[k] = v;
+        foreach (var (k, v) in set.Vectors) info.Vectors[k] = v;
     }
 
     async Task<MaterialInfo> ChainAsync(string path)
@@ -555,7 +571,11 @@ public sealed class MaterialService
     }
 
     // ------------------------------------------------------------ collections
-    /// <summary>A material parameter collection's defaults: {"scalars": {..}, "vectors": {..}}.</summary>
+    /// <summary>
+    /// A material parameter collection's values: {"scalars": {..}, "vectors": {..}}. Its
+    /// defaults, and over them what the season's day sequence gives it at <see cref="TimeOfDay"/>
+    /// (FortniteMaterialParameters' sky and cloud colours are black placeholders the sequence drives).
+    /// </summary>
     public Task<JObject> CollectionAsync(string path) => Locked(async () =>
     {
         var p = (await MainExportAsync(path))["Properties"] as JObject ?? new JObject();
@@ -569,8 +589,128 @@ public sealed class MaterialService
             var v = e["DefaultValue"];
             vectors[(string)e["ParameterName"]] = new JArray((double?)v?["R"] ?? 0, (double?)v?["G"] ?? 0, (double?)v?["B"] ?? 0, (double?)v?["A"] ?? 0);
         }
+        var day = await DayValuesAsync();
+        var name = path.Split('/').Last().Split('.')[0];
+        if (day.Collections.TryGetValue(name, out var set))
+        {
+            foreach (var (k, v) in set.Scalars) scalars[k] = v;
+            foreach (var (k, v) in set.Vectors) vectors[k] = new JArray(v);
+        }
         return new JObject { ["scalars"] = scalars, ["vectors"] = vectors };
     });
+
+    // ------------------------------------------------------------ time of day
+    /// <summary>The in-game hour (0-24) whose day sequence values materials get.</summary>
+    public double TimeOfDay { get; set; } = 12;
+
+    sealed class ParamValues
+    {
+        public Dictionary<string, double> Scalars { get; } = new();
+        public Dictionary<string, double[]> Vectors { get; } = new();
+    }
+
+    sealed class DayValues
+    {
+        /// <summary>A parameter collection (by asset name) -> the values the sequence gives it.</summary>
+        public Dictionary<string, ParamValues> Collections { get; } = new(StringComparer.OrdinalIgnoreCase);
+        /// <summary>A sky mesh's material slot ("Skydome", "SunMoon") -> the values the sequence gives its material.</summary>
+        public Dictionary<string, ParamValues> Slots { get; } = new(StringComparer.OrdinalIgnoreCase);
+        public double Hour;
+    }
+
+    DayValues day;
+
+    /// <summary>
+    /// The season's day sequence (the newest DS_BR_Ch&lt;n&gt;S&lt;n&gt;) evaluated at <see cref="TimeOfDay"/>:
+    /// its parameter collection track and its sky mesh's material tracks. The sequence is a
+    /// day long (its playback range is 24 in-game hours); a channel's keys are cubic,
+    /// linear or constant, held before the first and after the last.
+    /// </summary>
+    async Task<DayValues> DayValuesAsync()
+    {
+        if (day != null && day.Hour == TimeOfDay) return day;
+        var values = new DayValues { Hour = TimeOfDay };
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        try
+        {
+            var key = game.Provider.Files.Keys
+                .Select(k => (Key: k, M: System.Text.RegularExpressions.Regex.Match(System.IO.Path.GetFileName(k), @"^DS_BR_Ch(\d+)S(\d+)\.uasset$", System.Text.RegularExpressions.RegexOptions.IgnoreCase)))
+                .Where(x => x.M.Success)
+                .OrderByDescending(x => int.Parse(x.M.Groups[1].Value)).ThenByDescending(x => int.Parse(x.M.Groups[2].Value))
+                .Select(x => x.Key).FirstOrDefault();
+            if (key != null)
+            {
+                var pkg = await game.Provider.LoadPackageAsync(key);
+                // by export index: a sequence's names repeat (each track's section is "..._0")
+                var exports = pkg.GetExports().Select(e => JObject.Parse(JsonConvert.SerializeObject(e, Ser))).ToList();
+                var movie = exports.FirstOrDefault(e => (string)e["Type"] == "MovieScene")?["Properties"];
+                var dayTicks = (double?)movie?["PlaybackRange"]?["Value"]?["UpperBound"]?["Value"]?["Value"] ?? 19200000;
+                var t = TimeOfDay / 24.0 * dayTicks;
+                JObject Section(JToken r) => ((string)r?["ObjectPath"])?.Split('.').Last() is { } i && int.TryParse(i, out var n) && n >= 0 && n < exports.Count
+                    ? exports[n]["Properties"] as JObject : null;
+                foreach (var e in exports)
+                {
+                    var p = e["Properties"];
+                    ParamValues target = null;
+                    if ((string)e["Type"] == "MovieSceneMaterialParameterCollectionTrack" && ((string)p?["MPC"]?["ObjectName"])?.Split('\'') is { Length: > 1 } mpc)
+                        target = values.Collections.TryGetValue(mpc[1], out var c) ? c : values.Collections[mpc[1]] = new ParamValues();
+                    else if ((string)e["Type"] == "MovieSceneComponentMaterialTrack" && (string)p?["MaterialInfo"]?["MaterialSlotName"] is { } slot)
+                        target = values.Slots.TryGetValue(slot, out var s) ? s : values.Slots[slot] = new ParamValues();
+                    if (target == null) continue;
+                    foreach (var r in p["Sections"] ?? new JArray())
+                    {
+                        if (Section(r) is not { } sec) continue;
+                        foreach (var sp in (sec["ScalarParameterNamesAndCurves"] ?? sec["ScalarParameterInfosAndCurves"]) ?? new JArray())
+                            if (((string)sp["ParameterName"] ?? (string)sp["ParameterInfo"]?["Name"]) is { } n && Channel(sp["ParameterCurve"], t) is { } v)
+                                target.Scalars[n] = v;
+                        foreach (var cp in (sec["ColorParameterNamesAndCurves"] ?? sec["ColorParameterInfosAndCurves"]) ?? new JArray())
+                        {
+                            if (((string)cp["ParameterName"] ?? (string)cp["ParameterInfo"]?["Name"]) is not { } n) continue;
+                            var rgba = new[] { Channel(cp["RedCurve"], t), Channel(cp["GreenCurve"], t), Channel(cp["BlueCurve"], t), Channel(cp["AlphaCurve"], t) };
+                            if (rgba.All(x => x == null)) continue;
+                            target.Vectors[n] = rgba.Select((x, i) => x ?? (i == 3 ? 1.0 : 0.0)).ToArray();
+                        }
+                    }
+                }
+                Timing.Log($"time of day {TimeOfDay:0.#} h from {System.IO.Path.GetFileNameWithoutExtension(key)}: {values.Collections.Sum(c => c.Value.Scalars.Count + c.Value.Vectors.Count)} collection and " +
+                           $"{values.Slots.Sum(c => c.Value.Scalars.Count + c.Value.Vectors.Count)} sky values", sw);
+            }
+        }
+        catch (Exception e) { Timing.Log("time of day: the day sequence didn't read (" + e.Message + ")", sw); }
+        return day = values;
+    }
+
+    /// <summary>A movie scene float channel at tick t (null if it has no keys and no default).</summary>
+    static double? Channel(JToken ch, double t)
+    {
+        if (ch is not JObject) return null;
+        var times = (ch["Times"] as JArray ?? new JArray()).Select(x => (double?)x["Value"] ?? 0).ToArray();
+        var keys = ch["Values"] as JArray ?? new JArray();
+        if (times.Length == 0 || keys.Count == 0)
+            return (bool?)ch["bHasDefaultValue"] == true ? (double?)ch["DefaultValue"] : null;
+        double V(int i) => (double?)keys[i]["Value"] ?? 0;
+        if (t <= times[0]) return V(0);
+        var last = Math.Min(times.Length, keys.Count) - 1;
+        if (t >= times[last]) return V(last);
+        var k = 0;
+        while (k + 1 < last && times[k + 1] <= t) k++;
+        var dt = times[k + 1] - times[k];
+        var a = dt > 0 ? (t - times[k]) / dt : 0;
+        switch ((int?)keys[k]["InterpMode"] ?? 2)
+        {
+            case 1: return V(k);                                   // constant
+            case 0: return V(k) + (V(k + 1) - V(k)) * a;           // linear
+            default:
+            {
+                // cubic: a Bezier through the keys, tangents in value per tick
+                var p0 = V(k); var p3 = V(k + 1);
+                var p1 = p0 + ((double?)keys[k]["Tangent"]?["LeaveTangent"] ?? 0) * dt / 3;
+                var p2 = p3 - ((double?)keys[k + 1]["Tangent"]?["ArriveTangent"] ?? 0) * dt / 3;
+                var b = 1 - a;
+                return b * b * b * p0 + 3 * b * b * a * p1 + 3 * b * a * a * p2 + a * a * a * p3;
+            }
+        }
+    }
 
     /// <summary>A package's main export as JSON (the details view shows it raw).</summary>
     public Task<JObject> RawAsync(string path) => Locked(() => MainExportAsync(path));

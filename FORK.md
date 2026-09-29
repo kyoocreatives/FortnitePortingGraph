@@ -21,6 +21,14 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   matches, or its default shader knows the base colour); the rest stay exact.
   "Rim Light" (off by default) keeps the rim light of Fortnite's character
   materials (MF_RimV3's baseBrightness); off, exact materials get baseBrightness 0.
+  Time of day: the bridge takes the season's day sequence (the newest
+  `DS_BR_Ch<n>S<n>`) at 12:00. Its parameter collection track sets
+  FortniteMaterialParameters' cloud colours and overcast (the asset's own are
+  black placeholders), and its sky mesh's material tracks set a sky dome's
+  material (a master named `M_Sky*`, "Skydome" slot) and its sun and moon's
+  ("SunMoon"). What the sky and baked clouds read from the renderer (the sky
+  atmosphere, the dome at infinity, the clouds' altitude) is still stubbed:
+  fpv4_clouds builds those.
 - **Maps through Material Porter's map reader.** FP's world export hands each
   level to the reader (`src/FortnitePorting.Exporting/MaterialPorter/MapReader.g.cs`):
   every component of an actor from the level's exports over its class's

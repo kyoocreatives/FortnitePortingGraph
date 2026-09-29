@@ -2,7 +2,7 @@ An unofficial fork of [FortnitePorting](https://github.com/h4lfheart/FortnitePor
 
 **Install:** download `FortnitePortingMP.exe` below and run it (Windows x64, no installer). Windows may warn about an unsigned app: *More info > Run anyway*. It runs beside an installed FortnitePorting, with its own settings (`%APPDATA%\FortnitePorting MP`) and its own Blender plugin (`fortnite_porting_mp`), installed from the Plugins page as in FortnitePorting. Exact materials need Blender 5.0 or newer; older Blender gets FortnitePorting's shaders.
 
-**This release:** Rocket Racing cars get the values the game gives their unpainted look (the Patty Wagon's burger keeps its textures instead of turning the body colour), their wheels' own paint (the Patty Wagon's Steel Belted Pickles, Ran's wheels) and the game's default windows (the Patty Wagon's see-through dome); bodies whose unpainted option had no table row (Carrot, Endo, Safari, Seasalt, Interceptor and others) no longer start on their first paint colour, and BB offers its paint choice.
+**This release:** sky domes and baked clouds get the colours the game's day sequence gives them at noon (cloud light, shadow and haze, the dome's clouds, halo and sun bloom, the sun and moon) instead of black placeholders.
 
 **What it adds**
 - Exact materials, rebuilt from each material's Unreal graph. *Settings > Blender > Prefer FP Shaders for Characters* keeps FortnitePorting's shaders for character materials it has one for.
