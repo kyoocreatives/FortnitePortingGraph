@@ -16,6 +16,12 @@
         <VlcWindowsArm64Enabled>false</VlcWindowsArm64Enabled>
     </PropertyGroup>
 
+    <!-- Material Porter fork: UEFN island export only where the git-ignored Fork.local.props sets MPIslands -->
+    <Import Project="Fork.local.props" Condition="Exists('Fork.local.props')" />
+    <PropertyGroup Condition="'$(MPIslands)' == 'true'">
+        <DefineConstants>$(DefineConstants);MP_ISLANDS</DefineConstants>
+    </PropertyGroup>
+
     <ItemGroup>
         <PackageReference Include="Avalonia" />
         <PackageReference Include="Avalonia.Desktop" />

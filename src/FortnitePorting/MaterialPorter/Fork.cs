@@ -21,4 +21,15 @@ public static class Fork
     public const string PluginFolder = "fortnite_porting_mp";
     /// <summary>Upstream's Blender plugin listens on 40000.</summary>
     public const int BlenderPort = 40010;
+
+    /// <summary>
+    /// UEFN island export (maps of downloaded islands, unlocking islands by map code): only in the owner's
+    /// builds, where the git-ignored FortnitePorting/Fork.local.props sets MPIslands. Releases and other
+    /// builds don't have it, as upstream keeps it to the accounts it allows.
+    /// </summary>
+#if MP_ISLANDS
+    public const bool Islands = true;
+#else
+    public const bool Islands = false;
+#endif
 }

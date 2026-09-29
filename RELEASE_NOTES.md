@@ -7,7 +7,6 @@ An unofficial fork of [FortnitePorting](https://github.com/h4lfheart/FortnitePor
 **What it adds**
 - Exact materials, rebuilt from each material's Unreal graph. *Settings > Blender > Prefer FP Shaders for Characters* keeps FortnitePorting's shaders for character materials it has one for.
 - Maps through Material Porter's map reader: actor components, overrides, custom primitive data, spline meshes, water bodies, level instances.
-- UEFN islands by map code.
 - Rocket Racing cars with their styles (tier, body colour, paint, decal, wheels).
 - LEGO outfits (cooked and recipe figures, with face styles), LEGO emotes with animated faces, LEGO props and building sets, LEGO wildlife (needs LEGO Fortnite's optional content installed).
 - No online account: sign-in, chat and FortnitePorting's updater are off. New releases of this fork are announced in the app.

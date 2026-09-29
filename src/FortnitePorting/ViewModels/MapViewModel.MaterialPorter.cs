@@ -12,10 +12,13 @@ namespace FortnitePorting.ViewModels;
 /// Material Porter fork: a UEFN island opened by its map code. The user's key
 /// tool gets the island's key from Epic (a sign-in page opens when it asks);
 /// the key is kept with Material Porter's (never shown or logged), the island
-/// Fortnite downloaded is mounted, and the map list reloads with it.
+/// Fortnite downloaded is mounted, and the map list reloads with it. Only in
+/// the owner's builds (Fork.Islands).
 /// </summary>
 public partial class MapViewModel
 {
+    public bool CanUnlockIslands => Fork.Islands;
+
     [ObservableProperty] private string _islandCode = string.Empty;
     [ObservableProperty] private string _islandStatus = string.Empty;
     [ObservableProperty] private bool _isUnlockingIsland;
@@ -24,7 +27,7 @@ public partial class MapViewModel
     public async Task UnlockIsland()
     {
         var code = IslandCode.Trim();
-        if (IsUnlockingIsland || code.Length == 0) return;
+        if (!Fork.Islands || IsUnlockingIsland || code.Length == 0) return;
         IsUnlockingIsland = true;
         IslandStatus = "Asking for the island's key...";
         try

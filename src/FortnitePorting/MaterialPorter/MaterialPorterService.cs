@@ -111,6 +111,7 @@ public class MaterialPorterService : IService
     /// <summary>The downloaded islands (FP registers them, locked) this app has keys for, opened. Keys are never logged.</summary>
     public async Task SubmitIslandKeysAsync(AbstractVfsFileProvider provider)
     {
+        if (!Fork.Islands) return;
         var opened = 0;
         var keys = LoadIslandKeys();
         foreach (var k in keys)
@@ -143,6 +144,7 @@ public class MaterialPorterService : IService
     /// </summary>
     public async Task<bool> UnlockIslandAsync(string code, Action<string> status, Action<string> signIn)
     {
+        if (!Fork.Islands) throw new InvalidOperationException("UEFN island export isn't in this build");
         var (guid, key) = await RunKeyToolAsync(IslandKeyTool, code, status, signIn);
         var keys = LoadIslandKeys();
         keys.RemoveAll(k => NormalGuid(k.Guid) == NormalGuid(guid));

@@ -29,9 +29,12 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   UEFN island's `_Generated_` cells, missing from its runtime hash, are read
   with its main level. Landscapes still export through FP, with their weight
   layers renamed to the LayerName the exact materials sample.
-- **UEFN islands by map code.** Keys from the user's key tool live in Material
-  Porter's `islands.json` (shared by both apps, never logged); the Map page
-  lists islands for everyone and has an Unlock Island box.
+- **UEFN islands by map code (owner's builds only).** Keys from the user's key
+  tool live in Material Porter's `islands.json` (shared by both apps, never
+  logged); the Map page lists downloaded islands and has an Unlock Island box.
+  `Fork.Islands` is on only when the git-ignored `src/FortnitePorting/Fork.local.props`
+  sets `MPIslands`: releases and anyone else's builds don't export islands
+  (upstream keeps it to the accounts it allows).
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the
