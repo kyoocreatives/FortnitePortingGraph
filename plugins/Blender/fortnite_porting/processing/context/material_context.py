@@ -8,6 +8,19 @@ from ..utils import *
 from ...utils import *
 from ...logger import Log
 
+# Material Porter fork: the exports "Prefer FP Shaders for Characters" is about
+FP_SHADER_TYPES = [EExportType.OUTFIT, EExportType.BACKPACK, EExportType.PICKAXE, EExportType.GLIDER, EExportType.PET,
+                   EExportType.KICKS, EExportType.SIDEKICK, EExportType.FALL_GUYS_OUTFIT]
+
+
+def has_fp_shader(material_data):
+    """Material Porter fork: whether one of FP's shaders is made for a material - a base shader its
+    parameters call for (toon, layered, Valet, Bean...), or FP's default one knowing its base colour."""
+    if any(find_all_matching_mappings(material_data), lambda m: m.type == ENodeType.NT_Base):
+        return True
+    diffuse = {s.name.casefold() for s in DefaultMappings.textures if s.slot == "Diffuse"}
+    return any(material_data.get("Textures") or [], lambda t: (t.get("Name") or "").casefold() in diffuse)
+
 def create_texture_node(nodes, name, image, srgb):
     node = nodes.new(type="ShaderNodeTexImage")
     node.image = image
@@ -147,7 +160,11 @@ class MaterialImportContext:
 
         hash_key = hash_code(material_hash)
 
-        if existing_material := material_hash_cache.get(hash_key):
+        # Material Porter fork: "Prefer FP Shaders for Characters" gives a character's material that one of FP's
+        # shaders is made for to FP; one built the other way before the setting changed isn't reused
+        prefer_fp = bool(self.options.get("PreferFPShaders") and self.type in FP_SHADER_TYPES and has_fp_shader(material_data))
+        existing_material = material_hash_cache.get(hash_key)
+        if existing_material and bool(existing_material.get("MPPreferFP")) == prefer_fp:
             if not as_material_data:
                 material_slot.material = existing_material
                 return
@@ -166,10 +183,14 @@ class MaterialImportContext:
         material = bpy.data.materials.new(material_name) if as_material_data else material_slot.material
         material.use_nodes = True
         material.surface_render_method = "DITHERED"
-        # Material Porter fork: a material only *named* "...Transparent" (a car's glass) isn't hidden when
-        # exact materials build it - its graph says how see-through it is
+        # Material Porter fork: the exact material, rebuilt from its UE graph, unless FP's is preferred.
+        # A material only *named* "...Transparent" (a car's glass) isn't hidden when exact materials build
+        # it: its graph says how see-through it is
         from ...material_porter.hook import exact_available
-        crunch_names = [n for n in vertex_crunch_names if n != "Transparent"] if exact_available(self) else vertex_crunch_names
+        use_exact = exact_available(self) and not prefer_fp
+        if prefer_fp:
+            material["MPPreferFP"] = True
+        crunch_names = [n for n in vertex_crunch_names if n != "Transparent"] if use_exact else vertex_crunch_names
         if (any(crunch_names, lambda x: x in material_name) 
                 or get_param(scalars, "HT_CrunchVerts") == 1 
                 or (any(toon_outline_names, lambda x: x in material_name) and not any(toon_outline_disable_names, lambda x: x in material_name))):
@@ -203,10 +224,10 @@ class MaterialImportContext:
                 for vector in parameters.get("Vectors"):
                     replace_or_add_parameter(vectors, vector)
 
-        # Material Porter fork: the exact material, rebuilt from its UE graph; FP's presets when it can't be
+        # Material Porter fork: the exact material; FP's shader when it can't be built (or isn't wanted)
         from ...material_porter.hook import build_exact
-        if exact := build_exact(self, material_data, meta.get("TextureData"), override_parameters,
-                                None if as_material_data else material_slot.id_data):
+        if use_exact and (exact := build_exact(self, material_data, meta.get("TextureData"), override_parameters,
+                                               None if as_material_data else material_slot.id_data)):
             exact["Hash"] = hash_code(material_hash)
             exact["OriginalName"] = material_data.get("Name")
             if not as_material_data:

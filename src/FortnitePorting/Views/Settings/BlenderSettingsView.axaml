@@ -246,6 +246,14 @@
                                               SelectedItem="{Binding MaterialImportMethod, Converter={StaticResource EnumToRecord}}"/>
                                 </controls:SettingsItem.Footer>
                             </controls:SettingsItem>
+                            <!-- Material Porter fork: FP's shaders for characters, exact materials for what FP has none for -->
+                            <controls:SettingsItem Title="Prefer FP Shaders for Characters"
+                                                   Description="Outfits, back blings, pickaxes, gliders, pets, kicks and sidekicks use FP's prebuilt shaders where FP has one for a material; the others keep the exact material rebuilt from its Unreal graph."
+                                                   IsEnabled="{Binding ExportMaterials}">
+                                <controls:SettingsItem.Footer>
+                                    <ToggleSwitch IsChecked="{Binding PreferFPShaders}"/>
+                                </controls:SettingsItem.Footer>
+                            </controls:SettingsItem>
                         </StackPanel>
                     </sidebar:SidebarItemButton.Tag>
                 </sidebar:SidebarItemButton>

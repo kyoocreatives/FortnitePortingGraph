@@ -15,7 +15,10 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   material is rebuilt from its graph by Material Porter's translator; FP's
   texture data and style overrides go over it as a variant. When that can't be
   done (no bridge, Blender < 5.0, a failed build) FP's own preset material is
-  built as before.
+  built as before. "Prefer FP Shaders for Characters" (Blender settings,
+  Materials) gives FP the materials of outfits, back blings, pickaxes, gliders,
+  pets, kicks and sidekicks that one of its shaders is made for (a base mapping
+  matches, or its default shader knows the base colour); the rest stay exact.
 - **Maps through Material Porter's map reader.** FP's world export hands each
   level to the reader (`src/FortnitePorting.Exporting/MaterialPorter/MapReader.g.cs`):
   every component of an actor from the level's exports over its class's

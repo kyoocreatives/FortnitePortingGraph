@@ -34,6 +34,8 @@ public partial class BlenderSettingsViewModel : BaseExportSettings
     [ObservableProperty] private float _subsurface = 0.0f;
     [ObservableProperty] private float _toonShadingBrightness = 0.5f;
     [ObservableProperty] private EMaterialImportMethod _materialImportMethod = EMaterialImportMethod.Data;
+    // Material Porter fork: characters keep FP's shaders where FP has one for a material
+    [ObservableProperty] private bool _preferFPShaders = false;
     
     // Texture
     [ObservableProperty] private ETextureImportMethod _textureImportMethod = ETextureImportMethod.Data;
