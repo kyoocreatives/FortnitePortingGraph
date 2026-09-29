@@ -19,6 +19,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   Materials) gives FP the materials of outfits, back blings, pickaxes, gliders,
   pets, kicks and sidekicks that one of its shaders is made for (a base mapping
   matches, or its default shader knows the base colour); the rest stay exact.
+  "Rim Light" (off by default) keeps the rim light of Fortnite's character
+  materials (MF_RimV3's baseBrightness); off, exact materials get baseBrightness 0.
 - **Maps through Material Porter's map reader.** FP's world export hands each
   level to the reader (`src/FortnitePorting.Exporting/MaterialPorter/MapReader.g.cs`):
   every component of an actor from the level's exports over its class's

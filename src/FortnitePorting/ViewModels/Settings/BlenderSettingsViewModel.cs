@@ -36,6 +36,8 @@ public partial class BlenderSettingsViewModel : BaseExportSettings
     [ObservableProperty] private EMaterialImportMethod _materialImportMethod = EMaterialImportMethod.Data;
     // Material Porter fork: characters keep FP's shaders where FP has one for a material
     [ObservableProperty] private bool _preferFPShaders = false;
+    // Material Porter fork: the character materials' rim light (baseBrightness), off by default
+    [ObservableProperty] private bool _rimLight = false;
     
     // Texture
     [ObservableProperty] private ETextureImportMethod _textureImportMethod = ETextureImportMethod.Data;

@@ -254,6 +254,14 @@
                                     <ToggleSwitch IsChecked="{Binding PreferFPShaders}"/>
                                 </controls:SettingsItem.Footer>
                             </controls:SettingsItem>
+                            <!-- Material Porter fork: the character materials' rim light -->
+                            <controls:SettingsItem Title="Rim Light"
+                                                   Description="Keeps the rim light Fortnite's character materials add at the edges of a silhouette (their baseBrightness). Off: baseBrightness is 0 on exact materials."
+                                                   IsEnabled="{Binding ExportMaterials}">
+                                <controls:SettingsItem.Footer>
+                                    <ToggleSwitch IsChecked="{Binding RimLight}"/>
+                                </controls:SettingsItem.Footer>
+                            </controls:SettingsItem>
                         </StackPanel>
                     </sidebar:SidebarItemButton.Tag>
                 </sidebar:SidebarItemButton>

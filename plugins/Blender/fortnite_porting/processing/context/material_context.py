@@ -161,10 +161,13 @@ class MaterialImportContext:
         hash_key = hash_code(material_hash)
 
         # Material Porter fork: "Prefer FP Shaders for Characters" gives a character's material that one of FP's
-        # shaders is made for to FP; one built the other way before the setting changed isn't reused
+        # shaders is made for to FP; one built the other way (or, exact, with the other Rim Light) before a setting
+        # changed isn't reused
         prefer_fp = bool(self.options.get("PreferFPShaders") and self.type in FP_SHADER_TYPES and has_fp_shader(material_data))
+        rim_light = bool(self.options.get("RimLight"))
         existing_material = material_hash_cache.get(hash_key)
-        if existing_material and bool(existing_material.get("MPPreferFP")) == prefer_fp:
+        if existing_material and (bool(existing_material.get("MPPreferFP")) == prefer_fp
+                                  and bool(existing_material.get("MPRimLight", rim_light)) == rim_light):
             if not as_material_data:
                 material_slot.material = existing_material
                 return
@@ -229,6 +232,7 @@ class MaterialImportContext:
         if use_exact and (exact := build_exact(self, material_data, meta.get("TextureData"), override_parameters,
                                                None if as_material_data else material_slot.id_data)):
             exact["Hash"] = hash_code(material_hash)
+            exact["MPRimLight"] = rim_light
             exact["OriginalName"] = material_data.get("Name")
             if not as_material_data:
                 material_slot.material = exact
