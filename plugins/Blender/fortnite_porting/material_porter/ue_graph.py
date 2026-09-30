@@ -429,6 +429,7 @@ CUSTOM_HASHES = {
     "bd366923": "custom_bitfield_asuint",   # BitFieldExtractU32(asuint(Scalar), BitCount, BitIndex)
     "1ec1b585": "custom_hue_to_rgb",        # Hue = fmod(Hue, 1); R = |6H - 3| - 1 ...
     "aaaad1e2": "custom_clip",              # clip(Opacity - Threshold); return Opacity;
+    "5b90577e": "custom_raymarch_2d",       # for (d < marchDistance) { UV += marchDir * d / numSteps; light *= 1 - density } (MF_Raymarched_Smoke_Func)
     "190f0d13": "custom_eye_adaptation_inverse",  # LightValue * exp(-Alpha * log(Adaptation))
     "287306e9": "custom_oct_decode",        # hemi-octahedral -> normal
     "cee1e2ec": "custom_oct_encode",        # normal -> hemi-octahedral
@@ -2469,7 +2470,12 @@ class Translator:
             return self.stand_in("%s as 1" % t, self.const(1.0))
         if t == "ParticleSize":
             return self._hook("particle_size", lambda: self.stand_in("ParticleSize as 1 m", self.const((100.0, 100.0), 2)))
-        if t in ("ParticleDirection", "SamplePhysicsVectorField", "ShellMeshLocalShellOffset"):
+        if t == "ParticleSpriteRotation":
+            # a sprite's turn: radians, then degrees (the outputs mask one each)
+            return self._hook("particle_rotation", lambda: self.stand_in("ParticleSpriteRotation as 0", self.const((0.0, 0.0), 2)))
+        if t == "ParticleDirection":
+            return self._hook("particle_direction", lambda: self.stand_in("ParticleDirection as 0", self.const((0.0, 0.0, 0.0), 3)))
+        if t in ("SamplePhysicsVectorField", "ShellMeshLocalShellOffset"):
             return self.stand_in("%s as 0" % t, self.const((0.0, 0.0, 0.0), 3))
         if t == "LandscapeLayerCoords":
             # UE: the landscape's own texture coordinates (quads, landscape-wide:
@@ -2834,6 +2840,64 @@ class Translator:
         m = self.mask(self._in(ins, "Mask"), [0])
         off = self.math('LESS_THAN', m, self.const(0.0001)) if not m.const else self.const(1.0 if m.s < 0.0001 else 0.0)
         return self.select(off, v, self._in(ins, "Default"))
+
+    def _number(self, v, default):
+        """A scalar's number where building the material knows it: a constant, a parameter's own
+        value (its group input's default, a Value node's); the default otherwise."""
+        if v is None:
+            return default
+        if v.const:
+            try:
+                return float(v.s)
+            except (TypeError, ValueError):
+                return default
+        node = v.s.node
+        if node.type == 'VALUE':
+            return float(node.outputs[0].default_value)
+        if node.type == 'GROUP_INPUT':
+            item = next((i for i in node.id_data.interface.items_tree
+                         if i.item_type == 'SOCKET' and i.in_out == 'INPUT' and i.identifier == v.s.identifier), None)
+            try:
+                return float(item.default_value)
+            except (AttributeError, TypeError, ValueError):
+                return default
+        return default
+
+    def custom_raymarch_2d(self, ins, p):
+        # a light march through a density texture, in the sprite's plane: step k (0 .. numSteps - 1)
+        # moves the UV on by marchDir * (k * marchDistance / numSteps) / numSteps, reads the density
+        # there (the texel over (numSteps - contrast), against ChannelSelect) and dims the light by it;
+        # LO + LightColor * light * density comes out. The loop is laid out step by step: as many
+        # as NumSteps says when the material is built.
+        steps = int(round(self._number(ins.get("numSteps"), 16.0)))
+        if steps > 64:
+            self.warnings.append("approximate: a %d-step light march laid out as 64 steps" % steps)
+        steps = max(1, min(steps, 64))
+        count = self._in(ins, "numSteps", float(steps))
+        tex, uv, march = self._tex_name(ins, "Tex"), ins.get("UV") or self.env.uv(0), self._in(ins, "marchDir")
+        select = self._in(ins, "ChannelSelect", 1.0)
+        # what one more step adds to the UV, over the step's number
+        unit = self.binop('DIVIDE', self._in(ins, "marchDistance"), self.binop('MULTIPLY', count, count))
+        stride = self.vmath('SCALE', self.zero_z(Val(march.s, 2)) if march.w >= 2 else self.combine([march, march, self.const(0.0)]), unit, out_w=2)
+        thin = self.binop('SUBTRACT', count, self._in(ins, "contrast"))
+        light = self._in(ins, "TransmittedLight", 1.0)
+        light = self.mask(light, [0]) if light.w > 1 else light
+        for k in range(steps):
+            at = uv if k == 0 else self.vmath('ADD', uv, self.vmath('SCALE', stride, self.const(k * (k + 1) / 2.0), out_w=2), out_w=2)
+            n = self.sample_node(tex, at, "SAMPLERTYPE_Color")
+            texel = Val(n.outputs["Color"], 3)
+            if select.w == 1:
+                # (a scalar against the float4 texel: every channel)
+                density = self.binop('MULTIPLY', self.binop('ADD', self.vmath('DOT_PRODUCT', texel, self.const((1.0, 1.0, 1.0), 3)),
+                                                            Val(n.outputs["Alpha"], 1)), select)
+            else:
+                density = self.vmath('DOT_PRODUCT', texel, self.as3(select))
+                if select.w == 4:
+                    density = self.binop('ADD', density, self.binop('MULTIPLY', Val(n.outputs["Alpha"], 1), self.alpha(select)))
+            density = self.math('DIVIDE', density, thin, clamp=True)
+            light = self.binop('MULTIPLY', light, self.math('SUBTRACT', self.const(1.0), density, clamp=True))
+        lit = self.binop('MULTIPLY', self.binop('MULTIPLY', self._in(ins, "LightColor", 1.0), light), self._in(ins, "density", 1.0))
+        return self.binop('ADD', self._in(ins, "LO"), lit)
 
     def custom_pcg3d16(self, ins, p):
         # an integer hash of the cell: Blender's white noise per cell has the

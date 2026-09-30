@@ -622,7 +622,7 @@ def clear(root):
     for node in root.children:
         for piece in node.children:
             if piece.get(effects.KEY) in ("Sprite", "Mesh", "Ribbon"):
-                piece.hide_render = piece.hide_viewport = False
+                piece.hide_render = piece.hide_viewport = bool(piece.get(effects.KEY_SKIP))
 
 
 def _user(root, system):
@@ -724,7 +724,7 @@ def play(root):
         for piece in list(node.children):
             kind = piece.get(effects.KEY)
             renderer = next((e["props"] for e in exports if e["name"] == piece.get(effects.KEY_RENDERER) and e["outer"] == emitter.export["name"]), None)
-            if kind not in ("Sprite", "Mesh", "Ribbon") or renderer is None or piece.type != 'MESH':
+            if kind not in ("Sprite", "Mesh", "Ribbon") or renderer is None or piece.type != 'MESH' or piece.get(effects.KEY_SKIP):
                 continue
             keep = None
             if kind == "Mesh" and track.has(bound(renderer, "MeshIndexBinding", "MeshIndex")):

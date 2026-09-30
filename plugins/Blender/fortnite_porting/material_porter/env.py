@@ -390,6 +390,20 @@ class MaterialEnv:
         """UE's Particle Speed: how fast a particle moves (mp_velocity's length; 0 where there is none)."""
         return self.tr.vmath('LENGTH', self._particle_attr("mp_velocity")[0], out_w=1)
 
+    def particle_rotation(self):
+        """UE's Particle Sprite Rotation: a sprite's turn in radians and in degrees (mp_spin, which
+        runs Blender's way round; 0 where there is none)."""
+        tr = self.tr
+        turn = tr.math('MULTIPLY', self._particle_attr("mp_spin")[2], tr.const(-1.0))
+        return tr.combine([turn, tr.math('MULTIPLY', turn, tr.const(57.29577951308232))])
+
+    def particle_direction(self):
+        """UE's Particle Direction: the way a particle moves, in UE's axes (mp_velocity, which is
+        in Blender's; 0 where there is none)."""
+        tr = self.tr
+        ue = tr.vmath('MULTIPLY', self._particle_attr("mp_velocity")[0], tr.const((1.0, -1.0, 1.0), 3), out_w=3)
+        return tr.vmath('NORMALIZE', ue, out_w=3)
+
     def particle_size(self):
         """UE's Particle Size: a sprite's width and height (mp_size; 1 m where there is none)."""
         tr = self.tr

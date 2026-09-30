@@ -22,6 +22,7 @@ KEY = "mp_effect"           # on an effect's objects: "System", "Emitter (GPU)",
 KEY_EMITTER = "mp_emitter"  # on an emitter's empty: the emitter's name
 KEY_RENDERER = "mp_renderer"    # on a drawn piece: its renderer's name in the asset
 KEY_ROLE = "mp_effect_role"     # on an item's own effect's empty: "trail", "swing", "idle" or "event"
+KEY_SKIP = "mp_effect_skip"     # on a piece that isn't drawn: FP's importer hides its material (an anime outline's shell)
 
 
 def particle_values(obj):
@@ -180,6 +181,15 @@ def finish(context, mesh, root):
         return
     from . import effect_replay
     from .hook import _log
+    # what FP's importer hides on a character (an anime outline's shell: its material draws ink lines
+    # from the scene's depth, which a Blender material can't read) isn't drawn as a white shell here
+    hidden = list(getattr(context, "full_vertex_crunch_materials", None) or ())
+    for node in root.children:
+        for piece in node.children:
+            if piece.type == 'MESH' and len(piece.material_slots) and all(any(s.material == m for m in hidden) for s in piece.material_slots):
+                piece[KEY_SKIP] = True
+                piece.hide_render = piece.hide_viewport = True
+                _log("%s: %s not drawn (an outline shell: its lines come from the scene's depth)" % (root.name, piece.name))
     # a contrail, an animation's effect: on the armature selected when it was sent
     rig = getattr(context, "mp_selected_armature", None)
     if fx.get("Attach") and rig is not None:

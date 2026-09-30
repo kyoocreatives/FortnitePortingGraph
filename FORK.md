@@ -156,8 +156,15 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     still piece): `mp_particle` = 1 with `mp_particle_color`, `mp_dynamic` (four flags: which
     Dynamic Parameters the emitter writes, from the renderer's MaterialParamValidMask) with
     `mp_dynamic0..3`, `mp_subimage` (a flipbook's frame: a sprite's material carries `MPSprite`,
-    its sub-image counts, and its UV0 picks the sub-image), `mp_age`, `mp_velocity`, `mp_size`.
+    its sub-image counts, and its UV0 picks the sub-image), `mp_age`, `mp_velocity` (Particle Speed,
+    Particle Direction), `mp_size`, `mp_spin` (Particle Sprite Rotation: radians, degrees).
     A ribbon's run along it: its material (`MPRibbon`) reads them off the ribbon's mesh.
+  - **Effect materials.** The raymarched smoke's Custom node (`MF_Raymarched_Smoke_Func`: a light
+    march through the density texture in the sprite's plane) is laid out step by step, as many
+    steps as the material's NumSteps says when it is built (`custom_raymarch_2d`; 64 at most). A
+    piece whose material FP's importer hides (an anime outline's shell, `M_AnimeOutline_FX`: its
+    ink lines come from the scene's depth) isn't drawn (`mp_effect_skip`) instead of showing as a
+    white shell.
   - **UE's mesh particle normals.** UE turns a mesh particle's normals by its scale, not by the
     scale's inverse (a sphere flattened into a camera-facing card keeps a round one's falloff: the
     explosions' mesh smoke). The modifier sets the normals that come out so.
