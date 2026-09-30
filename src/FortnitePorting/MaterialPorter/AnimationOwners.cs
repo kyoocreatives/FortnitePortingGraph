@@ -1,0 +1,119 @@
+using System;
+using System.Collections.Concurrent;
+using System.Collections.Generic;
+using System.IO;
+using System.Linq;
+using System.Threading.Tasks;
+using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Objects.Core.i18N;
+using CUE4Parse.UE4.Objects.UObject;
+using FortnitePorting.CUE4Parse.Extensions;
+using FortnitePorting.Exporting.MaterialPorter;
+using FortnitePorting.Models.Assets.Loading;
+using FortnitePorting.Services;
+
+namespace FortnitePorting.MaterialPorter;
+
+/// <summary>
+/// Material Porter fork: the items the Animations tab's animations belong to, so that an animation
+/// shows its item's name and icon. A glider's, a back bling's and a pickaxe's by the skeleton of the
+/// item's mesh (read from the mesh's package's imports); an emote's by its montage's folder. Kept in
+/// a file (keyed like the outlines): about 9,000 items are read the first time.
+/// </summary>
+public static class AnimationOwners
+{
+    private static readonly (string Class, bool ByFolder)[] Sources =
+    [
+        ("AthenaGliderItemDefinition", false),
+        ("AthenaBackpackItemDefinition", false),
+        ("AthenaPickaxeItemDefinition", false),
+        ("AthenaDanceItemDefinition", true),
+    ];
+
+    public static async Task Build(string file, string key)
+    {
+        Animations.ClearOwners();
+        if (Recall(file, key)) return;
+        var found = new ConcurrentBag<(bool Folder, string Key, Animations.Owner Owner)>();
+        var items = UEParse.AssetRegistry.Where(a => Sources.Any(s => s.Class == a.AssetClass.Text)).ToList();
+        await Parallel.ForEachAsync(items, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2) }, async (data, _) =>
+        {
+            try
+            {
+                if (await UEParse.Provider.SafeLoadPackageObjectAsync(data.ObjectPath) is not { } item) return;
+                var name = item.GetAnyOrDefault<FText?>("DisplayName", "ItemName")?.Text is { Length: > 0 } shown ? shown : item.Name;
+                var owner = new Animations.Owner(name, AssetLoader.GetLowResIcon(item)?.GetPathName());
+                if (Sources.First(s => s.Class == data.AssetClass.Text).ByFolder)
+                {
+                    foreach (var montage in new[] { PathOf(item, "Animation"), PathOf(item, "AnimationFemaleOverride") })
+                        if (montage is not null) found.Add((true, montage[..montage.LastIndexOf('/')], owner));
+                    return;
+                }
+                foreach (var mesh in Meshes(item))
+                    if (await Animations.SkeletonOf(UEParse.Provider, mesh.Split('.')[0]) is { } skeleton)
+                        found.Add((false, skeleton, owner));
+            }
+            catch (Exception)
+            {
+                // (an item that can't be read owns nothing)
+            }
+        });
+        foreach (var (folder, at, owner) in found)
+            if (folder) Animations.OwnFolder(at, owner); else Animations.OwnSkeleton(at, owner);
+        try
+        {
+            using var writer = new StreamWriter(file);
+            writer.WriteLine(key);
+            foreach (var (folder, at, owner) in found)
+                writer.WriteLine($"{(folder ? "F" : "S")}\t{at}\t{owner.Name}\t{owner.Icon}");
+        }
+        catch (Exception)
+        {
+            // (only the next listing is slower)
+        }
+    }
+
+    private static bool Recall(string file, string key)
+    {
+        try
+        {
+            if (!File.Exists(file)) return false;
+            using var reader = new StreamReader(file);
+            if (reader.ReadLine() != key) return false;
+            var owners = new Dictionary<(string, string), Animations.Owner>();
+            while (reader.ReadLine() is { } line)
+            {
+                var f = line.Split('\t');
+                if (f.Length != 4) continue;
+                // one owner object an item (an owner compares by value anyway)
+                var owner = owners.TryGetValue((f[2], f[3]), out var had) ? had : owners[(f[2], f[3])] = new Animations.Owner(f[2], f[3].Length > 0 ? f[3] : null);
+                if (f[0] == "F") Animations.OwnFolder(f[1], owner); else Animations.OwnSkeleton(f[1], owner);
+            }
+            return true;
+        }
+        catch (Exception)
+        {
+            Animations.ClearOwners();
+            return false;
+        }
+    }
+
+    /// <summary>The meshes an item shows: a glider's, a back bling's parts', a pickaxe's weapon's.</summary>
+    private static IEnumerable<string> Meshes(UObject item)
+    {
+        if (PathOf(item, "SkeletalMesh") is { } glider) yield return glider;
+        foreach (var part in item.GetOrDefault("CharacterParts", Array.Empty<UObject>()))
+            if (PathOf(part, "SkeletalMesh") is { } mesh) yield return mesh;
+        if (item.GetOrDefault<UObject?>("WeaponDefinition") is { } weapon
+            && (PathOf(weapon, "WeaponMeshOverride") ?? weapon.GetDataListItem<FSoftObjectPath>("WeaponMeshOverride").AssetPathName.Text) is { Length: > 0 } axe && axe != "None")
+            yield return axe;
+    }
+
+    /// <summary>The path a property names, soft or hard, without reading what it names.</summary>
+    private static string? PathOf(UObject owner, string property)
+    {
+        if (owner.GetOrDefault<FSoftObjectPath>(property) is { AssetPathName.IsNone: false } soft) return soft.AssetPathName.Text;
+        if (owner.GetOrDefault<FPackageIndex?>(property) is { IsNull: false } hard && hard.ResolvedObject is { } resolved) return resolved.GetPathName();
+        return null;
+    }
+}

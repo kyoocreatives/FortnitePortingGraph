@@ -347,7 +347,7 @@ public partial class AssetLoader : ObservableObject
         var isHidden = HideNames.Any(name => asset.Name.Contains(name, StringComparison.OrdinalIgnoreCase)) || HidePredicate(this, asset, displayName);
         if (isHidden && !LoadHiddenAssets) return;
 
-        var lowResIconPath = LowResIconHandler(asset)?.GetPathName();
+        var lowResIconPath = MPIconPath?.Invoke(asset) ?? LowResIconHandler(asset)?.GetPathName();
         var highResIconPath = HighResIconHandler(asset)?.GetPathName();
         if (lowResIconPath is null && highResIconPath is null)
             lowResIconPath = PlaceholderIconPath;

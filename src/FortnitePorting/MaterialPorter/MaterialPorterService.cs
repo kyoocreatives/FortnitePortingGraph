@@ -453,6 +453,7 @@ public class MaterialPorterService : IService
                 managedMB = GC.GetTotalMemory(false) / 1_000_000, workingSetMB = Environment.WorkingSet / 1_000_000,
                 // effects: how many play in Blender (the tab's filter)
                 plays = loader.Type == EExportType.Effect ? loader.Source.Items.OfType<Models.Assets.Asset.AssetItem>().Count(a => Effects.Plays(a.CreationData.Object)) : -1,
+                owned = loader.Type == EExportType.Animation ? loader.Source.Items.OfType<Models.Assets.Asset.AssetItem>().Count(a => Animations.Owned(a.CreationData.Object)) : -1,
                 sample = names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(12),
                 cooked, failed = failed.Count, failedSample = failed.Take(12)
             });

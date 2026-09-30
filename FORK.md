@@ -139,6 +139,14 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   outlines are kept in `.data/mp_animations.tsv` (keyed by the file and archive counts), after
   which the tab lists in about a second. An export goes onto the armature selected in Blender, as
   from the Files tab (`AnimExport` reads the asset the tab listed unread).
+  An animation of an item shows the item's name and icon ("Vanguard Squadron X-wing · Maverick
+  Closed GLIDER"), and the tab sorts by name, so an item's animations sit together and the search
+  finds them by the item's name (`MaterialPorter/AnimationOwners.cs`, `Animations.Assign`): a
+  glider's, a back bling's and a pickaxe's by the skeleton of the item's mesh (from the mesh's
+  package's imports; a skeleton a few items share is theirs together, one of more than 3 none), an
+  emote's by its montage's folder, and the animations beside or under one found so (a glider's
+  rider's) take its item too - 26,400 of the 69,600. The "Of an Item" filter keeps those. The
+  items' index is kept in `.data/mp_animation_owners.tsv` beside the outlines.
 - **Particle effects, played.** Assets > Gameplay > Effects lists 18,500 Niagara systems: the asset
   registry's (552 once each - the registry holds most of them twice - nearly all islands') and the
   game's own, found by file name (`NS_...`: the cooked registry leaves nearly all of them out;

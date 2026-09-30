@@ -40,11 +40,88 @@ public static partial class Animations
     [GeneratedRegex(@"/anim|anim_|_anim|montage|/emotes?/|/dances?/", RegexOptions.IgnoreCase)]
     private static partial Regex Candidate();
 
-    public sealed record Outline(string? Class, string? Skeleton, string Kind) : Unloaded.IOutline
+    public sealed record Outline(string Package, string? Class, string? Skeleton, string Kind) : Unloaded.IOutline
     {
+        /// <summary>The item it belongs to, where one is found (<see cref="Assign"/>).</summary>
+        public Owner? Owner { get; set; }
+
+        public string Folder => Package[..Math.Max(0, Package.LastIndexOf('/'))];
+
         public string Describe(string folder) =>
-            $"{(Class == "AnimMontage" ? "Montage" : "Sequence")}{(Skeleton is null ? "" : $" · {Skeleton}")} · {folder}";
+            $"{(Owner is null ? "" : $"{Owner.Name}'s · ")}{(Class == "AnimMontage" ? "Montage" : "Sequence")}{(Skeleton is null ? "" : $" · {Skeleton}")} · {folder}";
     }
+
+    /// <summary>
+    /// An item animations belong to (a glider, a back bling, a pickaxe, an emote): its name and icon.
+    /// An animation is its item's when it moves the skeleton of the item's mesh (a skeleton only that
+    /// item's), or sits in the folder of the item's own animations (an emote's montage, a glider's
+    /// rider animations beside the glider's).
+    /// </summary>
+    public sealed record Owner(string Name, string? Icon);
+
+    // skeleton name -> its items, folder -> its items
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<Owner, byte>> _bySkeleton = new(StringComparer.OrdinalIgnoreCase);
+    private static readonly ConcurrentDictionary<string, ConcurrentDictionary<Owner, byte>> _byFolder = new(StringComparer.OrdinalIgnoreCase);
+    private const int SharedMost = 3;       // a skeleton or folder of more items than this is no item's (the pickaxes' shared melee skeleton)
+
+    public static void ClearOwners()
+    {
+        _bySkeleton.Clear();
+        _byFolder.Clear();
+    }
+
+    public static void OwnSkeleton(string skeleton, Owner owner) => _bySkeleton.GetOrAdd(skeleton, _ => new ConcurrentDictionary<Owner, byte>())[owner] = 0;
+
+    public static void OwnFolder(string folder, Owner owner) => _byFolder.GetOrAdd(folder, _ => new ConcurrentDictionary<Owner, byte>())[owner] = 0;
+
+    /// <summary>The item a skeleton or folder is of: one, or a few that share it (their names together, the first's icon).</summary>
+    private static Owner? Of(ConcurrentDictionary<string, ConcurrentDictionary<Owner, byte>> map, string? key)
+    {
+        if (key is null || !map.TryGetValue(key, out var owners) || owners.IsEmpty || owners.Count > SharedMost) return null;
+        var sorted = owners.Keys.OrderBy(o => o.Name, StringComparer.OrdinalIgnoreCase).ToList();
+        return sorted.Count == 1 ? sorted[0] : new Owner(string.Join(" / ", sorted.Select(o => o.Name).Distinct()), sorted.FirstOrDefault(o => o.Icon is not null)?.Icon);
+    }
+
+    private static string Up(string folder) => folder[..Math.Max(0, folder.LastIndexOf('/'))];
+
+    /// <summary>
+    /// Each animation's item: by its skeleton, else by its folder (or the folder above); then the
+    /// animations beside or under one found so (a glider's rider's, under the glider's own) take its
+    /// item too.
+    /// </summary>
+    public static void Assign(IReadOnlyList<Unloaded.IOutline> outlines)
+    {
+        var all = outlines.OfType<Outline>().ToList();
+        var beside = new Dictionary<string, Owner?>(StringComparer.OrdinalIgnoreCase);
+        foreach (var o in all)
+        {
+            o.Owner = Of(_bySkeleton, o.Skeleton) ?? Of(_byFolder, o.Folder) ?? Of(_byFolder, Up(o.Folder));
+            if (o.Owner is not null)
+                beside[o.Folder] = beside.TryGetValue(o.Folder, out var had) && had != o.Owner ? null : o.Owner;
+        }
+        foreach (var o in all)
+        {
+            if (o.Owner is not null) continue;
+            var folder = o.Folder;
+            for (var up = 0; up < 3 && o.Owner is null && folder.Length > 0; up++, folder = Up(folder))
+                if (beside.TryGetValue(folder, out var owner))
+                {
+                    o.Owner = owner;
+                    break;         // (one shared by several items above stays none)
+                }
+        }
+    }
+
+    /// <summary>An animation's name in the tab: its item's name first, where it has one; underscores as spaces.</summary>
+    public static string DisplayName(UObject animation)
+    {
+        var name = animation.Name.Replace('_', ' ');
+        return (Unloaded.Detail(animation) as Outline)?.Owner is { } owner ? $"{owner.Name} · {name}" : name;
+    }
+
+    public static string? IconPath(UObject animation) => ((Unloaded.Detail(animation) as Outline)?.Owner)?.Icon;
+
+    public static bool Owned(UObject animation) => (Unloaded.Detail(animation) as Outline)?.Owner is not null;
 
     /// <summary>The packages that may be animations, by path: (package path as the game mounts it, object name).</summary>
     public static List<(string Package, string Name)> Candidates(IFileProvider provider, IEnumerable<(string Package, string Name)> registry)
@@ -79,7 +156,7 @@ public static partial class Animations
             while (reader.ReadLine() is { } line)
             {
                 var f = line.Split('\t');
-                if (f.Length == 4) _known[f[0]] = new Outline(f[1].Length > 0 ? f[1] : null, f[2].Length > 0 ? f[2] : null, KindOf(f[0], f[2]));
+                if (f.Length == 4) _known[f[0]] = new Outline(f[0], f[1].Length > 0 ? f[1] : null, f[2].Length > 0 ? f[2] : null, KindOf(f[0], f[2]));
             }
         }
         catch (Exception)
@@ -121,17 +198,34 @@ public static partial class Animations
             var loaded = await provider.LoadPackageAsync(package);
             var index = loaded.GetExportIndex(name, StringComparison.OrdinalIgnoreCase);
             var type = index < 0 ? null : loaded.ResolvePackageIndex(new FPackageIndex(loaded, index + 1))?.Class?.Name.Text;
-            if (type is null || !Classes.Contains(type)) return new Outline(type, null, "");
+            if (type is null || !Classes.Contains(type)) return new Outline(package, type, null, "");
             string? skeleton = null;
             for (var i = 0; i < loaded.ImportMapLength && skeleton is null; i++)
                 if (loaded.ResolvePackageIndex(new FPackageIndex(loaded, -(i + 1))) is { } import && import.Class?.Name.Text == "Skeleton")
                     skeleton = import.Name.Text;
-            return new Outline(type, skeleton, KindOf(package, skeleton));
+            return new Outline(package, type, skeleton, KindOf(package, skeleton));
         }
         catch (Exception)
         {
             return null;
         }
+    }
+
+    /// <summary>The skeleton a package's mesh or animation imports (its package's import map: nothing is read).</summary>
+    public static async Task<string?> SkeletonOf(IFileProvider provider, string package)
+    {
+        try
+        {
+            var loaded = await provider.LoadPackageAsync(package);
+            for (var i = 0; i < loaded.ImportMapLength; i++)
+                if (loaded.ResolvePackageIndex(new FPackageIndex(loaded, -(i + 1))) is { } import && import.Class?.Name.Text == "Skeleton")
+                    return import.Name.Text;
+        }
+        catch (Exception)
+        {
+            // (none found)
+        }
+        return null;
     }
 
     /// <summary>What an animation is for, from its path and its skeleton's name.</summary>

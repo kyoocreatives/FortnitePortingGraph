@@ -8,6 +8,7 @@ using CUE4Parse.UE4.Objects.Core.i18N;
 using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.CUE4Parse.Extensions;
 using FortnitePorting.Exporting.MaterialPorter;
+using FortnitePorting.MaterialPorter;
 using FortnitePorting.Models.Assets.Filters;
 using FortnitePorting.Models.Assets.Loading;
 
@@ -44,18 +45,31 @@ public partial class AssetLoaderService
         {
             ClassNames = Animations.Classes,
             HideRarity = true,
+            // an animation of an item (a glider's, a back bling's, a pickaxe's, an emote's) shows the
+            // item's name and icon, so they can be found by the item: sorted by name, they sit together
+            SortType = EAssetSortType.AZ,
+            DisplayNameHandler = Animations.DisplayName,
             DescriptionHandler = Animations.Describe,
+            MPIconPath = Animations.IconPath,
             MPUnregistered = registry => UEParse.Provider is { } provider ? Animations.Candidates(provider, registry) : registry,
             MPOutline = async (package, name) => await Animations.ReadOutline(UEParse.Provider, package, name),
-            // the outlines kept from the last listing of the same files: a few seconds instead of over a minute
-            MPBeforeListing = () => Animations.Recall(Path.Combine(FortnitePorting.Application.AppServices.App.DataFolder.FullName, "mp_animations.tsv"),
-                $"1 {UEParse.Provider.Files.Count} {UEParse.Provider.MountedVfs.Count}"),
+            // the outlines and the items' index kept from the last listing of the same files: a few
+            // seconds instead of over a minute
+            MPBeforeListing = async () =>
+            {
+                var key = $"2 {UEParse.Provider.Files.Count} {UEParse.Provider.MountedVfs.Count}";
+                var data = FortnitePorting.Application.AppServices.App.DataFolder.FullName;
+                await AnimationOwners.Build(Path.Combine(data, "mp_animation_owners.tsv"), key);
+                Animations.Recall(Path.Combine(data, "mp_animations.tsv"), key);
+            },
+            MPOutlined = Animations.Assign,
             MPAfterListing = Animations.Remember,
             FilterCategories =
             {
                 new FilterCategory("ANIMATION", [EExportType.Animation])
                 {
-                    Filters = [..Animations.Kinds.Select(k => k.Kind).Append("Other")
+                    Filters = [new FilterItem("Of an Item", asset => Animations.Owned(asset.CreationData.Object)),
+                        ..Animations.Kinds.Select(k => k.Kind).Append("Other")
                         .Select(kind => new FilterItem(kind, asset => Animations.Is(asset.CreationData.Object, kind)))]
                 }
             },
