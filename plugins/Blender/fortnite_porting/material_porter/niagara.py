@@ -29,6 +29,8 @@ TYPES = {
     "LinearColor": (4, 0), "Quat4f": (4, 0), "Matrix44f": (16, 0), "NiagaraMatrix": (16, 0),
     "NiagaraID": (0, 2), "NiagaraSpawnInfo": (2, 2), "NiagaraRandInfo": (0, 3),
 }
+# half-precision attributes (an emitter's compressed ones): their own rows, after the floats
+HALVES = {"NiagaraHalf": 1, "NiagaraHalfVector2": 2, "NiagaraHalfVector3": 3, "NiagaraHalfVector4": 4}
 ACTIVE, INACTIVE, INACTIVE_CLEAR, COMPLETE, DISABLED = range(5)      # ENiagaraExecutionState
 QUALITY = 3     # the quality level replayed at (Engine.QualityLevel: 0 low to 4 cinematic)
 
@@ -51,7 +53,8 @@ def components(typedef):
     name = type_name(typedef)
     if name in TYPES:
         return TYPES[name]
-    if typedef.get("UnderlyingType") == 3 or (name and name.startswith("E") and name[1:2].isupper()):
+    # (UnderlyingType: 1 a class, 2 a struct, 3 an enum; older assets leave it out)
+    if typedef.get("UnderlyingType") == 3 or (typedef.get("UnderlyingType") != 2 and name and name.startswith("E") and name[1:2].isupper()):
         return (0, 1)       # an enum
     raise Unsupported("type %s in a data set" % name)
 
@@ -60,17 +63,30 @@ class Layout:
     """Where each variable of a data set sits: name -> (type, first float row, first int row, floats, ints)."""
 
     def __init__(self, variables):
-        self.vars, self.floats, self.ints = {}, 0, 0
+        self.vars, self.floats, self.ints, self.halves = {}, 0, 0, 0
+        half = []
         for v in variables:
             if v["Name"] in self.vars:
                 continue
+            kind = type_name(v["TypeDef"])
+            if kind in HALVES:
+                self.vars[v["Name"]] = None
+                half.append((v["Name"], kind, self.halves, HALVES[kind]))
+                self.halves += HALVES[kind]
+                continue
             nf, ni = components(v["TypeDef"])
-            self.vars[v["Name"]] = (type_name(v["TypeDef"]), self.floats, self.ints, nf, ni)
+            self.vars[v["Name"]] = (kind, self.floats, self.ints, nf, ni)
             self.floats += nf
             self.ints += ni
+        # a half attribute reads as floats: its rows come after the float rows (the VM's half
+        # reads and writes count from there)
+        for name, kind, at, n in half:
+            self.vars[name] = (kind, self.floats + at, 0, n, 0)
 
     def buffer(self, capacity=0):
-        return vm.Buffer(self.floats, self.ints, capacity)
+        b = vm.Buffer(self.floats + self.halves, self.ints, capacity)
+        b.half_base = self.floats
+        return b
 
 
 class Store:
@@ -194,7 +210,7 @@ class Array:
 
     def __init__(self, system, kind, props):
         listed = next((v for k, v in props.items() if k.endswith("Data") and isinstance(v, list)), [])
-        self.ints = kind.endswith(("Int32", "Bool"))
+        self.ints = kind.endswith(("Int32", "Bool", "UInt8", "NiagaraID"))
         rows = []
         for item in listed:
             if isinstance(item, dict):
@@ -204,12 +220,12 @@ class Array:
                 rows.append([-1 if item else 0])
             else:
                 rows.append([item])
-        self.width = None
-        self.rows = np.array(rows, I if self.ints else F).reshape(len(rows), -1) if rows else None
+        # an empty one (a script fills it as it plays) is as wide as its type says, whatever asks first
+        width = next((w for suffix, w in (("Float2", 2), ("Float3", 3), ("Position", 3), ("Float4", 4), ("Color", 4), ("Quat", 4),
+                                          ("NiagaraID", 2), ("Matrix", 16)) if kind.endswith(suffix)), 1)
+        self.rows = np.array(rows, I if self.ints else F).reshape(len(rows), -1) if rows else np.zeros((0, width), I if self.ints else F)
 
     def _table(self, width):
-        if self.rows is None:
-            self.rows = np.zeros((0, width), I if self.ints else F)
         return self.rows
 
     def function(self, name, specifiers, inputs, outputs):
@@ -348,6 +364,15 @@ class RendererInfo:
             return lambda count, args: [np.full(count, blend, I), np.full(count, size["X"], F), np.full(count, size["Y"], F)]
         if name == "GetNumMeshes":
             return lambda count, args: [np.full(count, len(self.props.get("Meshes") or []), I)]
+        if name == "GetMeshLocalBounds" and outputs == 9 and self.props.get("MPBounds"):
+            # a mesh's bounds with the renderer's scale of it (the app works them out): min, max, size
+            boxes = np.array(self.props["MPBounds"], F).reshape(-1, 6)
+            rows = np.concatenate([boxes, boxes[:, 3:] - boxes[:, :3]], axis=1)
+
+            def bounds(count, args):
+                index = np.clip(np.broadcast_to(vm.it(args[-1]), (count,)), 0, len(rows) - 1)
+                return [rows[index, i] for i in range(9)]
+            return bounds
         raise Unsupported("%s.%s" % (self.kind.replace("NiagaraDataInterface", ""), name))
 
 
@@ -472,6 +497,8 @@ class Camera:
         self.system = system
 
     def function(self, name, specifiers, inputs, outputs):
+        if name == "GetFieldOfView" and outputs == 1:
+            return lambda count, args: [np.full(count, self.system.fov, F)]
         if not name.startswith("GetCameraProperties"):
             raise Unsupported("Camera.%s" % name)
 
@@ -533,6 +560,29 @@ class PlatformSet:
         return lambda count, args: [np.full(count, -1 if self.active else 0, I)] * outputs
 
 
+class Distribution:
+    """A weighted distribution array (Value, Weight entries): its alias table, as the asset built it
+    (per entry: probability, alias, value, weight), which a script draws from with two random numbers."""
+
+    def __init__(self, system, kind, props):
+        raw = bytes(props.get("BuiltTableData") or [])
+        n = len(raw) // 16
+        self.probability = np.frombuffer(raw[:n * 16], F)[0::4].copy() if n else np.zeros(0, F)
+        self.alias = np.frombuffer(raw[:n * 16], I)[1::4].copy() if n else np.zeros(0, I)
+
+    def function(self, name, specifiers, inputs, outputs):
+        if name in ("Length", "Num"):
+            return lambda count, args: [np.full(count, len(self.probability), I)]
+        if name == "GetProbabilityAlias" and outputs == 2:
+            def entry(count, args):
+                if not len(self.probability):
+                    return [np.zeros(count, F), np.zeros(count, I)]
+                index = np.clip(np.broadcast_to(vm.it(args[-1]), (count,)), 0, len(self.probability) - 1)
+                return [self.probability[index], self.alias[index]]
+            return entry
+        raise Unsupported("ArrayDistribution.%s" % name)
+
+
 class Nothing:
     """A data interface with nothing to answer here (sound, a world to collide with): its functions give zeros."""
 
@@ -556,6 +606,7 @@ for _kind in ("Float", "Float2", "Float3", "Float4", "Position", "Color", "Quat"
     INTERFACES["NiagaraDataInterfaceArray" + _kind] = Array
 for _kind in ("AudioPlayer", "AudioOscilloscope", "AudioSpectrum", "Export", "DebugDraw", "CollisionQuery", "SimpleCounter"):
     INTERFACES["NiagaraDataInterface" + _kind] = Nothing
+INTERFACES["NiagaraDataInterfaceArrayDistributionInt"] = Distribution
 
 
 def _matrix_to_quaternion(count, args):
@@ -594,7 +645,10 @@ LIBRARY = {"FastMatrixToQuaternion": _matrix_to_quaternion}
 class Script:
     """A compiled script with its parameters and the functions it calls."""
 
-    def __init__(self, system, props, cooked, emitter=None):
+    def __init__(self, system, props, cooked, emitter=None, lenient=False):
+        """lenient (the system's own scripts, which hold every emitter's emitter-level modules):
+        what can't be answered here (a grid a GPU emitter simulates on, a data channel, a mesh to
+        sample) answers zeros instead of stopping the whole system."""
         data = props.get("CachedScriptVM") or {}
         code = (data.get("ByteCode") or {}).get("Data")
         if not code:
@@ -614,13 +668,24 @@ class Script:
                 self.functions.append(LIBRARY[f["Name"]])
                 continue
             interface = system.interface((owner or {}).get("ResolvedDataInterface"))
+            outputs = int(f.get("NumOutputs") or 0)
             if interface is None:
                 kind = str(((owner or {}).get("ResolvedDataInterface") or {}).get("ObjectName") or f.get("OwnerName")).split("'")[0]
+                if lenient:
+                    system.unanswered.add("%s.%s" % (kind.replace("NiagaraDataInterface", ""), f.get("Name")))
+                    self.functions.append(_zeros(outputs))
+                    continue
                 raise Unsupported("%s.%s" % (kind.replace("NiagaraDataInterface", ""), f.get("Name")))
             if hasattr(interface, "caller"):
                 interface.caller = emitter
-            self.functions.append(interface.function(f["Name"], f.get("FunctionSpecifiers") or [],
-                                                     len(f.get("InputParamLocations") or []), int(f.get("NumOutputs") or 0)))
+            try:
+                self.functions.append(interface.function(f["Name"], f.get("FunctionSpecifiers") or [],
+                                                         len(f.get("InputParamLocations") or []), outputs))
+            except Unsupported as e:
+                if not lenient:
+                    raise
+                system.unanswered.add(str(e))
+                self.functions.append(_zeros(outputs))
 
     def run(self, count, blocks, sets, rng, ids=None):
         return vm.run(self.program, self.registers, count, b"".join(blocks) + self.literals, sets, self.functions, rng, ids)
@@ -638,7 +703,7 @@ class Ids:
 
 
 class Handler:
-    """An emitter's answer to another's events: a script run on the particles it spawns per event, or on all."""
+    """An emitter's answer to another's events: particles spawned per event, and a script run on those or on all."""
 
     def __init__(self, system, emitter, handle, props):
         self.script = system.script(props["Script"], handle["Id"])
@@ -703,12 +768,13 @@ class Emitter:
                 if count > 0:
                     spawns.append((count, float(system.data.floats[f0, 0]), float(system.data.floats[f0 + 1, 0]), int(system.data.ints[i0 + 1, 0])))
             for h in self.handlers:
+                # an event spawns its Spawn Number of particles whatever the handler's script then
+                # runs on (the spawned ones, or every particle)
                 events, count = h.events()
-                if h.spawns:
-                    for j in range(count):
-                        n = h.number if h.least >= h.number else int(system.rng.integers(h.least, h.number + 1))
-                        if n > 0:
-                            answers.append((h, events, j, n))
+                for j in range(count):
+                    n = h.number if h.least >= h.number else int(system.rng.integers(h.least, h.number + 1))
+                    if n > 0:
+                        answers.append((h, events, j, n))
         existing = self.data.count
         self.next.reserve(existing + sum(s[0] for s in spawns) + sum(a[3] for a in answers))
         if self.previous is None:
@@ -771,7 +837,7 @@ class Emitter:
             start = alive
             ran.append((h, events, j, start, spawn(n, dt * 0.5, 0.0, 0)))
         for h, events, j, start, n in ran:
-            if n:
+            if n and h.spawns:
                 h.script.store.put("Engine.ExecutionCount", "<i", n)
                 h.script.run(n, blocks(h.script), [vm.Binding(self.next, start, self.next, start), vm.Binding(events, j)], system.rng, self.ids)
         for h in self.handlers:
@@ -815,7 +881,12 @@ class System:
         self.placed, self.dt = None, 1.0 / 60.0
         # where a script that asks finds the camera: position, forward, up, right (UE's axes, cm)
         self.camera = ((-500.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0))
+        self.fov = 80.0     # its field of view, degrees (the game's default)
         self.asset = next(e for e in exports if e["type"] == "NiagaraSystem")
+        # the user-defined structs its data sets hold (the app lays each out: floats, ints)
+        for e in exports:
+            if e["type"] == "MPStruct":
+                TYPES[e["name"]] = (int(e["props"]["Floats"]), int(e["props"]["Ints"]))
         props = self.props = self.asset["props"]
         self.rng = np.random.default_rng(seed)
         self.seed = seed
@@ -824,6 +895,17 @@ class System:
         self.layout = Layout(compiled["DataSetCompiledData"]["Variables"])
         self.data, self.next = self.layout.buffer(1), self.layout.buffer(1)
         self.user = Store(compiled.get("InstanceParamStore") or {})
+        # the parameter collections its scripts read (NPC.FortniteNPC.FortniteActiveTimeOfDay: which
+        # time of day's tint a smoke takes): each one's own values, as the app sends them. A script's
+        # cooked store holds placeholders for these (every time of day at once), not the values.
+        self.shared = Store({})
+        for e in exports:
+            if e["type"] == "MPCollection":
+                one = Store(e["props"].get("ParameterStorage") or {})
+                for name, (offset, tname) in one.offsets.items():
+                    self.shared.offsets.setdefault(name, (len(self.shared.data) + offset, tname))
+                self.shared.data += one.data
+                self.shared.size = len(self.shared.data)
         for name, value in (user or {}).items():
             self.set_user(name, value)
         self.cooked = {(k["Key"]["EmitterHandleId"], k["Key"]["ScriptUsage"].split("::")[-1], k["Key"].get("ScriptUsageId") or NO_ID): k["Value"]
@@ -836,6 +918,7 @@ class System:
         struct.pack_into("<4f", self.owner, 384, 0, 0, 0, 1)                         # rotation
         struct.pack_into("<4f4f4f4f", self.owner, 432, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0)    # axes, scale
         self.previous = None
+        self.unanswered = set()     # what its own scripts ask that answers zeros here ("Grid2DCollection.SetNumCells")
         self.spawn = self.script(props["SystemSpawnScript"], None)
         self.update = self.script(props["SystemUpdateScript"], None)
         self.spawn_inputs = Layout(compiled["SpawnInstanceParamsDataSetCompiledData"]["Variables"])
@@ -849,6 +932,8 @@ class System:
             if "Stateless" in str(handle.get("EmitterMode")):
                 # no script: its modules' settings, worked out (niagara_stateless)
                 export = self.export(handle.get("StatelessEmitter"))
+                if export is None:      # (one the cook left out: not for this platform)
+                    continue
                 try:
                     from . import niagara_stateless
                     self.emitters.append(niagara_stateless.Emitter(self, index, handle, export))
@@ -884,34 +969,48 @@ class System:
                              if interface.held(self.pose, i) is None and interface.names[i].lower() != "none")
         return sorted(names)
 
+    def _read(self):
+        """The parameter collections' values its scripts read, by name."""
+        scripts = [self.spawn, self.update] + [s for e in self.emitters for s in
+                                               (getattr(e, "spawn", None), getattr(e, "update", None), *[h.script for h in getattr(e, "handlers", ())]) if s is not None]
+        return {name for s in scripts for name in s.store.offsets if name in self.shared.offsets}
+
     def users(self):
-        """The system's user parameters a number or a few say: [(name, type, value)]."""
+        """What the game sets of it that a number or a few say: its user parameters, and the
+        parameter collections' values its scripts read: [(name, type, value)]."""
         found = []
-        for name, (offset, tname) in sorted(self.user.offsets.items()):
-            nf, ni = TYPES.get(tname, (0, 0))
-            if tname == "NiagaraBool":
-                found.append((name, tname, struct.unpack_from("<i", self.user.data, offset)[0] != 0))
-            elif ni == 1 and not nf:
-                found.append((name, tname, struct.unpack_from("<i", self.user.data, offset)[0]))
-            elif nf and not ni:
-                values = struct.unpack_from("<%df" % nf, self.user.data, offset)
-                found.append((name, tname, values[0] if nf == 1 else list(values)))
+        read = self._read()
+        for store in (self.user, self.shared):
+            for name, (offset, tname) in sorted(store.offsets.items()):
+                if store is self.shared and name not in read:
+                    continue
+                nf, ni = TYPES.get(tname, (0, 0))
+                if tname == "NiagaraBool":
+                    found.append((name, tname, struct.unpack_from("<i", store.data, offset)[0] != 0))
+                elif ni == 1 and not nf:
+                    found.append((name, tname, struct.unpack_from("<i", store.data, offset)[0]))
+                elif nf and not ni:
+                    values = struct.unpack_from("<%df" % nf, store.data, offset)
+                    found.append((name, tname, values[0] if nf == 1 else list(values)))
         return found
 
     def set_user(self, name, value):
-        """A user parameter's value over the asset's own (a number, a bool, or floats)."""
-        name = name if name.startswith("User.") else "User." + name
-        if name not in self.user.offsets:
+        """A user parameter's (or a parameter collection's) value over the asset's own (a number, a bool, or floats)."""
+        name = name if name.startswith(("User.", "NPC.")) else "User." + name
+        # (UE's names don't mind case)
+        name = next((n for n in list(self.user.offsets) + list(self.shared.offsets) if n.lower() == name.lower()), name)
+        store = self.user if name in self.user.offsets else self.shared if name in self.shared.offsets else None
+        if store is None:
             return
-        tname = self.user.offsets[name][1]
+        tname = store.offsets[name][1]
         nf, ni = TYPES.get(tname, (0, 0))
         if tname == "NiagaraBool":
-            self.user.put(name, "<i", -1 if value else 0)
+            store.put(name, "<i", -1 if value else 0)
         elif ni == 1 and not nf:
-            self.user.put(name, "<i", int(value))
+            store.put(name, "<i", int(value))
         elif nf:
             values = list(value) if hasattr(value, "__len__") else [value]
-            self.user.put(name, "<%df" % nf, *[float(v) for v in (values + [0.0] * nf)[:nf]])
+            store.put(name, "<%df" % nf, *[float(v) for v in (values + [0.0] * nf)[:nf]])
 
     def place(self, owner=None, component=None, pose=None):
         """Where the effect stands for the next tick: its owner's transform and its character's (4x4,
@@ -978,7 +1077,8 @@ class System:
         if cooked is None:       # older assets keep the store on the script itself
             cooked = {"CookedExecutionParameterStore": export["props"].get("ScriptExecutionParamStore") or {},
                       "CookedScriptRuntimeCompiledData": {"ResolvedDataInterfaces": export["props"].get("ResolvedDataInterfaces") or []}}
-        return Script(self, export["props"], cooked, next((h["Name"] for h in self.props.get("EmitterHandles") or [] if handle and h.get("Id") == handle), None))
+        return Script(self, export["props"], cooked, next((h["Name"] for h in self.props.get("EmitterHandles") or [] if handle and h.get("Id") == handle), None),
+                      lenient=handle is None)
 
     def read(self, name):
         """A system data set variable's values (its floats, else its ints), or None."""
@@ -998,6 +1098,9 @@ class System:
                 store.data[offset + 4 * nf:offset + 4 * (nf + ni)] = self.data.ints[i0:i0 + ni, 0].tobytes()
             elif name in self.user.offsets:
                 raw = self.user.raw(name)
+                store.data[offset:offset + len(raw)] = raw
+            elif name in self.shared.offsets:
+                raw = self.shared.raw(name)
                 store.data[offset:offset + len(raw)] = raw
 
     def _inputs(self, layout, prefix):

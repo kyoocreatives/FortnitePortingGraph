@@ -167,6 +167,10 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
     if material_data.get("MPRibbon"):
         entry["ribbon"] = True
         entry["variant"] = hashlib.sha1(("%s ribbon" % entry.get("variant", "")).encode("utf-8")).hexdigest()[:8]
+    # a particle effect's piece: its material's World Position Offset moves its vertices too (build.build_one)
+    if obj is not None and obj.get("mp_effect") in ("Sprite", "Ribbon", "Mesh"):
+        entry["particle"] = True
+        entry["variant"] = hashlib.sha1(("%s particle" % entry.get("variant", "")).encode("utf-8")).hexdigest()[:8]
     # a world's hundreds of materials: each tree laid out when a node editor first shows it
     build.LAZY_LAYOUT = getattr(getattr(context, "type", None), "name", "") in ("WORLD", "PREFAB")
     try:

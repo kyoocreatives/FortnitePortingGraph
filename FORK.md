@@ -165,6 +165,24 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     piece whose material FP's importer hides (an anime outline's shell, `M_AnimeOutline_FX`: its
     ink lines come from the scene's depth) isn't drawn (`mp_effect_skip`) instead of showing as a
     white shell.
+  - **World Position Offset.** A particle's material also moves its vertices (a lightning or flame
+    mesh is a zero-width strip its material thickens towards the camera - `SplineThicken` - or
+    bends): for an effect's pieces (`entry["particle"]`, set by `hook.build_exact` from the piece's
+    `mp_effect`) the material's World Position Offset pin is translated too and wired to the
+    material's Displacement (`Vector Displacement`, world space, cm and UE's axes turned to metres
+    and Blender's; `displacement_method = 'DISPLACEMENT'`: Eevee moves the vertices). At the
+    vertices the Geometry node's Incoming is zero, so a particle material's camera vector is the
+    Camera Data's view vector turned into the world (`env._incoming`). Both sides are drawn (a
+    thickened strip has no side of its own). Only materials with separate output pins: one that
+    ends in a Material Attributes pin keeps its vertices.
+  - **Division by zero.** UE's `A / B` with B zero is an infinity of A's sign, which a saturate
+    turns into 1 or 0 (a camera fade over a length of 0 shows everything); a Blender Divide gives 0
+    (the glow drew nothing). `Translator.divide` checks a socket divisor as the material runs. A
+    SmoothStep over an empty range (Min = Max: a softness of 0.5 taken off both ends) is likewise a
+    hard edge at Min, where a Map Range gives 0 (`Translator.smoothstep`: embers drew nothing).
+  - **Particle Random** is the particle's own random number (`mp_random`, the renderer's
+    `MaterialRandom`: the same for the particle's whole life), not the instance's, which changes as
+    particles die.
   - **UE's mesh particle normals.** UE turns a mesh particle's normals by its scale, not by the
     scale's inverse (a sphere flattened into a camera-facing card keeps a round one's falloff: the
     explosions' mesh smoke). The modifier sets the normals that come out so.
@@ -199,8 +217,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     - a back bling's and an outfit's parts' idle effect (`IdleEffectNiagara` on `IdleFXSocketName`:
       `ExportContext.PartEffects`, from `CharacterPart`);
     - a glider's trails (`TrailEffectDefinitions`: system, socket, offset; the older
-      `TrailEffectNiagara` / `2`: `GliderEffects`), sent with the locker's flags
-      (`User.bIsFrontEnd`, `User.bIsFrontEndPreview`: properties on the effect's empty, like
+      `TrailEffectNiagara` / `2`: `GliderEffects`), sent with the locker's flags once the glider is
+      out (`User.bIsFrontEnd`, `User.bIsFrontEndPreview`, `User.bIsFullyDeployed`: a speed line's
+      opacity waits for the last; properties on the effect's empty, like
       `User.ForwardDot` and `User.RightDot`, which the game sets from the player's steering: change
       them and Replay Effect). A glider flies toward +Y in Blender; many trails take a second or
       two to start (the glider opening);
@@ -214,9 +233,10 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     the mesh itself: `Table`), for a socket the armature doesn't have as a bone and for the ones the
     effect's scripts read (`effect_replay.holder_of`: the armature, else the static mesh it is on).
     An effect's pieces aren't parts of the item (`imported_meshes`: an outfit's armatures are merged
-    and its pose assets applied over the parts only). Not reproduced: a material that reads the
-    scene behind it (`SceneTexture`: an aura drawn on the character's own normals) or shapes its
-    mesh with World Position Offset. Test: `fork-export-asset?type=Glider&effects=1`,
+    and its pose assets applied over the parts only). A socket the item's mesh doesn't have (a
+    pickaxe's `idle_fx` where the mesh has `FX_Idle`) leaves the effect on the mesh's origin, as the
+    engine's attachment does. Not reproduced: a material that reads the scene behind it
+    (`SceneTexture`: an aura drawn on the character's own normals). Test: `fork-export-asset?type=Glider&effects=1`,
     `fork-asset-page?type=Glider&name=...&pick=Effects:Its trail&export=1`.
   - **An animation's effects.** An emote's (or any exported animation's) Niagara notifies come with
     it (`AnimExport.MPEffects`, `EffectNotify`: a notify or timed notify whose `Template` is a
@@ -234,20 +254,63 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     `_Off`); they are exported as windows (`AnimExport.MPTrails`; a notify's time is its own link's:
     `GetTime`). Imported onto a character, the windows go to the trail and swing effects of the
     pickaxe under its armature (`effects.swing`; with none there, to every pickaxe trail in the
-    scene), which are replayed once per swing.
+    scene), which are replayed once per swing. The held pickaxe's idle effect is replayed too (its
+    world-space particles were left where the pickaxe was when it was imported).
   - **Ribbons.** A ribbon's width runs across the view, the particles' facing, or along their side
-    vector (a trail between two sockets), as the renderer says (the modifier's Facing); it has two
-    UV sets along it (a trail's fades read the second).
+    vector (a trail between two sockets), as the renderer says (the modifier's Facing). Its two UV
+    sets are laid along it as the renderer's `UV0Settings` / `UV1Settings` say (`_ribbon_uv`: over
+    the whole ribbon by length or evenly a point, or tiled every Tiling Length from its leading
+    edge or by each particle's `RibbonUVDistance`; scale, offset, the emitter's own U and V range),
+    from its first point in link order (the youngest, without one); each point carries them
+    (`mp_uv0`, `mp_uv1`: U, V at one edge, V at the other). Its shape is a plane, several planes
+    turned about it (`MultiPlaneCount`) or a tube (`TubeSubdivisions`): the modifier's Shape, Sides.
+  - **Sprites and meshes on their particle.** A sprite's pivot (`PivotInUVSpace`: a flame whose
+    base, not its middle, is the particle) and a mesh's `PivotOffset` are the modifier's Piece
+    Offset; a sprite with Custom Alignment runs its length along the emitter's own vector
+    (`SpriteAlignment`: `mp_align`, which is the velocity otherwise). A sprite's or a mesh's
+    `CameraOffset` draws it that far toward the camera (`mp_camera_offset`: a glow out in front of
+    the smoke it sits in).
+  - **Which renderers draw.** A renderer bound to a visibility tag draws only the particles whose
+    tag is its `RendererVisibility` (one emitter, several looks); one whose `RendererEnabledBinding`
+    reads false draws nothing; a piece with no particles of its own is hidden.
   - A renderer's material kept inside the system (an instance with the renderer's parameters) is
     exported as the asset it is an instance of, with its values.
+  - **What the engine does around the scripts** (found by replaying 3,000 of the game's systems
+    and checking every emitter's particles, then rendering 200 effects and items and measuring
+    each played piece - `ns_audit.py`, `fx_audit.py` in the session's scratchpad):
+    - the VM's division, roots, powers and logarithms are the engine's safe ones (a division by
+      nearly nothing gives 0, not an infinity that spreads over a particle's position);
+    - an event spawns its Spawn Number of particles whatever its handler's script then runs on;
+    - half-precision attributes (`NiagaraHalf...`: an emitter's compressed ones) have their own
+      rows; a user-defined struct in a data set (a Fortnite module's bone data) is laid out as the
+      app says (`MPStruct`: its floats and ints, `Effects.Components`);
+    - the parameter collections a script reads take their collection's own values (`MPCollection`:
+      the default instance's store; `NPC.FortniteNPC.FortniteActiveTimeOfDay` is Day - a script's
+      cooked store holds every time of day at once, which made 4 in 10 systems' tints several
+      times too bright and lit what only shows at night). They are properties on the effect's
+      empty beside its user parameters: set the time of day to `[0, 0, 0, 1]` (morning, day,
+      evening, night) and Replay Effect for the night's look;
+    - the system's own scripts answer zeros for what can't be answered here (a grid a GPU emitter
+      simulates on, a data channel) instead of the whole system failing (`System.unanswered`);
+    - an array a script fills as it plays is as wide as its type; a weighted distribution array
+      gives its alias table; a mesh renderer's `GetMeshLocalBounds` (`MPBounds`), the camera's
+      field of view;
+    - a mesh renderer's override material also goes to a slot the mesh itself leaves empty;
+    - UE's names don't mind case: an effect's `User.bisFullyDeployed` is the `User.bIsFullyDeployed`
+      the export sets.
   - **Not replayed:** GPU emitters (7% of the game's own emitters, 4 of 5 of the islands') keep
     only a compiled shader; their pieces stay as imported, in a row beside the effect. Without an
     armature, a script that reads a character's bones or sockets finds them all at the effect's
-    origin. Collisions find nothing to hit.
-  - Of 293 of the game's own systems sampled, 282 play, 1,115 of their 1,197 emitters.
+    origin. Collisions find nothing to hit. An emitter that samples a static mesh's or a skinned
+    mesh's surface, water, or a data channel is left out. A material that reads the scene behind
+    it (a particle decal, a refraction) draws nothing.
+  - Of 2,000 of the game's own systems sampled, all but 3 (uncooked templates) play; of their
+    7,330 emitters 498 are GPU and 66 are left out for what they read.
     Test route: `fork-effect-program?path=` (what the export carries for the replay).
   Build revision 12: an additive material's light is Emissive * Opacity (it was Emissive alone: a
   flash drew as its whole quad). 13: particle values from the instance, a sprite's sub-image.
+  17: a particle material's World Position Offset, UE's division by zero. 18: a SmoothStep over an
+  empty range, Particle Random from the particle.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the

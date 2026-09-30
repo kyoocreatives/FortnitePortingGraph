@@ -110,8 +110,23 @@ class MaterialEnv:
         return self.once("geo", lambda: self.tr.node("ShaderNodeNewGeometry", "geometry"))
 
     # ------------------------------------------------------------ view and world
+    def _incoming(self):
+        """From the shaded point towards the camera (Blender's axes). A particle's material also
+        runs at the vertices (its World Position Offset), where the Geometry node's Incoming is
+        zero: there it is the camera's view vector, turned into the world and back on itself."""
+        if not self.entry.get("particle"):
+            return Val(self._geo().outputs["Incoming"], 3)
+
+        def make():
+            cam = self.tr.node("ShaderNodeCameraData", "camera data")
+            world = self.tr.node("ShaderNodeVectorTransform", "view to world", vector_type='VECTOR', convert_from='CAMERA', convert_to='WORLD')
+            self.tr.L.new(cam.outputs["View Vector"], world.inputs[0])
+            away = self.tr.vmath('NORMALIZE', Val(world.outputs[0], 3), out_w=3)
+            return self.tr.vmath('SCALE', away, self.tr.const(-1.0), out_w=3)
+        return self.once("incoming", make)
+
     def camera_vector(self):
-        return self.once("camvec", lambda: self._ue(Val(self._geo().outputs["Incoming"], 3)))
+        return self.once("camvec", lambda: self._ue(self._incoming()))
 
     def world_position(self, camera_relative=False):
         p = self.once("wpos", lambda: self._ue(Val(self._geo().outputs["Position"], 3), 100.0))
@@ -122,7 +137,7 @@ class MaterialEnv:
             # the camera is where the view ray leaves: P + Incoming * view distance
             cam = self.tr.node("ShaderNodeCameraData", "camera data")
             geo = self._geo()
-            ray = self.tr.vmath('SCALE', Val(geo.outputs["Incoming"], 3), Val(cam.outputs["View Distance"], 1), out_w=3)
+            ray = self.tr.vmath('SCALE', self._incoming(), Val(cam.outputs["View Distance"], 1), out_w=3)
             return self._ue(self.tr.vmath('ADD', Val(geo.outputs["Position"], 3), ray, out_w=3), 100.0)
         return self.once("campos", make)
 
@@ -389,6 +404,13 @@ class MaterialEnv:
     def particle_speed(self):
         """UE's Particle Speed: how fast a particle moves (mp_velocity's length; 0 where there is none)."""
         return self.tr.vmath('LENGTH', self._particle_attr("mp_velocity")[0], out_w=1)
+
+    def particle_random(self):
+        """UE's Particle Random: a particle's own random number, the same for its whole life
+        (mp_random; an instance's index changes as particles die). None for anything else."""
+        if not self.entry.get("particle"):
+            return None
+        return self._particle_attr("mp_random")[2]
 
     def particle_rotation(self):
         """UE's Particle Sprite Rotation: a sprite's turn in radians and in degrees (mp_spin, which

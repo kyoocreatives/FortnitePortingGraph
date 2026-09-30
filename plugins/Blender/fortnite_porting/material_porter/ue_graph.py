@@ -1002,6 +1002,27 @@ class Translator:
             v = self.with_alpha(v, self.math(op if op != "FLOOR_DIVIDE" else "DIVIDE", self.alpha(a), self.alpha(b)))
         return v
 
+    def divide(self, a, b, label=""):
+        """UE's A / B. Where B is zero the GPU gives an infinity of A's sign - which a saturate
+        turns into 1 or 0: a fade over a length of 0 shows everything past its start - where a
+        Blender Divide gives 0 (the material drew nothing). A divisor that is a socket (a
+        parameter, a function's input) is checked as the material runs; one known when the
+        material is built and not zero: a plain Divide."""
+        big = 1e18
+        if b.const:
+            values = b.s if isinstance(b.s, (tuple, list)) else (b.s,)
+            if all(float(v) != 0.0 for v in values):
+                return self.binop('DIVIDE', a, b, label=label)
+            if b.w == 1:
+                return self.binop('MULTIPLY', a, self.const(big), label=label)
+            return self.binop('DIVIDE', a, b, label=label)
+        if b.w != 1:
+            return self.binop('DIVIDE', a, b, label=label)
+        # (1 where B is exactly 0) * big * A, added to the Divide's 0
+        zero = self.math('COMPARE', b, self.const(0.0), self.const(0.0))
+        return self.binop('ADD', self.binop('DIVIDE', a, b, label=label),
+                          self.binop('MULTIPLY', a, self.math('MULTIPLY', zero, self.const(big))))
+
     def unary(self, op, a):
         if a.w == 1:
             mop = {"FRACTION": "FRACT", "NORMALIZE": "SIGN"}.get(op, op)
@@ -1243,6 +1264,8 @@ class Translator:
         if t in ("Add", "Subtract", "Multiply", "Divide", "Max", "Min"):
             op = {"Add": "ADD", "Subtract": "SUBTRACT", "Multiply": "MULTIPLY", "Divide": "DIVIDE",
                   "Max": "MAXIMUM", "Min": "MINIMUM"}[t]
+            if t == "Divide":
+                return self.divide(P("A"), P("B"), label=x["Name"][18:])
             return self.binop(op, P("A"), P("B"), label=x["Name"][18:])
         if t == "Power":
             base, ex = P("Base", fallback=1.0), P("Exponent")
@@ -1299,17 +1322,7 @@ class Translator:
                      for a, b in zip(self.comps(xv), self.comps(y))][:w]
             return self.combine(parts)
         if t == "SmoothStep":
-            mn, mx, v = P("Min"), P("Max"), P("Value")
-            w = max(mn.w, mx.w, v.w)
-            n = self.node("ShaderNodeMapRange", "smoothstep", interpolation_type='SMOOTHSTEP',
-                          data_type='FLOAT' if w == 1 else 'FLOAT_VECTOR', clamp=True)
-            if w == 1:
-                self.link(v, n.inputs[0]); self.link(mn, n.inputs[1]); self.link(mx, n.inputs[2])
-                n.inputs[3].default_value, n.inputs[4].default_value = 0.0, 1.0
-                return Val(n.outputs[0], 1)
-            self.link(v, n.inputs[6]); self.link(mn, n.inputs[7]); self.link(mx, n.inputs[8])
-            n.inputs[9].default_value = (0.0, 0.0, 0.0); n.inputs[10].default_value = (1.0, 1.0, 1.0)
-            return Val(n.outputs[1], w)
+            return self.smoothstep(P("Min"), P("Max"), P("Value"))
         if t == "Rotator":
             uv = self.input(g, p.get("Coordinate"), scope, None) or env.uv(0)
             tm = self.input(g, p.get("Time"), scope, None) or env.time()
@@ -2280,13 +2293,25 @@ class Translator:
         return self.const({"TemporalSampleCount": 1.0, "ResolutionFraction": 1.0, "PreExposure": 1.0}.get(name, 0.0))
 
     def smoothstep(self, mn, mx, v):
+        """HLSL's smoothstep(Min, Max, Value). Over an empty range (Min = Max: a softness of 0.5
+        taken off both ends) its (Value - Min) / 0 is an infinity the saturate turns into a hard
+        edge, 1 past Min and 0 before it; a Blender Map Range gives 0 everywhere (the embers drew
+        nothing). Scalars: a Min and Max that are sockets are checked as the material runs."""
         w = max(mn.w, mx.w, v.w)
+        if w == 1 and mn.const and mx.const and float(mn.s) == float(mx.s):
+            return self.math('GREATER_THAN', v, mn)
         n = self.node("ShaderNodeMapRange", "smoothstep", interpolation_type='SMOOTHSTEP',
                       data_type='FLOAT' if w == 1 else 'FLOAT_VECTOR', clamp=True)
         if w == 1:
             self.link(v, n.inputs[0]); self.link(mn, n.inputs[1]); self.link(mx, n.inputs[2])
             n.inputs[3].default_value, n.inputs[4].default_value = 0.0, 1.0
-            return Val(n.outputs[0], 1)
+            smooth = Val(n.outputs[0], 1)
+            if mn.const and mx.const:
+                return smooth
+            # (1 where Min is Max) * (the hard edge - the Map Range's), added to the Map Range's
+            empty = self.math('COMPARE', mn, mx, self.const(0.0))
+            edge = self.math('GREATER_THAN', v, mn)
+            return self.binop('ADD', smooth, self.binop('MULTIPLY', empty, self.binop('SUBTRACT', edge, smooth)))
         self.link(v, n.inputs[6]); self.link(mn, n.inputs[7]); self.link(mx, n.inputs[8])
         n.inputs[9].default_value = (0.0, 0.0, 0.0); n.inputs[10].default_value = (1.0, 1.0, 1.0)
         return Val(n.outputs[1], min(w, 3))
@@ -2455,7 +2480,7 @@ class Translator:
                 return self.mask(v, [out])
             return Val(v.s, 3) if out == 4 else v
         if t == "ParticleRandom":
-            return self.evaluate_geometry(g, x, "PerInstanceRandom", out, scope, p, P)
+            return self._hook("particle_random", lambda: self.evaluate_geometry(g, x, "PerInstanceRandom", out, scope, p, P))
         if t == "ParticlePositionWS":
             return env.actor_position("CameraRelative" in str(p.get("OriginType", "")))
         if t == "ParticleRadius":

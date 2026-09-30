@@ -188,9 +188,143 @@ public static class Effects
                 if (p.Tag?.GenericValue is { } value && !props.ContainsKey(p.Name.Text))
                     props[p.Name.Text] = JToken.FromObject(value, serializer);
             Prune(props);
+            if (export.ExportType == "NiagaraMeshRendererProperties" && MeshBounds(export) is { } bounds) props["MPBounds"] = bounds;
             exports.Add(new JObject { ["name"] = export.Name, ["type"] = export.ExportType, ["outer"] = export.Outer?.Name.Text, ["props"] = props });
         }
+        // the parameter collections its scripts read (the game's time of day, wind): each one's own
+        // values (its default instance's store). A script's cooked store only holds placeholders.
+        var collections = new Dictionary<string, UObject>();
+        foreach (var export in system.Owner!.GetExports())
+            if (export.ExportType == "NiagaraScript")
+                foreach (var collection in export.GetOrDefault("CachedParameterCollectionReferences", Array.Empty<UObject>()))
+                    collections.TryAdd(collection.GetPathName(), collection);
+        foreach (var collection in collections.Values)
+        {
+            try
+            {
+                if (collection.GetOrDefault<UObject?>("DefaultInstance") is not { } instance) continue;
+                var props = new JObject();
+                foreach (var p in instance.Properties)
+                    if (p.Tag?.GenericValue is { } value && !props.ContainsKey(p.Name.Text))
+                        props[p.Name.Text] = JToken.FromObject(value, serializer);
+                exports.Add(new JObject { ["name"] = collection.Name, ["type"] = "MPCollection", ["outer"] = null, ["props"] = props });
+            }
+            catch (Exception e)
+            {
+                Serilog.Log.Warning("[Material Porter] {System}: the parameter collection {Collection} wasn't read ({Error})", system.Name, collection.Name, e.Message);
+            }
+        }
+        // the user-defined structs its data sets hold (a Fortnite module's bone data): how many
+        // floats and ints each is laid out as, which the asset itself doesn't say
+        var structs = new Dictionary<string, FPackageIndex>();
+        foreach (var export in system.Owner!.GetExports())
+            foreach (var p in export.Properties)
+                FindStructs(p.Tag?.GenericValue, structs, 0);
+        foreach (var (name, index) in structs)
+        {
+            try
+            {
+                if (index.Load<UStruct>() is not { } type) continue;
+                var (floats, ints) = Components(type, 0);
+                exports.Add(new JObject { ["name"] = name, ["type"] = "MPStruct", ["outer"] = null, ["props"] = new JObject { ["Floats"] = floats, ["Ints"] = ints } });
+            }
+            catch (Exception e)
+            {
+                Serilog.Log.Warning("[Material Porter] {System}: the struct {Struct} wasn't read ({Error})", system.Name, name, e.Message);
+            }
+        }
         return exports;
+    }
+
+    /// <summary>
+    /// A mesh renderer's meshes' bounds, each with the renderer's scale of it (what a script's
+    /// GetMeshLocalBounds reads): min then max, six numbers a mesh.
+    /// </summary>
+    private static JArray? MeshBounds(UObject renderer)
+    {
+        try
+        {
+            var all = new JArray();
+            foreach (var entry in renderer.GetOrDefault("Meshes", Array.Empty<FStructFallback>()))
+            {
+                var scale = entry.GetOrDefault("Scale", FVector.OneVector);
+                var box = entry.GetOrDefault<global::CUE4Parse.UE4.Assets.Exports.StaticMesh.UStaticMesh?>("Mesh")?.RenderData?.Bounds;
+                var (min, max) = box is { } b ? (b.Origin - b.BoxExtent, b.Origin + b.BoxExtent) : (FVector.ZeroVector, FVector.ZeroVector);
+                all.Add(new JArray(min.X * scale.X, min.Y * scale.Y, min.Z * scale.Z, max.X * scale.X, max.Y * scale.Y, max.Z * scale.Z));
+            }
+            return all.Count > 0 ? all : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>The user-defined structs named by the type definitions (FNiagaraTypeDefinition.ClassStructOrEnum) under a value.</summary>
+    private static void FindStructs(object? value, Dictionary<string, FPackageIndex> found, int depth)
+    {
+        if (depth > 12) return;
+        switch (value)
+        {
+            case FStructFallback fallback:
+                foreach (var p in fallback.Properties)
+                {
+                    if (p.Name.Text == "ClassStructOrEnum" && p.Tag?.GenericValue is FPackageIndex { IsNull: false } index)
+                    {
+                        if (index.ResolvedObject?.Class?.Name.Text == "UserDefinedStruct") found.TryAdd(index.Name, index);
+                        continue;
+                    }
+                    FindStructs(p.Tag?.GenericValue, found, depth + 1);
+                }
+                break;
+            case FScriptStruct { StructType: FStructFallback inner }:
+                FindStructs(inner, found, depth + 1);
+                break;
+            case FScriptStruct { StructType: global::CUE4Parse.UE4.Objects.Niagara.FNiagaraVariableBase variable }:
+                FindStructs(variable.TypeDef, found, depth + 1);        // (a data set's variable: its name and type)
+                break;
+            case UScriptArray array:
+                // (arrays of numbers - bytecode, parameter data - hold no type definition)
+                if (array.InnerType is "StructProperty")
+                    foreach (var item in array.Properties)
+                        FindStructs(item.GenericValue, found, depth + 1);
+                break;
+        }
+    }
+
+    /// <summary>A struct as a Niagara data set lays it out: its fields' floats, then ints (a vector: three floats, as Niagara narrows it).</summary>
+    private static (int Floats, int Ints) Components(UStruct type, int depth)
+    {
+        int floats = 0, ints = 0;
+        foreach (var field in type.ChildProperties ?? [])
+        {
+            switch (field)
+            {
+                case FStructProperty inner:
+                    var known = inner.Struct.Name switch
+                    {
+                        "Vector" or "Vector3f" or "Vector3d" or "Rotator" => 3,
+                        "Vector2D" or "Vector2f" => 2,
+                        "Vector4" or "Vector4f" or "Quat" or "Quat4f" or "LinearColor" => 4,
+                        _ => 0,
+                    };
+                    if (known > 0) floats += known;
+                    else if (depth < 4 && inner.Struct.Load<UStruct>() is { } nested)
+                    {
+                        var (f, i) = Components(nested, depth + 1);
+                        floats += f;
+                        ints += i;
+                    }
+                    break;
+                case FFloatProperty or FDoubleProperty:
+                    floats++;
+                    break;
+                case FBoolProperty or FEnumProperty or FNumericProperty:
+                    ints++;
+                    break;
+            }
+        }
+        return (floats, ints);
     }
 
     /// <summary>

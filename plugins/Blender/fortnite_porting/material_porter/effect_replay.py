@@ -27,13 +27,13 @@ from . import effects, niagara
 
 GROUP = "MP Effect Particles"
 RIBBONS = "MP Effect Ribbons"
-GROUP_VERSION = 7
+GROUP_VERSION = 8
 # how a particle's piece is turned (the modifier's Turn): as the renderer says
-TURN_OWN, TURN_CAMERA, TURN_CAMERA_VELOCITY, TURN_FACING, TURN_MESH_VELOCITY, TURN_MESH_CAMERA = range(6)
+TURN_OWN, TURN_CAMERA, TURN_CAMERA_VELOCITY, TURN_FACING, TURN_MESH_VELOCITY, TURN_MESH_CAMERA, TURN_FACING_ALIGNED = range(7)
 FACINGS = "What a ribbon's width runs across: 0: the view (it faces the camera); 1: each particle's facing; "           "2: along each particle's side vector (a trail between two sockets)"
 TURNS = "0: the particle's own rotation (a mesh); 1: a sprite facing the camera; 2: a sprite facing the camera, its length " \
-        "along the velocity; 3: a sprite facing the particle's own direction; 4: a mesh, its X axis along the velocity; " \
-        "5: a mesh, its X axis to the camera"
+        "along its velocity (or its own vector); 3: a sprite facing the particle's own direction; 4: a mesh, its X axis along the velocity; " \
+        "5: a mesh, its X axis to the camera; 6: a sprite facing its own direction, its length along its own vector"
 MOST_POINTS = 2_000_000     # over all frames, per effect
 KEY_PROGRAM = "mp_effect_program"   # on an effect's empty: the text that keeps what its replay takes
 KEY_SCALE = "mp_effect_scale"       # and the import's scale (Blender units per UE unit)
@@ -259,6 +259,66 @@ def bound(renderer, binding, default):
     return name[len("Particles."):] if name.startswith("Particles.") else default
 
 
+def _ribbon_runs(frame, ribbon, order, position):
+    """The points of every frame's ribbons in the order each ribbon runs through them: (the sort,
+    each point's index in its ribbon, its ribbon's point count, its distance along it, its
+    ribbon's length), in UE's units."""
+    n = len(frame)
+    if not n:
+        empty = np.zeros(0, np.float32)
+        return np.zeros(0, np.int64), empty, empty, empty, empty
+    sort = np.lexsort((order, ribbon, frame))
+    f, r, p = frame[sort], ribbon[sort], position[sort].astype(np.float64)
+    first = np.ones(n, bool)
+    first[1:] = (f[1:] != f[:-1]) | (r[1:] != r[:-1])
+    step = np.zeros(n)
+    step[1:] = np.linalg.norm(p[1:] - p[:-1], axis=1)
+    step[first] = 0.0
+    run = np.cumsum(first) - 1                      # which ribbon each sorted point is of
+    along = np.cumsum(step)
+    start = along[first][run]
+    along = along - start
+    counts = np.bincount(run)
+    index = np.arange(n) - np.nonzero(first)[0][run]
+    length = np.zeros(len(counts))
+    np.maximum.at(length, run, along)
+    return sort, index.astype(np.float32), counts[run].astype(np.float32), along.astype(np.float32), length[run].astype(np.float32)
+
+
+def _ribbon_uv(track, renderer, which, runs, pick):
+    """A ribbon's UV set (0 or 1) at every point: (U, V at one edge, V at the other). U runs from the
+    ribbon's first point in link order (the youngest, without one): over the whole ribbon (by
+    its length, or evenly a point), or tiled every Tiling Length; then the renderer's scale and
+    offset, and the emitter's own U and V range where it gives them."""
+    sort, index, count, along, length = runs
+    settings = renderer.get("UV%dSettings" % which) or {}
+    mode = str(settings.get("DistributionMode", "ScaledUsingRibbonSegmentLength"))
+    tiling = float(settings.get("TilingLength", 100.0)) or 100.0
+    n = len(sort)
+    u = np.zeros(n, np.float32)
+    with np.errstate(all="ignore"):
+        if "TiledFromStart" in mode and track.has(bound(renderer, "RibbonUVDistance", "RibbonUVDistance")):
+            u = pick(track.get(bound(renderer, "RibbonUVDistance", "RibbonUVDistance"), (0,)))[:, 0][sort] / tiling
+        elif "Tiled" in mode:
+            u = along / tiling
+        elif "ScaledUniformly" in mode:
+            u = np.where(count > 1, index / np.maximum(count - 1, 1), 0.0)
+        else:
+            u = np.where(length > 0, along / np.maximum(length, 1e-9), 0.0)
+    scale, offset = settings.get("Scale") or {}, settings.get("Offset") or {}
+    sx, sy, ox, oy = float(scale.get("X", 1.0)), float(scale.get("Y", 1.0)), float(offset.get("X", 0.0)), float(offset.get("Y", 0.0))
+    out = np.zeros((n, 3), np.float32)
+    out[sort, 0] = np.nan_to_num(u) * sx + ox
+    out[:, 1], out[:, 2] = oy, sy + oy
+    given = bound(renderer, "U%dOverrideBinding" % which, "U%dOverride" % which)
+    if settings.get("bEnablePerParticleUOverride") and track.has(given):
+        out[:, 0] = pick(track.get(given, (0,)))[:, 0]
+    given = bound(renderer, "V%dRangeOverrideBinding" % which, "V%dRangeOverride" % which)
+    if settings.get("bEnablePerParticleVRangeOverride") and track.has(given):
+        out[:, 1:3] = pick(track.get(given, (0, 1)))[:, :2]
+    return out
+
+
 def _attribute(mesh, name, kind, values):
     field = {"FLOAT_VECTOR": "vector", "FLOAT_COLOR": "color"}.get(kind, "value")
     a = mesh.attributes.new(name, kind, 'POINT')
@@ -284,6 +344,11 @@ def points(name, track, renderer, kind, scale, keep=None):
         ribbon = pick(track.get(bound(renderer, "RibbonIdBinding", "RibbonID"), (0,)))[:, 0].astype(np.int64)
         _attribute(mesh, "mp_ribbon", 'INT', (ribbon % 100003 + pick(track.run) * 100003).astype(np.int32))      # each play's ribbons its own
         _attribute(mesh, "mp_facing", 'FLOAT_VECTOR', pick(track.get(bound(renderer, "RibbonFacingBinding", "RibbonFacing"), (0, 0, 1))) * flip)
+        # its two UV sets, as the renderer lays each along the ribbon: (U, V at one edge, V at the other) a point
+        groups = _ribbon_runs(pick(track.frame), (ribbon % 100003 + pick(track.run) * 100003),
+                              pick(track.get(order if track.has(order) else bound(renderer, "NormalizedAgeBinding", "NormalizedAge"), (0,)))[:, 0], position / scale)
+        for i in (0, 1):
+            _attribute(mesh, "mp_uv%d" % i, 'FLOAT_VECTOR', _ribbon_uv(track, renderer, i, groups, pick))
     elif kind == "Sprite":
         size = pick(track.get(bound(renderer, "SpriteSizeBinding", "SpriteSize"), (50, 50)))
         _attribute(mesh, "mp_size", 'FLOAT_VECTOR', np.concatenate([size, np.zeros((len(size), 1), np.float32)], axis=1))   # in UE's units, for the materials
@@ -291,6 +356,12 @@ def points(name, track, renderer, kind, scale, keep=None):
         _attribute(mesh, "mp_facing", 'FLOAT_VECTOR', pick(track.get(bound(renderer, "SpriteFacingBinding", "SpriteFacing"), (1, 0, 0))) * flip)
         _attribute(mesh, "mp_scale", 'FLOAT_VECTOR', np.concatenate([size, np.ones((len(size), 1), np.float32)], axis=1))
         _attribute(mesh, "mp_spin", 'FLOAT', -np.radians(pick(track.get(bound(renderer, "SpriteRotationBinding", "SpriteRotation"), (0,)))))
+        # what its length runs along: the emitter's own vector (Custom Alignment), else its velocity
+        custom = bound(renderer, "SpriteAlignmentBinding", "SpriteAlignment")
+        if "CustomAlignment" in str(renderer.get("Alignment")) and track.has(custom):
+            _attribute(mesh, "mp_align", 'FLOAT_VECTOR', pick(track.get(custom, (0, 0, 1))) * flip)
+        else:
+            _attribute(mesh, "mp_align", 'FLOAT_VECTOR', pick(track.get(bound(renderer, "VelocityBinding", "Velocity"), (0, 0, 0))) * flip)
     else:
         _attribute(mesh, "mp_scale", 'FLOAT_VECTOR', pick(track.get(bound(renderer, "ScaleBinding", "Scale"), (1, 1, 1))))
         q = pick(track.get(bound(renderer, "MeshOrientationBinding", "MeshOrientation"), (0, 0, 0, 1))).astype(np.float32)
@@ -310,6 +381,11 @@ def points(name, track, renderer, kind, scale, keep=None):
             _attribute(mesh, "mp_dynamic%d" % i, 'FLOAT_COLOR', pick(track.get(attribute, (1, 1, 1, 1))))
     _attribute(mesh, "mp_dynamic", 'FLOAT_COLOR', np.tile(np.array(flags, np.float32), (len(position), 1)))
     _attribute(mesh, "mp_subimage", 'FLOAT', pick(track.get(bound(renderer, "SubImageIndexBinding", "SubImageIndex"), (0,))))
+    # its own random number (the materials' Particle Random: the same for a particle's whole life)
+    _attribute(mesh, "mp_random", 'FLOAT', pick(track.get(bound(renderer, "MaterialRandomBinding", "MaterialRandom"), (0,))))
+    if kind != "Ribbon":
+        # how far it is drawn towards the camera from where it is (a glow out in front of what it sits in)
+        _attribute(mesh, "mp_camera_offset", 'FLOAT', pick(track.get(bound(renderer, "CameraOffsetBinding", "CameraOffset"), (0,))) * scale)
     _attribute(mesh, "mp_age", 'FLOAT', pick(track.get(bound(renderer, "NormalizedAgeBinding", "NormalizedAge"), (0,))))
     return mesh
 
@@ -330,7 +406,9 @@ def group():
     face.new_socket(name="Frames", in_out='INPUT', socket_type='NodeSocketInt', description="How many frames were replayed").default_value = 1
     face.new_socket(name="Loop", in_out='INPUT', socket_type='NodeSocketBool', description="Start over after the last replayed frame")
     turn = face.new_socket(name="Turn", in_out='INPUT', socket_type='NodeSocketInt', description=TURNS)
-    turn.min_value, turn.max_value = 0, 5
+    turn.min_value, turn.max_value = 0, 6
+    face.new_socket(name="Piece Offset", in_out='INPUT', socket_type='NodeSocketVector',
+                    description="Where the piece sits on its particle, in the particle's own space: a sprite's pivot, a mesh's pivot offset")
     face.new_socket(name="Piece Rotation", in_out='INPUT', socket_type='NodeSocketRotation', description="The renderer's own rotation of the piece")
     face.new_socket(name="Piece Scale", in_out='INPUT', socket_type='NodeSocketVector', description="The renderer's own scale of the piece").default_value = (1.0, 1.0, 1.0)
 
@@ -381,6 +459,7 @@ def group():
     links.new(inputs.outputs["Piece"], piece.inputs["Object"])
     placed = node("GeometryNodeTransform")
     links.new(piece.outputs["Geometry"], placed.inputs["Geometry"])
+    links.new(inputs.outputs["Piece Offset"], placed.inputs["Translation"])
     links.new(inputs.outputs["Piece Rotation"], placed.inputs["Rotation"])
     links.new(inputs.outputs["Piece Scale"], placed.inputs["Scale"])
     # UE turns a particle mesh's normals by its scale, not by the scale's inverse (a sphere flattened into a
@@ -404,6 +483,7 @@ def group():
     links.new(camera.outputs["Location"], toward.inputs[0])
     links.new(node("GeometryNodeInputPosition").outputs[0], toward.inputs[1])
     velocity = attribute("mp_velocity", 'FLOAT_VECTOR')
+    along = attribute("mp_align", 'FLOAT_VECTOR')      # what a sprite's length runs along: its velocity, or the emitter's own vector
     own = attribute("mp_rotation", 'QUATERNION')
     spin = node("FunctionNodeAxisAngleToRotation")
     spin.inputs["Axis"].default_value = (0.0, 0.0, 1.0)
@@ -435,10 +515,11 @@ def group():
     turns = [
         own,
         spun(camera.outputs["Rotation"]),                                   # a sprite: the camera's plane, spun
-        aligned('Z', toward.outputs[0], aligned('Y', velocity), 'Y'),       # its length along the velocity, its face to the camera
+        aligned('Z', toward.outputs[0], aligned('Y', along), 'Y'),          # its length along the velocity, its face to the camera
         spun(aligned('Z', attribute("mp_facing", 'FLOAT_VECTOR'))),         # its face to the particle's own direction
         mesh_facing(velocity),
         mesh_facing(toward.outputs[0]),
+        aligned('Y', along, aligned('Z', attribute("mp_facing", 'FLOAT_VECTOR')), 'Z'),     # its face to its own direction, its length along its own vector
     ]
     rotation = node("GeometryNodeIndexSwitch", data_type='ROTATION')
     while len(rotation.index_switch_items) < len(turns):
@@ -447,8 +528,17 @@ def group():
     for i, turn in enumerate(turns):
         links.new(turn, rotation.inputs[i + 1])
 
+    # each particle drawn towards the camera by its camera offset
+    nearer = node("ShaderNodeVectorMath", operation='NORMALIZE')
+    links.new(toward.outputs[0], nearer.inputs[0])
+    by = node("ShaderNodeVectorMath", operation='SCALE')
+    links.new(nearer.outputs[0], by.inputs[0])
+    links.new(attribute("mp_camera_offset", 'FLOAT'), by.inputs["Scale"])
+    offset = node("GeometryNodeSetPosition")
+    links.new(current.outputs[0], offset.inputs["Geometry"])
+    links.new(by.outputs[0], offset.inputs["Offset"])
     instances = node("GeometryNodeInstanceOnPoints")
-    links.new(current.outputs[0], instances.inputs["Points"])
+    links.new(offset.outputs[0], instances.inputs["Points"])
     links.new(shaded.outputs[0], instances.inputs["Instance"])
     links.new(rotation.outputs[0], instances.inputs["Rotation"])
     links.new(attribute("mp_scale", 'FLOAT_VECTOR'), instances.inputs["Scale"])
@@ -475,6 +565,11 @@ def ribbons():
     face.new_socket(name="Loop", in_out='INPUT', socket_type='NodeSocketBool', description="Start over after the last replayed frame")
     facing = face.new_socket(name="Facing", in_out='INPUT', socket_type='NodeSocketInt', description=FACINGS)
     facing.min_value, facing.max_value = 0, 2
+    shape = face.new_socket(name="Shape", in_out='INPUT', socket_type='NodeSocketInt',
+                            description="What is swept along the ribbon: 0: a plane; 1: several planes turned about it; 2: a tube")
+    shape.min_value, shape.max_value = 0, 2
+    sides = face.new_socket(name="Sides", in_out='INPUT', socket_type='NodeSocketInt', description="How many planes (Shape 1), how many sides the tube has (Shape 2)")
+    sides.min_value, sides.default_value = 1, 2
 
     nodes, links = g.nodes, g.links
     column = [0]
@@ -559,29 +654,59 @@ def ribbons():
         turned.mode = 'FREE'
     links.new(side, turned.inputs["Normal"])
 
-    # UVs: U along the ribbon, V across it
-    along = node("GeometryNodeCaptureAttribute", domain='POINT')
-    along.capture_items.new('FLOAT', "U")
-    links.new(turned.outputs[0], along.inputs[0])
-    links.new(node("GeometryNodeSplineParameter").outputs["Factor"], along.inputs["U"])
-    profile = node("GeometryNodeCurvePrimitiveLine")
-    profile.inputs["Start"].default_value = (-0.5, 0.0, 0.0)
-    profile.inputs["End"].default_value = (0.5, 0.0, 0.0)
+    # what is swept along it: a plane a unit wide; several, turned about the ribbon; a tube a unit across
+    line = node("GeometryNodeCurvePrimitiveLine")
+    line.inputs["Start"].default_value = (-0.5, 0.0, 0.0)
+    line.inputs["End"].default_value = (0.5, 0.0, 0.0)
+    spots = node("GeometryNodePoints")
+    links.new(inputs.outputs["Sides"], spots.inputs["Count"])
+    half = node("ShaderNodeValue")
+    half.outputs[0].default_value = 3.141592653589793
+    turn = node("ShaderNodeMath", operation='MULTIPLY')         # each plane: half a turn over the count on from the last
+    links.new(node("GeometryNodeInputIndex").outputs[0], turn.inputs[0])
+    links.new(math_('DIVIDE', half.outputs[0], inputs.outputs["Sides"]), turn.inputs[1])
+    about = node("ShaderNodeCombineXYZ")
+    links.new(turn.outputs[0], about.inputs[2])
+    planes = node("GeometryNodeInstanceOnPoints")
+    links.new(spots.outputs[0], planes.inputs["Points"])
+    links.new(line.outputs[0], planes.inputs["Instance"])
+    links.new(about.outputs[0], planes.inputs["Rotation"])
+    several = node("GeometryNodeRealizeInstances")
+    links.new(planes.outputs[0], several.inputs[0])
+    tube = node("GeometryNodeCurvePrimitiveCircle")
+    tube.inputs["Radius"].default_value = 0.5
+    least = node("ShaderNodeValue")
+    least.outputs[0].default_value = 3.0
+    links.new(math_('MAXIMUM', inputs.outputs["Sides"], least.outputs[0]), tube.inputs["Resolution"])
+    profile = node("GeometryNodeIndexSwitch", data_type='GEOMETRY')
+    while len(profile.index_switch_items) < 3:
+        profile.index_switch_items.new()
+    links.new(inputs.outputs["Shape"], profile.inputs["Index"])
+    links.new(line.outputs[0], profile.inputs[1])
+    links.new(several.outputs[0], profile.inputs[2])
+    links.new(tube.outputs[0], profile.inputs[3])
     across = node("GeometryNodeCaptureAttribute", domain='POINT')
     across.capture_items.new('FLOAT', "V")
     links.new(profile.outputs[0], across.inputs[0])
     links.new(node("GeometryNodeSplineParameter").outputs["Factor"], across.inputs["V"])
     ribbon = node("GeometryNodeCurveToMesh")
-    links.new(along.outputs[0], ribbon.inputs["Curve"])
+    links.new(turned.outputs[0], ribbon.inputs["Curve"])
     links.new(across.outputs[0], ribbon.inputs["Profile Curve"])
     if "Scale" in ribbon.inputs:        # Blender 5: the profile's scale is the node's own input, not the curve's radius
         links.new(width, ribbon.inputs["Scale"])
-    uv = node("ShaderNodeCombineXYZ")
-    links.new(along.outputs["U"], uv.inputs[0])
-    links.new(across.outputs["V"], uv.inputs[1])
-    # (a ribbon has two UV sets, both laid along it unless the renderer says otherwise: a trail's fades read the second)
+    # its two UV sets: U as each point carries it (the renderer's way of laying it along the ribbon),
+    # V across, between the two edges' values
     mapped = ribbon
-    for name in ("UV0", "UV1"):
+    for name, carried in (("UV0", "mp_uv0"), ("UV1", "mp_uv1")):
+        parts = node("ShaderNodeSeparateXYZ")
+        links.new(attribute(carried, 'FLOAT_VECTOR'), parts.inputs[0])
+        v = node("ShaderNodeMix", data_type='FLOAT')
+        links.new(across.outputs["V"], v.inputs[0])
+        links.new(parts.outputs[1], v.inputs[2])
+        links.new(parts.outputs[2], v.inputs[3])
+        uv = node("ShaderNodeCombineXYZ")
+        links.new(parts.outputs[0], uv.inputs[0])
+        links.new(v.outputs[0], uv.inputs[1])
         store = node("GeometryNodeStoreNamedAttribute", data_type='FLOAT2', domain='CORNER')
         store.inputs["Name"].default_value = name
         links.new(mapped.outputs[0], store.inputs[0])
@@ -625,16 +750,41 @@ def clear(root):
                 piece.hide_render = piece.hide_viewport = bool(piece.get(effects.KEY_SKIP))
 
 
+def _enabled(system, emitter, renderer):
+    """Whether a renderer draws: its Renderer Enabled binding's value (a system's, an emitter's or a
+    user's bool) as the replay left it; one bound to nothing draws."""
+    binding = renderer.get("RendererEnabledBinding") or {}
+    name = str(binding.get("DataSetName") or (binding.get("ParamMapVariable") or {}).get("Name") or "")
+    if not name or name == "None":
+        return True
+    if name.startswith("Emitter."):
+        name = emitter.name + name[len("Emitter"):]
+    value = system.read(name)
+    if value is None and name in system.user.offsets:
+        value = np.frombuffer(system.user.raw(name)[:4], np.int32)
+    if value is None or not len(value):
+        return True
+    return bool(int(np.asarray(value).view(np.int32)[0]) != 0)
+
+
 def _user(root, system):
-    """The system's user parameters as the effect's empty's properties (made from the asset's own
-    values the first time), and those told to the system."""
+    """The system's user parameters, and the parameter collections' values it reads (the time of
+    day), as the effect's empty's properties (made from the assets' own values the first time), and
+    those told to the system."""
     for name, kind, value in system.users():
         if name not in root:
             root[name] = value
-    for name in [k for k in root.keys() if k.startswith("User.")]:
-        if name not in system.user.offsets:     # one the export set that this system doesn't take
+    # UE's names don't mind case (a glider's bisFullyDeployed is the bIsFullyDeployed the game sets)
+    spelled = {n.lower(): n for n in list(system.user.offsets) + list(system.shared.offsets)}
+    for name in [k for k in root.keys() if k.startswith(("User.", "NPC."))]:
+        own = spelled.get(name.lower())
+        if own is None:     # one the export set that this system doesn't take
             del root[name]
             continue
+        if own != name:
+            root[own] = root[name]
+            del root[name]
+            name = own
         value = root[name]
         system.set_user(name, list(value) if hasattr(value, "__len__") else value)
 
@@ -726,11 +876,24 @@ def play(root):
             renderer = next((e["props"] for e in exports if e["name"] == piece.get(effects.KEY_RENDERER) and e["outer"] == emitter.export["name"]), None)
             if kind not in ("Sprite", "Mesh", "Ribbon") or renderer is None or piece.type != 'MESH' or piece.get(effects.KEY_SKIP):
                 continue
+            if not _enabled(system, emitter, renderer):
+                # a renderer the system switches off (a variant's: System.IsGold): its piece out of sight
+                piece.hide_render = piece.hide_viewport = True
+                continue
             keep = None
             if kind == "Mesh" and track.has(bound(renderer, "MeshIndexBinding", "MeshIndex")):
                 keep = track.get(bound(renderer, "MeshIndexBinding", "MeshIndex"), (0,))[:, 0] == int(piece.get("mp_mesh_index", 0))
             elif kind == "Mesh" and int(piece.get("mp_mesh_index", 0)) > 0:
                 continue        # without a mesh index every particle draws the first mesh
+            # an emitter with several renderers says which draws each particle: the particle's
+            # visibility tag is the renderer's (without the attribute, every renderer draws it)
+            tag = bound(renderer, "RendererVisibilityTagBinding", "VisibilityTag")
+            if track.has(tag):
+                mine = track.get(tag, (0,))[:, 0].astype(np.int64) == int(renderer.get("RendererVisibility", 0))
+                keep = mine if keep is None else keep & mine
+            if keep is not None and not keep.any():
+                piece.hide_render = piece.hide_viewport = True      # none of this replay's particles are its
+                continue
             tree = ribbons() if kind == "Ribbon" else group()
             data = points(piece.name + " particles", track, renderer, kind, scale, keep)
             obj = bpy.data.objects.new(piece.name + " particles", data)
@@ -750,14 +913,21 @@ def play(root):
                 _set(modifier, tree, "Material", piece.material_slots[0].material if piece.material_slots else None)
                 facing = str(renderer.get("FacingMode"))
                 _set(modifier, tree, "Facing", 2 if "CustomSideVector" in facing else 1 if "Custom" in facing else 0)
+                shape = str(renderer.get("Shape"))
+                _set(modifier, tree, "Shape", 1 if "MultiPlane" in shape else 2 if "Tube" in shape else 0)
+                _set(modifier, tree, "Sides", int(renderer.get("TubeSubdivisions", 3)) if "Tube" in shape else int(renderer.get("MultiPlaneCount", 2)))
                 piece.hide_render = True
                 piece.hide_viewport = True
                 drawn += 1
                 continue
             _set(modifier, tree, "Piece", piece)
             if kind == "Sprite":
-                turn = TURN_FACING if "CustomFacing" in str(renderer.get("FacingMode")) else \
-                    TURN_CAMERA_VELOCITY if "VelocityAligned" in str(renderer.get("Alignment")) else TURN_CAMERA
+                lengthwise = any(x in str(renderer.get("Alignment")) for x in ("VelocityAligned", "CustomAlignment"))
+                turn = (TURN_FACING_ALIGNED if lengthwise else TURN_FACING) if "CustomFacing" in str(renderer.get("FacingMode")) else \
+                    TURN_CAMERA_VELOCITY if lengthwise else TURN_CAMERA
+                # its pivot (in UV space: 0.5, 0.5 its middle; V runs down) is where the particle is
+                pivot = renderer.get("PivotInUVSpace") or {}
+                _set(modifier, tree, "Piece Offset", (0.5 - float(pivot.get("X", 0.5)), float(pivot.get("Y", 0.5)) - 0.5, 0.0))
                 for constraint in list(piece.constraints):      # the still piece's turn to the camera: the modifier's now
                     piece.constraints.remove(constraint)
             else:
@@ -765,6 +935,11 @@ def play(root):
                 turn = TURN_MESH_VELOCITY if "Velocity" in facing else TURN_MESH_CAMERA if "Camera" in facing else TURN_OWN
                 _set(modifier, tree, "Piece Rotation", piece.rotation_euler)
                 _set(modifier, tree, "Piece Scale", piece.scale)
+                # the renderer's pivot offset of this mesh (UE's units and axes, in the mesh's space)
+                listed = renderer.get("Meshes") or []
+                at = int(piece.get("mp_mesh_index", 0))
+                offset = (listed[at].get("PivotOffset") if at < len(listed) else None) or {}
+                _set(modifier, tree, "Piece Offset", (float(offset.get("X", 0.0)) * scale, -float(offset.get("Y", 0.0)) * scale, float(offset.get("Z", 0.0)) * scale))
             _set(modifier, tree, "Turn", turn)
             # the piece itself: what the particles draw, out of sight
             piece.hide_render = True

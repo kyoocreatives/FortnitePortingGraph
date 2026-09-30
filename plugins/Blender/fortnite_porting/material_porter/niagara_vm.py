@@ -52,17 +52,55 @@ def _select(m, a, b):
     return np.where(m != 0, a, b)
 
 
+# The engine's VM guards what would give an infinity or a NaN: a division by (nearly) nothing, a root
+# or a power of nothing, a logarithm of nothing give 0 (its "safe" kernels), not an infinity that
+# then spreads over a particle's position.
+SMALL = F(1e-8)
+
+
+def _safe(ok, value):
+    return np.where(ok, value, F(0)).astype(F, copy=False)
+
+
+def _div(a, b):
+    ok = np.abs(b) > SMALL
+    return _safe(ok, a / np.where(ok, b, F(1)))
+
+
+def _fmod(a, b):
+    ok = np.abs(b) > SMALL
+    return _safe(ok, np.fmod(a, np.where(ok, b, F(1))))
+
+
+def _pow(a, b):
+    ok = a > SMALL
+    return _safe(ok, np.power(np.where(ok, a, F(1)), b))
+
+
+def _root(a):
+    ok = a > SMALL
+    return _safe(ok, np.sqrt(np.where(ok, a, F(1))))
+
+
+def _log(kind):
+    def log(a):
+        ok = a > 0
+        return _safe(ok, kind(np.where(ok, a, F(1))))
+    return log
+
+
 # name: (operand kinds, function). Kinds: f float, i int, b mask (int), x untyped.
 FLOAT1 = {
-    "rcp": lambda a: F(1) / a, "rsq": lambda a: F(1) / np.sqrt(a), "sqrt": np.sqrt, "neg": np.negative, "abs": np.abs,
-    "exp": np.exp, "exp2": np.exp2, "log": np.log, "log2": np.log2, "sin": np.sin, "cos": np.cos, "tan": np.tan,
-    "asin": np.arcsin, "acos": np.arccos, "atan": np.arctan, "ceil": np.ceil, "floor": np.floor,
+    "rcp": lambda a: _div(F(1), a), "rsq": lambda a: _div(F(1), _root(a)), "sqrt": _root, "neg": np.negative, "abs": np.abs,
+    "exp": np.exp, "exp2": np.exp2, "log": _log(np.log), "log2": _log(np.log2), "sin": np.sin, "cos": np.cos, "tan": np.tan,
+    "asin": lambda a: np.arcsin(np.clip(a, F(-1), F(1))), "acos": lambda a: np.arccos(np.clip(a, F(-1), F(1))),
+    "atan": np.arctan, "ceil": np.ceil, "floor": np.floor,
     "frac": lambda a: a - np.floor(a), "trunc": np.trunc, "round": np.rint,
     "sign": lambda a: np.where(a >= 0, F(1), F(-1)),
 }
 FLOAT2 = {
-    "add": np.add, "sub": np.subtract, "mul": np.multiply, "div": np.divide, "atan2": np.arctan2, "fmod": np.fmod,
-    "min": np.minimum, "max": np.maximum, "pow": np.power,
+    "add": np.add, "sub": np.subtract, "mul": np.multiply, "div": _div, "atan2": np.arctan2, "fmod": _fmod,
+    "min": np.minimum, "max": np.maximum, "pow": _pow,
     "step": lambda edge, x: np.where(x >= edge, F(1), F(0)),
 }
 FLOAT3 = {
@@ -180,6 +218,7 @@ class Buffer:
         self.floats = np.zeros((floats, capacity), F)
         self.ints = np.zeros((ints, capacity), I)
         self.count = 0
+        self.half_base = floats     # where the half-precision rows start among the float rows
 
     def reserve(self, capacity):
         if capacity > self.floats.shape[1]:
@@ -223,25 +262,30 @@ def run(program, registers, count, constants, sets, functions, rng, ids=None):
             kinds = _kinds(name)
             if kinds is not None:
                 r[ins[2]] = kinds[1](*[value(o, k) for o, k in zip(ins[1], kinds[0])])
-            elif name in ("inputdata_float", "inputdata_int32"):
+            elif name in ("inputdata_float", "inputdata_int32", "inputdata_half"):
                 b = sets[ins[1]]
-                rows = b.source.floats if name == "inputdata_float" else b.source.ints
-                v = rows[ins[2], b.source_start:b.source_start + count]
+                rows = b.source.ints if name == "inputdata_int32" else b.source.floats
+                row = ins[2] + (b.source.half_base if name == "inputdata_half" else 0)
+                v = rows[row, b.source_start:b.source_start + count]
                 if len(v) < count:          # one instance read by all (an event's payload)
-                    v = rows[ins[2], b.source_start]
+                    v = rows[row, b.source_start]
                 r[ins[3]] = v.copy() if b.source is b.target else v     # a spawn script reads where it writes
-            elif name in ("inputdata_noadvance_float", "inputdata_noadvance_int32"):
+            elif name in ("inputdata_noadvance_float", "inputdata_noadvance_int32", "inputdata_noadvance_half"):
                 b = sets[ins[1]]
-                rows = b.source.floats if name == "inputdata_noadvance_float" else b.source.ints
-                r[ins[3]] = rows[ins[2], b.source_start]
-            elif name in ("outputdata_float", "outputdata_int32"):
+                rows = b.source.ints if name == "inputdata_noadvance_int32" else b.source.floats
+                r[ins[3]] = rows[ins[2] + (b.source.half_base if name.endswith("half") else 0), b.source_start]
+            elif name in ("outputdata_float", "outputdata_int32", "outputdata_half"):
                 b = sets[ins[1]]
                 mask, n = places[ins[2]]
-                rows = b.target.floats if name == "outputdata_float" else b.target.ints
-                v = value(ins[3], "f" if name == "outputdata_float" else "i")
+                rows = b.target.ints if name == "outputdata_int32" else b.target.floats
+                v = value(ins[3], "i" if name == "outputdata_int32" else "f")
                 if mask is not None and np.ndim(v):
                     v = v[mask]
-                rows[ins[4], b.target_start:b.target_start + n] = v
+                row = ins[4]
+                if name == "outputdata_half":       # kept at half precision, as the engine's buffer keeps it
+                    row += b.target.half_base
+                    v = np.asarray(v, F).astype(np.float16).astype(F)
+                rows[row, b.target_start:b.target_start + n] = v
             elif name == "acquireindex":
                 b = sets[ins[1]]
                 valid = value(ins[2], "i")

@@ -172,6 +172,14 @@ def swing(windows, rig):
             _log("%s: not replayed on the swing (%s: %s)" % (root.name, type(e).__name__, e))
     _log("the swing's %d trail window(s) given to %s%s" % (len(frames), ", ".join(o.name for o in found),
                                                         "" if held else " (no pickaxe under the armature: every pickaxe trail in the scene)"))
+    # the held pickaxe's idle effect now moves with the swing: played again on it (its particles were
+    # left where the pickaxe was when it was imported)
+    for root in [o for o in rig.children_recursive if o.get(KEY) == "System" and o.get(KEY_ROLE) == "idle"] if held else []:
+        try:
+            for line in effect_replay.play(root):
+                _log(line)
+        except Exception as e:
+            _log("%s: not replayed on the swing (%s: %s)" % (root.name, type(e).__name__, e))
 
 
 def finish(context, mesh, root):

@@ -126,7 +126,10 @@ public partial class ExportContext
         }
     }
 
-    /// <summary>A glider's trails, each on its socket, played as the locker shows them (the glider needn't fly).</summary>
+    /// <summary>
+    /// A glider's trails, each on its socket, played as the locker shows them once the glider is out
+    /// (the glider needn't fly): front end, fully deployed (a speed line's opacity waits for it).
+    /// </summary>
     public void GliderEffects(UObject glider, ExportMesh mesh)
     {
         foreach (var (path, socket, offset) in Effects.GliderTrails(glider))
@@ -135,7 +138,7 @@ public partial class ExportContext
             {
                 if (Effects.Shown(path) is not { } system) continue;
                 if (OwnEffect(mesh, system, "trail", Effects.Named(socket) ? socket.Text : null, offset) is { MPEffect: { } node })
-                    node["User"] = new Dictionary<string, object> { ["User.bIsFrontEnd"] = true, ["User.bIsFrontEndPreview"] = true };
+                    node["User"] = new Dictionary<string, object> { ["User.bIsFrontEnd"] = true, ["User.bIsFrontEndPreview"] = true, ["User.bIsFullyDeployed"] = true };
             }
             catch (Exception e)
             {
@@ -270,7 +273,8 @@ public partial class ExportContext
                         MPEffect = new Dictionary<string, object> { ["Kind"] = "Mesh", ["Renderer"] = renderer.Name, ["Index"] = index },
                     };
                     // each slot: the renderer's override, else the mesh's own, with the renderer's parameters
-                    foreach (var slot in mesh.Materials.Select(m => m.Slot).Distinct())
+                    // (a mesh whose own slot holds no material still has the slot: the override's)
+                    foreach (var slot in mesh.Materials.Select(m => m.Slot).Concat(Enumerable.Range(0, overrides.Length)).Distinct())
                     {
                         var material = slot < overrides.Length ? overrides[slot].GetOrDefault<UMaterialInterface?>("ExplicitMat") : null;
                         if (material is not null)
