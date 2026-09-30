@@ -3,6 +3,7 @@ using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Component;
 using CUE4Parse.UE4.Assets.Exports.Material.Parameters;
 using CUE4Parse.UE4.Assets.Objects;
+using CUE4Parse.UE4.Assets.Objects.Properties;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.GameplayTags;
 using CUE4Parse.UE4.Objects.UObject;
@@ -315,6 +316,10 @@ public static class CUE4ParseExtensions
 
         public T GetEnumOrDefault<T>(string propertyName, T def = default) where T : unmanaged
         {
+            // Material Porter fork: an EnumProperty holds its value's name - read as a number first, it logged
+            // an "Incorrect type conversion" warning each time (a character part's type and gender)
+            if (propertyHolder.Properties.FirstOrDefault(p => p.Name.Text == propertyName)?.Tag is EnumProperty)
+                return propertyHolder.GetFNameEnum<T>(propertyName) ?? propertyHolder.GetOrDefault(propertyName, def);
             return propertyHolder.GetByteEnum<T>(propertyName)
                    ?? propertyHolder.GetFNameEnum<T>(propertyName)
                    ?? propertyHolder.GetOrDefault(propertyName, def);
