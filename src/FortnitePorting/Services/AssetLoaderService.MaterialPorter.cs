@@ -1,4 +1,5 @@
 using System;
+using System.IO;
 using System.Linq;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Texture;
@@ -32,6 +33,30 @@ public partial class AssetLoaderService
                 new FilterCategory("EFFECT", [EExportType.Effect])
                 {
                     Filters = [new FilterItem("Plays in Blender", asset => Effects.Plays(asset.CreationData.Object))]
+                }
+            },
+        });
+
+        // animations (sequences and montages) by what they are for: characters', gliders', back blings',
+        // creatures'... found by path and listed unread (the registry keeps few of them); exported onto
+        // the armature selected in Blender
+        Categories.First(category => category.Category == EAssetCategory.Gameplay).Loaders.Add(new AssetLoader(EExportType.Animation)
+        {
+            ClassNames = Animations.Classes,
+            HideRarity = true,
+            DescriptionHandler = Animations.Describe,
+            MPUnregistered = registry => UEParse.Provider is { } provider ? Animations.Candidates(provider, registry) : registry,
+            MPOutline = async (package, name) => await Animations.ReadOutline(UEParse.Provider, package, name),
+            // the outlines kept from the last listing of the same files: a few seconds instead of over a minute
+            MPBeforeListing = () => Animations.Recall(Path.Combine(FortnitePorting.Application.AppServices.App.DataFolder.FullName, "mp_animations.tsv"),
+                $"1 {UEParse.Provider.Files.Count} {UEParse.Provider.MountedVfs.Count}"),
+            MPAfterListing = Animations.Remember,
+            FilterCategories =
+            {
+                new FilterCategory("ANIMATION", [EExportType.Animation])
+                {
+                    Filters = [..Animations.Kinds.Select(k => k.Kind).Append("Other")
+                        .Select(kind => new FilterItem(kind, asset => Animations.Is(asset.CreationData.Object, kind)))]
                 }
             },
         });

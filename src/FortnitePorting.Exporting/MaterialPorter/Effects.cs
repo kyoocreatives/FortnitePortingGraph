@@ -86,7 +86,7 @@ public static class Effects
     /// its name, its emitters, how many run on the GPU (a GPU emitter has a GPUComputeScript: it isn't
     /// replayed) and what its renderers draw.
     /// </summary>
-    public sealed record Outline(string? Class, int Emitters, int Gpu, string[] Draws)
+    public sealed record Outline(string? Class, int Emitters, int Gpu, string[] Draws) : Unloaded.IOutline
     {
         public bool Plays => Emitters > Gpu;
 

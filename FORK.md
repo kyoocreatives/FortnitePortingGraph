@@ -128,6 +128,17 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   Test routes: `fork-weapon-mods?path=`, `fork-asset-page?type=&name=[&pick=Channel:Option;...][&export=1]`
   (an asset's page as the Assets view builds it, and its export through `ExportService`'s styles),
   `fork-export-asset` takes `wrap=` and `mods=Slot:path;...`.
+- **Animations tab.** Assets > Gameplay > Animations lists the game's 69,600 animations (sequences
+  and montages), which the cooked registry mostly leaves out (2,248, nearly all islands'): found by
+  path (an animation folder, "anim" or "montage" in the name: 133,000 packages of 2 million), each
+  checked from its package's export and import maps without being read (`MaterialPorter/Animations.cs`:
+  its class, its skeleton - the import of class Skeleton) and listed unread like the effects. The
+  description says montage or sequence, its skeleton and its folder; the filters say what it is
+  for, from its path and skeleton (Emotes, Characters, Gliders, Weapons, Creatures, Pickaxes, LEGO,
+  Back Blings, Pets, Vehicles, Other). Reading the maps takes about 45 s the first time; the
+  outlines are kept in `.data/mp_animations.tsv` (keyed by the file and archive counts), after
+  which the tab lists in about a second. An export goes onto the armature selected in Blender, as
+  from the Files tab (`AnimExport` reads the asset the tab listed unread).
 - **Particle effects, played.** Assets > Gameplay > Effects lists 18,500 Niagara systems: the asset
   registry's (552 once each - the registry holds most of them twice - nearly all islands') and the
   game's own, found by file name (`NS_...`: the cooked registry leaves nearly all of them out;

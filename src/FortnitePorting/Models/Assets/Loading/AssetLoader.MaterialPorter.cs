@@ -24,9 +24,17 @@ public partial class AssetLoader
     /// </summary>
     public Func<IReadOnlyList<(string Package, string Name)>, IReadOnlyList<(string Package, string Name)>>? MPUnregistered;
 
+    /// <summary>Before and after the listing (an outline cache to read, then write).</summary>
+    public Action? MPBeforeListing, MPAfterListing;
+
+    /// <summary>Each listed package's outline (its class first), from its package's maps.</summary>
+    public Func<string, string, Task<Unloaded.IOutline?>> MPOutline = async (package, name) =>
+        await Effects.ReadOutline(UEParse.Provider, package, name);
+
     private async Task LoadUnregistered(IReadOnlyList<(string Package, string Name)> packages, CancellationToken token)
     {
         if (packages.Count == 0) return;
+        MPBeforeListing?.Invoke();
         int start = LoadedAssets, done = 0;
         await Parallel.ForEachAsync(packages, new ParallelOptions { MaxDegreeOfParallelism = Math.Max(2, Environment.ProcessorCount / 2) },
             async (package, ct) =>
@@ -35,7 +43,7 @@ public partial class AssetLoader
                 await WaitIfPausedAsync();
                 try
                 {
-                    if (await Effects.ReadOutline(UEParse.Provider, package.Package, package.Name) is { Class: { } className } outline
+                    if (await MPOutline(package.Package, package.Name) is { Class: { } className } outline
                         && ClassNames.Contains(className))
                         await LoadAsset(Unloaded.Create(package.Package, package.Name, className, outline));
                 }
@@ -46,5 +54,6 @@ public partial class AssetLoader
 
                 LoadedAssets = start + Interlocked.Increment(ref done);
             });
+        if (!token.IsCancellationRequested) MPAfterListing?.Invoke();
     }
 }

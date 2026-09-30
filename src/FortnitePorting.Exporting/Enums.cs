@@ -191,7 +191,7 @@ public enum EExportType
     [NonAsset]
     Texture = ExportCategory.Generic + 3,
 
-    [Description("Animation"), Export(EPrimitiveExportType.Animation)]
+    [Description("Animations"), Export(EPrimitiveExportType.Animation)]
     [NonAsset]
     Animation = ExportCategory.Generic + 4,
 

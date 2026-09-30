@@ -42,6 +42,8 @@ public class AnimExport : BaseExport
     
     public AnimExport(string name, UObject asset, ExportStyleBase[] styles, EExportType exportType, ExportDataMeta metaData, IExportFileMeta? fileMeta) : base(name, exportType, metaData)
     {
+        // Material Porter fork: one the Animations tab lists unread is read now
+        asset = MaterialPorter.Unloaded.Read(asset, Context.Meta.Provider.Provider);
         switch (exportType)
         {
             case EExportType.Animation:

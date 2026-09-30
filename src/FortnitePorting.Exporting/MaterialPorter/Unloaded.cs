@@ -14,6 +14,12 @@ public static class Unloaded
 {
     private sealed record Marker(string Path, object? Detail);
 
+    /// <summary>What a listing learns of an asset from its package's maps: its class, and what else its tab says.</summary>
+    public interface IOutline
+    {
+        string? Class { get; }
+    }
+
     public static UObject Create(string package, string name, string className, object? detail = null) => new()
     {
         Name = name,
