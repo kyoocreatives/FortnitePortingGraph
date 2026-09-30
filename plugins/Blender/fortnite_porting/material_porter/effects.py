@@ -245,6 +245,10 @@ def swing(windows, rig, hits=()):
         _log("the swing's %d trail window(s) given to %s%s" % (len(frames), ", ".join(o.name for o in trails),
                                                             "" if held else " (no pickaxe held: every pickaxe trail in the scene)"))
     impacts = under(("impact",)) if held else [o for o in everywhere if o.get(KEY_ROLE) == "impact"]
+    # one hit effect a pickaxe: the one for the Default surface (the others - a weak point's, water's -
+    # wait for Replay Effect)
+    plain = [o for o in impacts if "Default" in str(o.get("mp_effect_surfaces", "Default")).split(",")]
+    impacts = plain or impacts[:1]
     if hits and impacts:
         frames = sorted({time_to_frame(t) for t in hits})
         for root in impacts:
@@ -317,6 +321,8 @@ def finish(context, mesh, root):
             root[effect_replay.KEY_SOCKETS] = ",".join(fx["Sockets"])
         for name, value in (fx.get("User") or {}).items():
             root[name] = value
+        if fx.get("Surfaces"):     # a hit effect's surfaces (Default: what a swing hits here)
+            root["mp_effect_surfaces"] = ",".join(fx["Surfaces"])
         if fx.get("Role") in ("event", "impact"):
             # one the game plays on an event (a weapon's reload, its level up) or where a swing hits: it
             # waits for a swing animation's hits or Replay Effect
