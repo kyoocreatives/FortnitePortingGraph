@@ -278,13 +278,14 @@ class ParticleRead:
     """Another emitter's particles, read by a script (the emitter as it stands when the script runs)."""
 
     def __init__(self, system, kind, props):
-        self.system, self.source = system, props.get("EmitterName")
-
-    def emitter(self):
-        return next((e for e in self.system.emitters if e.name == self.source), None)
+        # the emitter it names (older assets: on the interface itself); none named: the script's own
+        self.system, self.source = system, props.get("EmitterName") or (props.get("EmitterBinding") or {}).get("EmitterName")
+        self.caller = None      # the emitter whose script is being bound (Script sets it)
 
     def function(self, name, specifiers, inputs, outputs):
         attribute = _specifiers(specifiers).get("Attribute")
+        source = self.source if self.source and str(self.source) != "None" else self.caller
+        self = _Reader(self.system, source)
 
         def nothing(count):
             return [np.zeros(count, I)] * outputs
@@ -320,6 +321,16 @@ class ParticleRead:
                 return ([np.where(valid, I(-1), I(0))] + [np.where(valid, row[safe], row.dtype.type(0)) for row in rows])[:outputs]
             return by_id
         raise Unsupported("ParticleRead.%s" % name)
+
+
+class _Reader:
+    """The emitter one bound function of a ParticleRead reads."""
+
+    def __init__(self, system, source):
+        self.system, self.source = system, source
+
+    def emitter(self):
+        return next((e for e in self.system.emitters if e.name == self.source), None)
 
 
 class RendererInfo:
@@ -583,7 +594,7 @@ LIBRARY = {"FastMatrixToQuaternion": _matrix_to_quaternion}
 class Script:
     """A compiled script with its parameters and the functions it calls."""
 
-    def __init__(self, system, props, cooked):
+    def __init__(self, system, props, cooked, emitter=None):
         data = props.get("CachedScriptVM") or {}
         code = (data.get("ByteCode") or {}).get("Data")
         if not code:
@@ -606,6 +617,8 @@ class Script:
             if interface is None:
                 kind = str(((owner or {}).get("ResolvedDataInterface") or {}).get("ObjectName") or f.get("OwnerName")).split("'")[0]
                 raise Unsupported("%s.%s" % (kind.replace("NiagaraDataInterface", ""), f.get("Name")))
+            if hasattr(interface, "caller"):
+                interface.caller = emitter
             self.functions.append(interface.function(f["Name"], f.get("FunctionSpecifiers") or [],
                                                      len(f.get("InputParamLocations") or []), int(f.get("NumOutputs") or 0)))
 
@@ -965,7 +978,7 @@ class System:
         if cooked is None:       # older assets keep the store on the script itself
             cooked = {"CookedExecutionParameterStore": export["props"].get("ScriptExecutionParamStore") or {},
                       "CookedScriptRuntimeCompiledData": {"ResolvedDataInterfaces": export["props"].get("ResolvedDataInterfaces") or []}}
-        return Script(self, export["props"], cooked)
+        return Script(self, export["props"], cooked, next((h["Name"] for h in self.props.get("EmitterHandles") or [] if handle and h.get("Id") == handle), None))
 
     def read(self, name):
         """A system data set variable's values (its floats, else its ints), or None."""

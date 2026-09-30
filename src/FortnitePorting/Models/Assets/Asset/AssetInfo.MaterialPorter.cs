@@ -131,19 +131,20 @@ public partial class AssetInfo
     }
 
     /// <summary>
-    /// A pickaxe's Effects: without (as FP exports it), or with the effects its weapon definition names
-    /// (trail, swing, idle), which the export puts on the pickaxe and the plugin plays on its sockets.
+    /// An item's Effects: without (as FP exports it), or with its own effects (Effects.OwnEffectNames:
+    /// a pickaxe's trail, swing and idle effects, a back bling's or an outfit's idle effect, a glider's
+    /// trails, a weapon's), which the export puts on the item and the plugin plays on its sockets.
     /// </summary>
     private void AddEffectStyles()
     {
         var item = Asset.CreationData.Object;
-        if (item is null || Asset.CreationData.ExportType is not EExportType.Pickaxe) return;
+        var type = Asset.CreationData.ExportType;
+        if (item is null || type is not (EExportType.Pickaxe or EExportType.Backpack or EExportType.Outfit or EExportType.Glider or EExportType.Item)) return;
         _ = Task.Run(async () =>
         {
             try
             {
-                if (item.GetOrDefault<global::CUE4Parse.UE4.Assets.Exports.UObject?>("WeaponDefinition") is not { } weapon) return;
-                var names = Effects.PickaxeEffectNames(weapon);
+                var names = Effects.OwnEffectNames(item, type);
                 if (names.Count == 0) return;
                 var options = new List<EffectsStyleData> { new("None", false), new("Its " + string.Join(", ", names), true) };
                 var info = new AssetStyleInfo("Effects", options) { SelectedStyleIndex = 0 };

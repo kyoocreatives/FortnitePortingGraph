@@ -2,7 +2,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Assets.Exports.Animation;
 using CUE4Parse.UE4.Assets.Exports.Material;
+using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.StaticMesh;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Assets.Objects;
@@ -25,13 +27,67 @@ namespace FortnitePorting.Exporting.Context;
 /// </summary>
 public partial class ExportContext
 {
-    /// <summary>Whether a pickaxe's export takes its own effects along (the Effects pick of its page).</summary>
+    /// <summary>Whether an item's export takes its own effects along (the Effects pick of its page).</summary>
     public bool EffectsPick;
 
     /// <summary>
-    /// A pickaxe's own effects (its weapon definition's trail, swing and idle effects) under its mesh,
-    /// each as its effect (Effect): the swing's and the idle's on their sockets, the trail told the two
-    /// sockets it runs between. In Blender they sit on the pickaxe's armature and read its sockets.
+    /// One of an item's own effects, under its mesh: the effect (Effect) with what it is ("trail",
+    /// "swing", "idle", "event": Role), the socket it sits on (MPParentBone) and where it sits there
+    /// (Place). In Blender it is on the item's armature and reads its bones and sockets.
+    /// </summary>
+    private readonly System.Runtime.CompilerServices.ConditionalWeakTable<ExportMesh, Dictionary<string, MaterialPorter.ExportSocket>> _meshSockets = new();
+
+    /// <summary>
+    /// A mesh's sockets, kept for the effects put on it: a skeletal mesh's own and its skeleton's, each
+    /// on its bone; a static mesh's, on the mesh itself (no bone).
+    /// </summary>
+    private void MeshSockets(ExportMesh export, UObject mesh)
+    {
+        var table = new Dictionary<string, MaterialPorter.ExportSocket>();
+        try
+        {
+            if (mesh is USkeletalMesh skeletal)
+            {
+                foreach (var index in skeletal.Sockets.Concat(skeletal.Skeleton.Load<USkeleton>()?.Sockets ?? []))
+                    if (index.Load<global::CUE4Parse.UE4.Assets.Exports.SkeletalMesh.USkeletalMeshSocket>() is { } socket && Effects.Named(socket.SocketName))
+                        table.TryAdd(socket.SocketName.Text, new MaterialPorter.ExportSocket
+                        {
+                            Bone = socket.BoneName.Text, Location = socket.RelativeLocation, Rotation = socket.RelativeRotation, Scale = socket.RelativeScale,
+                        });
+            }
+            else if (mesh is UStaticMesh fixedMesh)
+            {
+                foreach (var index in fixedMesh.Sockets ?? [])
+                    if (index.Load<global::CUE4Parse.UE4.Assets.Exports.StaticMesh.UStaticMeshSocket>() is { } socket && Effects.Named(socket.SocketName))
+                        table.TryAdd(socket.SocketName.Text, new MaterialPorter.ExportSocket
+                        {
+                            Location = socket.RelativeLocation, Rotation = socket.RelativeRotation, Scale = socket.RelativeScale,
+                        });
+            }
+        }
+        catch (Exception e)
+        {
+            Serilog.Log.Warning("[Material Porter] {Mesh}: its sockets weren't read ({Error})", mesh.Name, e.Message);
+        }
+        if (table.Count > 0) _meshSockets.AddOrUpdate(export, table);
+    }
+
+    private MaterialPorterMesh? OwnEffect(ExportMesh mesh, UObject? system, string role, string? socket, FTransform? place = null)
+    {
+        if (system is null || Effect(system) is not MaterialPorterMesh effect) return null;
+        var node = effect.MPEffect ??= new Dictionary<string, object> { ["Kind"] = "System" };
+        node["Role"] = role;
+        if (_meshSockets.TryGetValue(mesh, out var table)) node["Table"] = table;
+        if (socket is not null) effect.MPParentBone = socket;
+        if (place is { } at)
+            node["Place"] = new Dictionary<string, object> { ["Location"] = at.Translation, ["Rotation"] = at.Rotation.Rotator(), ["Scale"] = at.Scale3D };
+        mesh.Children.Add(effect);
+        return effect;
+    }
+
+    /// <summary>
+    /// A pickaxe's own effects (its weapon definition's trail, swing and idle effects): the swing's and
+    /// the idle's on their sockets, the trail told the two sockets it runs between.
     /// </summary>
     public void PickaxeEffects(UObject weaponDefinition, List<ExportMesh> meshes)
     {
@@ -42,25 +98,70 @@ public partial class ExportContext
             {
                 var path = weaponDefinition.GetDataListItem<FSoftObjectPath>(property);
                 if (!Effects.Named(path.AssetPathName) || !path.TryLoad(out UObject? system)) continue;
-                if (Effect(system) is not MaterialPorterMesh effect) continue;
-                var node = effect.MPEffect ??= new Dictionary<string, object> { ["Kind"] = "System" };
-                node["Role"] = name;
-                if (socketProperty is not null)
-                {
-                    var socket = weaponDefinition.GetDataListItem<FName>(socketProperty);
-                    if (Effects.Named(socket)) effect.MPParentBone = socket.Text;
-                }
-                else
-                {
-                    var sockets = new[] { Effects.TrailFirstSocket, Effects.TrailSecondSocket }
-                        .Select(p => weaponDefinition.GetDataListItem<FName>(p)).Where(Effects.Named).Select(s => s.Text).ToArray();
-                    if (sockets.Length > 0) node["Sockets"] = sockets;
-                }
-                mesh.Children.Add(effect);
+                var socket = socketProperty is null ? default : weaponDefinition.GetDataListItem<FName>(socketProperty);
+                if (OwnEffect(mesh, system, name, Effects.Named(socket) ? socket.Text : null) is not { MPEffect: { } node } || socketProperty is not null) continue;
+                var sockets = new[] { Effects.TrailFirstSocket, Effects.TrailSecondSocket }
+                    .Select(p => weaponDefinition.GetDataListItem<FName>(p)).Where(Effects.Named).Select(s => s.Text).ToArray();
+                if (sockets.Length > 0) node["Sockets"] = sockets;
             }
             catch (Exception e)
             {
                 Serilog.Log.Warning("[Material Porter] {Weapon}: its {Effect} effect wasn't read ({Error})", weaponDefinition.Name, name, e.Message);
+            }
+        }
+    }
+
+    /// <summary>A character part's idle effect (a back bling's glow, an outfit's aura), on its socket of the part's mesh.</summary>
+    public void PartEffects(UObject part, ExportMesh mesh)
+    {
+        try
+        {
+            if (Effects.Shown(part.GetOrDefault<FSoftObjectPath>(Effects.PartEffect)) is not { } system) return;
+            var socket = part.GetOrDefault<FName>(Effects.PartSocket);
+            OwnEffect(mesh, system, "idle", Effects.Named(socket) ? socket.Text : null);
+        }
+        catch (Exception e)
+        {
+            Serilog.Log.Warning("[Material Porter] {Part}: its idle effect wasn't read ({Error})", part.Name, e.Message);
+        }
+    }
+
+    /// <summary>A glider's trails, each on its socket, played as the locker shows them (the glider needn't fly).</summary>
+    public void GliderEffects(UObject glider, ExportMesh mesh)
+    {
+        foreach (var (path, socket, offset) in Effects.GliderTrails(glider))
+        {
+            try
+            {
+                if (Effects.Shown(path) is not { } system) continue;
+                if (OwnEffect(mesh, system, "trail", Effects.Named(socket) ? socket.Text : null, offset) is { MPEffect: { } node })
+                    node["User"] = new Dictionary<string, object> { ["User.bIsFrontEnd"] = true, ["User.bIsFrontEndPreview"] = true };
+            }
+            catch (Exception e)
+            {
+                Serilog.Log.Warning("[Material Porter] {Glider}: a trail wasn't read ({Error})", glider.Name, e.Message);
+            }
+        }
+    }
+
+    /// <summary>
+    /// A weapon's own effects: its actor class's Niagara components, each on the socket it is attached
+    /// to. One that plays by itself is "idle"; one the game plays on an event (a reload, a level up)
+    /// is "event": it comes along unplayed, for Replay Effect.
+    /// </summary>
+    public void WeaponEffects(UObject actorClass, ExportMesh mesh)
+    {
+        foreach (var (component, socket, auto) in Effects.WeaponComponents(actorClass))
+        {
+            try
+            {
+                var place = new FTransform(component.GetOrDefault("RelativeRotation", FRotator.ZeroRotator).Quaternion(),
+                    component.GetOrDefault("RelativeLocation", FVector.ZeroVector), component.GetOrDefault("RelativeScale3D", FVector.OneVector));
+                OwnEffect(mesh, component.GetOrDefault<UObject?>("Asset"), auto ? "idle" : "event", socket, place);
+            }
+            catch (Exception e)
+            {
+                Serilog.Log.Warning("[Material Porter] {Weapon}: its {Component} wasn't read ({Error})", actorClass.Name, component.Name, e.Message);
             }
         }
     }

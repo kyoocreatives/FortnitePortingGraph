@@ -59,6 +59,7 @@ public partial class ExportContext
             };
 
             AddMeshMaterials(exportPart, convertedMesh);
+            if (EffectsPick) MeshSockets(exportPart, mesh); // Material Porter fork
             return exportPart;
         }
         catch (Exception)
@@ -90,6 +91,7 @@ public partial class ExportContext
             };
 
             AddMeshMaterials(exportPart, convertedMesh);
+            if (EffectsPick) MeshSockets(exportPart, mesh); // Material Porter fork
             return exportPart;
         }
         catch (Exception)
@@ -212,6 +214,7 @@ public partial class ExportContext
             };
 
             AddMeshMaterials(exportPart, convertedMesh);
+            if (EffectsPick) MeshSockets(exportPart, mesh); // Material Porter fork
             return exportPart;
         }
         catch (Exception)

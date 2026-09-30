@@ -122,7 +122,10 @@ public partial class ExportContext
                 }
             }
         }
-        
+
+        // Material Porter fork: the part's idle effect, when the item's page says so
+        if (EffectsPick) PartEffects(part, exportPart);
+
         return exportPart;
     }
     

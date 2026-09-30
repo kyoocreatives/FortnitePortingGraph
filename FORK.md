@@ -185,6 +185,32 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     effects on the selection). What isn't played of an effect that is on something (GPU emitters)
     is hidden instead of rowed beside it. Nothing moving above an effect: one frame is sampled
     for all (`effect_replay.Stand`). Test: `fork-export-asset?type=Pickaxe&effects=1`.
+  - **Other items' own effects.** The same Effects pick is on a back bling's, an outfit's, a
+    glider's and a weapon's page, only where the item has effects (`Effects.OwnEffectNames`; a part
+    naming a blank system - `NS_Blank_Body`, `NS_Empty`: no emitter, there to switch a base part's
+    effect off - has none: `Effects.Shown`):
+    - a back bling's and an outfit's parts' idle effect (`IdleEffectNiagara` on `IdleFXSocketName`:
+      `ExportContext.PartEffects`, from `CharacterPart`);
+    - a glider's trails (`TrailEffectDefinitions`: system, socket, offset; the older
+      `TrailEffectNiagara` / `2`: `GliderEffects`), sent with the locker's flags
+      (`User.bIsFrontEnd`, `User.bIsFrontEndPreview`: properties on the effect's empty, like
+      `User.ForwardDot` and `User.RightDot`, which the game sets from the player's steering: change
+      them and Replay Effect). A glider flies toward +Y in Blender; many trails take a second or
+      two to start (the glider opening);
+    - a weapon's actor class's Niagara components (its parent classes' too: `WeaponComponents`,
+      `WeaponEffects`, from `WeaponLook`), each on what its construction script node attaches it to
+      (`SCS_Node.AttachToName`) at the component's relative transform (`Place`). One that plays by
+      itself (`bAutoActivate`) is played; one the game plays on an event (a reload, a level up) has
+      the role "event": stored, its pieces hidden, played by Replay Effect from its `Start Frame`.
+    Each effect carries its mesh's sockets (`ExportContext.MeshSockets`, kept per exported mesh while
+    the pick is on: a skeletal mesh's own and its skeleton's, each on its bone; a static mesh's, on
+    the mesh itself: `Table`), for a socket the armature doesn't have as a bone and for the ones the
+    effect's scripts read (`effect_replay.holder_of`: the armature, else the static mesh it is on).
+    An effect's pieces aren't parts of the item (`imported_meshes`: an outfit's armatures are merged
+    and its pose assets applied over the parts only). Not reproduced: a material that reads the
+    scene behind it (`SceneTexture`: an aura drawn on the character's own normals) or shapes its
+    mesh with World Position Offset. Test: `fork-export-asset?type=Glider&effects=1`,
+    `fork-asset-page?type=Glider&name=...&pick=Effects:Its trail&export=1`.
   - **An animation's effects.** An emote's (or any exported animation's) Niagara notifies come with
     it (`AnimExport.MPEffects`, `EffectNotify`: a notify or timed notify whose `Template` is a
     Niagara system - the montage's own and its sequences'). One effect per system and socket, with

@@ -108,6 +108,15 @@ def rig_of(root):
     return None
 
 
+def holder_of(root):
+    """What the effect reads bones and sockets of: the armature it is on, else the mesh it is on (a
+    static mesh's sockets), or None."""
+    rig = rig_of(root)
+    if rig is None and root.parent is not None and root.parent.type == 'MESH':
+        return root.parent
+    return rig
+
+
 def _moves(root):
     """Whether anything could move the effect over the frames: a parent, or its own animation."""
     return root.parent is not None or root.animation_data is not None
@@ -136,13 +145,15 @@ class Stand:
         self.still = None if _animated(root) else False     # unmoving: one frame's stand serves them all
         self.bones = {}     # name read: (pose bone, where on it: a socket the armature doesn't have, else None)
         if rig is not None:
-            by_name = {b.name.lower(): b for b in rig.pose.bones}
+            by_name = {b.name.lower(): b for b in rig.pose.bones} if rig.type == 'ARMATURE' else {}
             for name in reads:
                 socket = (sockets or {}).get(name)
                 if name in by_name:
                     self.bones[name] = (by_name[name], None)
                 elif socket is not None and str(socket.get("Bone")).lower() in by_name:
                     self.bones[name] = (by_name[str(socket["Bone"]).lower()], effects.socket_matrix(socket, scale))
+                elif socket is not None and not socket.get("Bone"):     # a static mesh's socket: on the mesh itself
+                    self.bones[name] = (None, effects.socket_matrix(socket, scale))
 
     def at(self, frame):
         """(the owner's matrix, the character's, its pose) on a scene frame, in UE's terms."""
@@ -156,7 +167,7 @@ class Stand:
         owner = _ue(self.root.matrix_world, self.scale)
         pose = {}
         for name, (bone, place) in self.bones.items():
-            m = _ue(bone.matrix @ place if place is not None else bone.matrix, self.scale)
+            m = _ue(place if bone is None else bone.matrix @ place if place is not None else bone.matrix, self.scale)
             rows = m[:3, :3]
             pose[name] = (m[3, :3].copy(), niagara._quaternion(rows / np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), 1e-9)))
         stand = (owner, _ue(self.rig.matrix_world, self.scale) if self.rig is not None else owner, pose)
@@ -669,7 +680,7 @@ def play(root):
     clear(root)
     system = niagara.System(exports, fields=fields, sockets=[s for s in str(root.get(KEY_SOCKETS) or "").split(",") if s])
     _user(root, system)
-    rig = rig_of(root)
+    rig = holder_of(root)
     fps = scene.render.fps / scene.render.fps_base
     # the scene frame the effect starts on: the frame range's first, until its Start Frame property says another
     if KEY_START not in root:
@@ -778,7 +789,7 @@ def play(root):
             _title(root), ", ".join(played), "%d times " % len(runs) if len(runs) > 1 else "", length, start, most,
             ", on %s" % rig.name if rig is not None else "")
         if root.get(effects.KEY_ROLE) in ("trail", "swing") and stand is not None and stand.still:
-            yield "%s: a pickaxe's %s shows on a swing: animate it, set the effect's Start Frame on the swing, then Replay Effect" % (
+            yield "%s: a %s shows on what moves: animate it, set the effect's Start Frame where it starts, then Replay Effect" % (
                 _title(root), root[effects.KEY_ROLE])
     approximate = [name for name in played if name in system.approximate]
     if approximate:

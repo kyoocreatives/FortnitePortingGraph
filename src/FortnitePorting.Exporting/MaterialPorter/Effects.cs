@@ -8,6 +8,7 @@ using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Objects.Engine.VectorField;
 using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.CUE4Parse.Extensions;
+using CUE4Parse.UE4.Objects.Engine;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -39,6 +40,102 @@ public static class Effects
     /// <summary>Which of its own effects a pickaxe's weapon definition has: "trail", "swing", "idle".</summary>
     public static List<string> PickaxeEffectNames(UObject weaponDefinition) =>
         PickaxeEffects.Where(e => Named(weaponDefinition.GetDataListItem<FSoftObjectPath>(e.Property).AssetPathName)).Select(e => e.Name).ToList();
+
+    public const string PartEffect = "IdleEffectNiagara", PartSocket = "IdleFXSocketName";
+
+    /// <summary>
+    /// The system a soft path names, where it shows something: many parts name a blank system
+    /// (NS_Blank_Body, NS_Empty: no emitter) to switch their base part's effect off.
+    /// </summary>
+    public static UObject? Shown(FSoftObjectPath path)
+    {
+        try
+        {
+            return Named(path.AssetPathName) && path.TryLoad(out UObject? system) && Emitters(system).Count > 0 ? system : null;
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>An outfit's character parts: its own, else its hero definition's first specialization's.</summary>
+    public static UObject[] OutfitParts(UObject outfit)
+    {
+        var parts = outfit.GetOrDefault("BaseCharacterParts", Array.Empty<UObject>());
+        if (parts.Length == 0 && outfit.TryGetValue(out UObject hero, "HeroDefinition") && hero.TryGetValue(out UObject[] specializations, "Specializations"))
+            parts = specializations.FirstOrDefault()?.GetOrDefault("CharacterParts", Array.Empty<UObject>()) ?? [];
+        return parts;
+    }
+
+    /// <summary>A glider's trail effects: (system, socket, offset), from its trail definitions or its older trail properties.</summary>
+    public static List<(FSoftObjectPath System, FName Socket, FTransform? Offset)> GliderTrails(UObject glider)
+    {
+        var trails = new List<(FSoftObjectPath, FName, FTransform?)>();
+        foreach (var trail in glider.GetOrDefault("TrailEffectDefinitions", Array.Empty<FStructFallback>()))
+        {
+            var system = trail.GetOrDefault<FSoftObjectPath>("NiagaraSystem");
+            if (Named(system.AssetPathName)) trails.Add((system, trail.GetOrDefault<FName>("EffectSocket"), trail.GetOrDefault<FTransform?>("Offset")));
+        }
+        if (trails.Count == 0)
+            foreach (var property in new[] { "TrailEffectNiagara", "TrailEffectNiagara2" })
+            {
+                var system = glider.GetOrDefault<FSoftObjectPath>(property);
+                if (Named(system.AssetPathName) && trails.All(t => t.Item1.AssetPathName != system.AssetPathName)) trails.Add((system, default, null));
+            }
+        return trails;
+    }
+
+    /// <summary>
+    /// A weapon actor class's Niagara components, its own and its parent classes': (component, socket
+    /// on the weapon it is attached to, whether it plays by itself rather than on an event of the game's).
+    /// </summary>
+    public static List<(UObject Component, string? Socket, bool Auto)> WeaponComponents(UObject? actorClass)
+    {
+        var found = new List<(UObject, string?, bool)>();
+        for (var guard = 0; actorClass is UBlueprintGeneratedClass && guard < 6; guard++)
+        {
+            var exports = actorClass.Owner?.GetExports().ToList() ?? [];
+            foreach (var component in exports.Where(e => e.ExportType == "NiagaraComponent"))
+            {
+                if (!Named(component.GetOrDefault<FPackageIndex?>("Asset")?.Name is { } asset ? new FName(asset) : default)) continue;
+                if (found.Any(f => f.Item1.Name == component.Name)) continue;
+                // the construction script node that owns the component says what it is attached to
+                var node = exports.FirstOrDefault(e => e.ExportType == "SCS_Node" && e.GetOrDefault<FPackageIndex?>("ComponentTemplate")?.Name == component.Name);
+                var socket = node?.GetOrDefault<FName>("AttachToName") ?? default;
+                found.Add((component, Named(socket) ? socket.Text : null, component.GetOrDefault("bAutoActivate", true)));
+            }
+            actorClass = (actorClass as UBlueprintGeneratedClass)?.SuperStruct?.Load<UObject>();
+        }
+        return found;
+    }
+
+    /// <summary>
+    /// What of its own effects an item of a tab can be exported with ("trail", "swing", "idle",
+    /// "event effects"): a pickaxe's weapon definition's, a back bling's or an outfit's parts' idle
+    /// effects, a glider's trails, a weapon's actor class's Niagara components.
+    /// </summary>
+    public static List<string> OwnEffectNames(UObject item, EExportType type)
+    {
+        switch (type)
+        {
+            case EExportType.Pickaxe:
+                return item.GetOrDefault<UObject?>("WeaponDefinition") is { } weapon ? PickaxeEffectNames(weapon) : [];
+            case EExportType.Backpack or EExportType.Outfit:
+                var parts = type is EExportType.Backpack ? item.GetOrDefault("CharacterParts", Array.Empty<UObject>()) : OutfitParts(item);
+                return parts.Any(p => Shown(p.GetOrDefault<FSoftObjectPath>(PartEffect)) is not null) ? ["idle"] : [];
+            case EExportType.Glider:
+                return GliderTrails(item).Any(t => Shown(t.System) is not null) ? ["trail"] : [];
+            case EExportType.Item:
+                var components = WeaponComponents(item.GetOrDefault<UObject?>("WeaponActorClass") ?? item.GetDataListItem<UObject?>("WeaponActorClass"));
+                var names = new List<string>();
+                if (components.Any(c => c.Auto)) names.Add("idle");
+                if (components.Any(c => !c.Auto)) names.Add("event effects");
+                return names;
+            default:
+                return [];
+        }
+    }
 
     /// <summary>Whether a name names something (it is set, and isn't None).</summary>
     public static bool Named(FName name) => name.Text is { Length: > 0 } text && text != "None";

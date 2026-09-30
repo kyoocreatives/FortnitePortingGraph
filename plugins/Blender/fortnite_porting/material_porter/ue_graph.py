@@ -1088,6 +1088,13 @@ class Translator:
     def zero_z(self, v):
         return self.combine(self.comps(v)[:2] + [self.const(0.0)]) if v.w == 2 else v
 
+    def flat(self, a, b):
+        """Two operands of a length or a distance: where the wider is 2 wide, both with Z 0 (a
+        scalar against a float2 spreads over X and Y only)."""
+        if max(a.w, b.w) != 2:
+            return a, b
+        return tuple(self.combine(self.comps(v)[:2] + [self.const(0.0)]) for v in (a, b))
+
     # -------------------------------------------------------- evaluation
     def graph(self, path):
         g = self.graphs.get(path)
@@ -1263,7 +1270,7 @@ class Translator:
         if t == "CrossProduct":
             return self.vmath('CROSS_PRODUCT', P("A"), P("B"), out_w=3)
         if t == "Distance":
-            return self.vmath('DISTANCE', self.zero_z(P("A")), self.zero_z(P("B")))
+            return self.vmath('DISTANCE', *self.flat(P("A"), P("B")))
         if t == "ComponentMask":
             idx = [i for i, k in enumerate("RGBA") if p.get(k)]
             return self.mask(P("Input"), idx)
@@ -1325,7 +1332,7 @@ class Translator:
             a, b = P("A"), P("B")
             radius = self.input(g, p.get("Radius"), scope, self.const(float(p.get("AttenuationRadius", 256.0))))
             hard = self.input(g, p.get("Hardness"), scope, self.const(float(p.get("HardnessPercent", 100.0))))
-            d = self.vmath('LENGTH', self.vmath('SUBTRACT', a, b, out_w=3), out_w=1) if max(a.w, b.w) > 1 \
+            d = self.vmath('LENGTH', self.vmath('SUBTRACT', *self.flat(a, b), out_w=3), out_w=1) if max(a.w, b.w) > 1 \
                 else self.math('ABSOLUTE', self.binop('SUBTRACT', a, b))
             nd = self.binop('DIVIDE', d, self.math('MAXIMUM', radius, self.const(0.00001)))
             soft = self.binop('SUBTRACT', self.const(1.0), self.binop('MULTIPLY', hard, self.const(0.01)))

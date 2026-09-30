@@ -209,6 +209,8 @@ public class MeshExport : BaseExport
                     part.OverrideMaterials.AddIfNotNull(Context.OverrideMaterial(overrideMaterial));
                 }
 
+                // Material Porter fork: its trails, when its page says so
+                if (Context.EffectsPick) Context.GliderEffects(asset, part);
                 Meshes.Add(part);
                 break;
             }

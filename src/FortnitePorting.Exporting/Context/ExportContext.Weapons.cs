@@ -57,6 +57,8 @@ public partial class ExportContext
             {
                 WeaponComponentLook(defaults, "WeaponMesh", meshes, 0);
                 WeaponComponentLook(defaults, "LeftHandWeaponMesh", meshes, 1);
+                // its own effects, when its page says so
+                if (EffectsPick) WeaponEffects(actorClass, meshes[0]);
             }
 
             WeaponModMeshes(weaponDefinition, meshes[0]);

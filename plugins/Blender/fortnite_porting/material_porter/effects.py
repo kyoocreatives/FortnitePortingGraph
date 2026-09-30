@@ -21,7 +21,7 @@ from mathutils import Matrix
 KEY = "mp_effect"           # on an effect's objects: "System", "Emitter (GPU)", "Sprite", "Mesh"...
 KEY_EMITTER = "mp_emitter"  # on an emitter's empty: the emitter's name
 KEY_RENDERER = "mp_renderer"    # on a drawn piece: its renderer's name in the asset
-KEY_ROLE = "mp_effect_role"     # on a pickaxe's own effect's empty: "trail", "swing" or "idle"
+KEY_ROLE = "mp_effect_role"     # on an item's own effect's empty: "trail", "swing", "idle" or "event"
 
 
 def particle_values(obj):
@@ -186,11 +186,19 @@ def finish(context, mesh, root):
         effect_replay.attach(root, rig)
     # a pickaxe's own effect, an animation's: on its socket
     bone, offset = mesh.get("MPParentBone") or fx.get("Bone"), fx.get("Offset")
+    if offset is None and fx.get("Place"):      # where an item's own effect sits on its socket
+        offset = socket_matrix(fx["Place"], context.scale)
+    if not bone and offset is not None:
+        root.matrix_basis = offset
     table = {k.lower(): v for k, v in (fx.get("Table") or {}).items()}
     if bone and not on_bone(root, bone, offset):
         # a socket the armature doesn't have: on the socket's bone, where the skeleton puts it
         socket = table.get(bone.lower())
-        placed = socket is not None and on_bone(root, socket["Bone"], socket_matrix(socket, context.scale) @ (offset if offset is not None else Matrix.Identity(4)))
+        there = socket_matrix(socket, context.scale) @ (offset if offset is not None else Matrix.Identity(4)) if socket is not None else None
+        placed = socket is not None and on_bone(root, socket["Bone"], there)
+        if not placed and socket is not None and not socket.get("Bone") and root.parent is not None:
+            root.matrix_basis = there       # a static mesh's socket: on the mesh itself
+            placed = True
         if not placed:
             if offset is not None:
                 root.matrix_basis = offset
@@ -216,6 +224,13 @@ def finish(context, mesh, root):
             root[effect_replay.KEY_SOCKETS] = ",".join(fx["Sockets"])
         for name, value in (fx.get("User") or {}).items():
             root[name] = value
+        if fx.get("Role") == "event":
+            # one the game plays on an event (a weapon's reload, its level up): it waits for Replay Effect
+            for node in root.children:
+                for piece in node.children:
+                    piece.hide_render = piece.hide_viewport = True
+            _log("%s: the game plays it on an event: select it and press Replay Effect to play it (from its Start Frame)" % root.name)
+            return
         for line in effect_replay.play(root):
             _log(line)
     except Exception as e:      # the pieces stay as imported

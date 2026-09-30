@@ -234,19 +234,23 @@ class MeshImportContext:
         from ...material_porter.placement import after_import
         after_import(mesh, imported_object, imported_mesh, self.scale)
 
-        self.imported_meshes.append({
-            "Skeleton": imported_object,
-            "Mesh": imported_mesh,
-            "Type": part_type,
-            "Meta": mesh.get("Meta")
-        })
+        # (Material Porter fork: a particle effect's pieces aren't parts of the item: an outfit's
+        # armatures are merged and its bones reparented over these)
+        if not mesh.get("MPEffect"):
+            self.imported_meshes.append({
+                "Skeleton": imported_object,
+                "Mesh": imported_mesh,
+                "Type": part_type,
+                "Meta": mesh.get("Meta")
+            })
 
         # metadata handling
         meta = self.gather_metadata("PoseAsset")
 
         # pose asset (Material Porter fork: not for a world's meshes; making each one active
-        # resyncs the view layer per object)
-        if imported_mesh is not None and self.type not in [EExportType.WORLD, EExportType.PREFAB]:
+        # resyncs the view layer per object. Nor for a particle effect's pieces: an outfit's
+        # idle effect comes after its head, whose poses are no business of a sprite's)
+        if imported_mesh is not None and self.type not in [EExportType.WORLD, EExportType.PREFAB] and not mesh.get("MPEffect"):
             bpy.context.view_layer.objects.active = imported_mesh
             self.import_pose_asset_data(meta, get_selected_armature(), part_type)
 
