@@ -46,6 +46,7 @@ public class MeshExport : BaseExport
     {
         // Material Porter fork: the wrap and the weapon mods picked on the asset's page
         Context.WrapPick = styles.OfType<MaterialPorter.ExportWrapStyle>().FirstOrDefault()?.Path;
+        Context.EffectsPick = styles.OfType<MaterialPorter.ExportEffectsStyle>().Any(s => s.On);
         Context.WeaponModPicks = styles.OfType<MaterialPorter.ExportWeaponModStyle>().Where(s => s.Path is not null)
             .GroupBy(s => s.Slot).ToDictionary(g => g.Key, g => g.Last().Path!);
 
@@ -190,6 +191,8 @@ public class MeshExport : BaseExport
                 if (weapon is null) break;
 
                 Meshes.AddRange(Context.WeaponDefinition(weapon));
+                // Material Porter fork: its trail, swing and idle effects, when its page says so
+                if (Context.EffectsPick) Context.PickaxeEffects(weapon, Meshes);
                 break;
             }
             case EExportType.Glider:

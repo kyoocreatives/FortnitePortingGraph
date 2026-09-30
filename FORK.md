@@ -171,10 +171,23 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   - **Contrails.** Assets > Cosmetics > Contrails lists the skydiving contrails with a Niagara
     effect (267); the export is the item's effect with the locker's flags on
     (`User.bIsFrontEnd`, `User.bIsFrontEndPreview`: the character needn't fall), put on the
-    armature selected in Blender when it is sent. A pickaxe's trail (its weapon definition's
-    `AnimTrailsNiagara`, `SwingEffectNiagara`, `IdleEffectNiagara`) is exported from the Files tab
-    and put on the pickaxe's armature with Replay Effect: it reads the pickaxe's trail sockets
-    (imported as bones), so it needs a swing animation, and its `Start Frame` on the swing.
+    armature selected in Blender when it is sent.
+  - **A pickaxe's own effects.** A pickaxe's page has an Effects pick (None, or "Its trail, swing,
+    idle": what its weapon definition's data names - `AnimTrailsNiagara`, `SwingEffectNiagara`,
+    `IdleEffectNiagara`; `AssetInfo.AddEffectStyles`, `ExportEffectsStyle`). With it the export puts
+    each effect under the pickaxe's mesh (`ExportContext.PickaxeEffects`): the swing's and the idle's
+    on their sockets (`SwingFXSocketName`, `IdleFXSocketName`: `MPParentBone`, `effects.on_bone`),
+    the trail told the two sockets it runs between (`AnimTrailsFirstSocketName`,
+    `AnimTrailsSecondSocketName`: `Sockets`, which stand for the trail's filtered sockets where the
+    pickaxe has none of their names). They are replayed on the pickaxe's armature (its sockets are
+    imported as bones). A trail and a swing effect show on a swing: animate the pickaxe, set the
+    effect's `Start Frame` on the swing, select the pickaxe and press Replay Effect (it replays the
+    effects on the selection). What isn't played of an effect that is on something (GPU emitters)
+    is hidden instead of rowed beside it. Nothing moving above an effect: one frame is sampled
+    for all (`effect_replay.Stand`). Test: `fork-export-asset?type=Pickaxe&effects=1`.
+  - **Ribbons.** A ribbon's width runs across the view, the particles' facing, or along their side
+    vector (a trail between two sockets), as the renderer says (the modifier's Facing); it has two
+    UV sets along it (a trail's fades read the second).
   - A renderer's material kept inside the system (an instance with the renderer's parameters) is
     exported as the asset it is an instance of, with its values.
   - **Not replayed:** GPU emitters (7% of the game's own emitters, 4 of 5 of the islands') keep

@@ -131,12 +131,39 @@ public partial class AssetInfo
     }
 
     /// <summary>
+    /// A pickaxe's Effects: without (as FP exports it), or with the effects its weapon definition names
+    /// (trail, swing, idle), which the export puts on the pickaxe and the plugin plays on its sockets.
+    /// </summary>
+    private void AddEffectStyles()
+    {
+        var item = Asset.CreationData.Object;
+        if (item is null || Asset.CreationData.ExportType is not EExportType.Pickaxe) return;
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                if (item.GetOrDefault<global::CUE4Parse.UE4.Assets.Exports.UObject?>("WeaponDefinition") is not { } weapon) return;
+                var names = Effects.PickaxeEffectNames(weapon);
+                if (names.Count == 0) return;
+                var options = new List<EffectsStyleData> { new("None", false), new("Its " + string.Join(", ", names), true) };
+                var info = new AssetStyleInfo("Effects", options) { SelectedStyleIndex = 0 };
+                await Dispatcher.UIThread.InvokeAsync(() => StyleInfos.Add(info));
+            }
+            catch (Exception e)
+            {
+                Log.Warning(e, "[Material Porter] effect styles for {Name}", item.Name);
+            }
+        });
+    }
+
+    /// <summary>
     /// A weapon's mod slots (Optic, Magazine, Barrel, Underbarrel: its own mod, none, or a mod that
     /// allows it) and the wrap over a weapon or a vehicle (as it is, none, or any wrap). The export
     /// puts the mods on the weapon's attach bones and lays the wrap over all of it.
     /// </summary>
     private void AddWeaponStyles()
     {
+        AddEffectStyles();
         var item = Asset.CreationData.Object;
         if (item is null) return;
         var weapon = Asset.CreationData.ExportType is EExportType.Item && item.ExportType.Contains("Weapon", StringComparison.OrdinalIgnoreCase);

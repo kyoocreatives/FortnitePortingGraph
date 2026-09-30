@@ -296,6 +296,7 @@ public class ExportService(
             // Material Porter fork: the wrap and the weapon mods picked on the asset's page
             WrapStyleData wrap => new Exporting.MaterialPorter.ExportWrapStyle { Path = wrap.Path },
             WeaponModStyleData mod => new Exporting.MaterialPorter.ExportWeaponModStyle { Slot = mod.Slot, Path = mod.Path },
+            EffectsStyleData effects => new Exporting.MaterialPorter.ExportEffectsStyle { On = effects.On },
             AssetColorStyleData colorStyle => new ExportColorStyle
             {
                 StyleData = colorStyle.StyleData,

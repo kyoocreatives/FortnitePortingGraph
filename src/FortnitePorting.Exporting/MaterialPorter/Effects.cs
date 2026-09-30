@@ -7,6 +7,7 @@ using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Objects.Engine.VectorField;
 using CUE4Parse.UE4.Objects.UObject;
+using FortnitePorting.CUE4Parse.Extensions;
 using Newtonsoft.Json;
 using Newtonsoft.Json.Linq;
 
@@ -22,6 +23,25 @@ public static class Effects
     public const string ContrailClass = "AthenaSkyDiveContrailItemDefinition";
     /// <summary>A contrail item's effect (older ones name only a Cascade effect: none to replay).</summary>
     public const string ContrailEffect = "NiagaraContrailEffect";
+
+    /// <summary>
+    /// A pickaxe's own effects, as its weapon definition's data names them: the property, what it is
+    /// called, and the property naming the socket it sits on (the trail runs between two sockets instead).
+    /// </summary>
+    public static readonly (string Property, string Name, string? Socket)[] PickaxeEffects =
+    [
+        ("AnimTrailsNiagara", "trail", null),
+        ("SwingEffectNiagara", "swing", "SwingFXSocketName"),
+        ("IdleEffectNiagara", "idle", "IdleFXSocketName"),
+    ];
+    public const string TrailFirstSocket = "AnimTrailsFirstSocketName", TrailSecondSocket = "AnimTrailsSecondSocketName";
+
+    /// <summary>Which of its own effects a pickaxe's weapon definition has: "trail", "swing", "idle".</summary>
+    public static List<string> PickaxeEffectNames(UObject weaponDefinition) =>
+        PickaxeEffects.Where(e => Named(weaponDefinition.GetDataListItem<FSoftObjectPath>(e.Property).AssetPathName)).Select(e => e.Name).ToList();
+
+    /// <summary>Whether a name names something (it is set, and isn't None).</summary>
+    public static bool Named(FName name) => name.Text is { Length: > 0 } text && text != "None";
 
     /// <summary>An enabled emitter: its name, how it is simulated (CPU, GPU, Stateless) and its enabled renderers.</summary>
     public sealed record Emitter(string Name, string Sim, UObject Asset, FStructFallback? Version, List<UObject> Renderers);

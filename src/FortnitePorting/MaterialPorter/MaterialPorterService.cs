@@ -445,8 +445,10 @@ public class MaterialPorterService : IService
                 .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportCarStyle { Channel = int.Parse(x[0]), Option = int.Parse(x[1]) })
                 .Concat((query["face"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))
                     .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportFigureFaceStyle { Feature = x[0], Pose = int.Parse(x[1]) }))
-                // wrap=<wrap item path, or empty for none>; mods=Optic:<mod item path>;Magazine: (empty: none)
+                // wrap=<wrap item path, or empty for none>; mods=Optic:<mod item path>;Magazine: (empty: none); effects=1
                 .Concat(query["wrap"] is { } wrapPick ? [new ExportWrapStyle { Path = wrapPick }] : Array.Empty<Exporting.Styles.ExportStyleBase>())
+                // effects=1: a pickaxe with its own effects
+                .Concat(query["effects"] == "1" ? [new ExportEffectsStyle { On = true }] : Array.Empty<Exporting.Styles.ExportStyleBase>())
                 .Concat((query["mods"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':', 2))
                     .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportWeaponModStyle { Slot = x[0], Path = x[1] }))
                 .ToArray();

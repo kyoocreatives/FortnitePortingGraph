@@ -13,6 +13,19 @@ public partial class WrapStyleData : BaseStyleData
     }
 }
 
+/// <summary>A pickaxe's Effects option (Material Porter fork): without its own effects, or with them.</summary>
+public partial class EffectsStyleData : BaseStyleData
+{
+    public bool On { get; }
+
+    public EffectsStyleData(string name, bool on)
+    {
+        StyleName = name;
+        On = on;
+        ShowName = true;
+    }
+}
+
 /// <summary>A weapon mod option for a slot (Material Porter fork): a mod item's path, "" for none, null for the weapon's own.</summary>
 public partial class WeaponModStyleData : BaseStyleData
 {

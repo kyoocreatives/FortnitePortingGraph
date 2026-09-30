@@ -8,6 +8,7 @@ using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.UObject;
+using FortnitePorting.CUE4Parse.Extensions;
 using FortnitePorting.Exporting.MaterialPorter;
 using FortnitePorting.Exporting.Models;
 
@@ -24,6 +25,46 @@ namespace FortnitePorting.Exporting.Context;
 /// </summary>
 public partial class ExportContext
 {
+    /// <summary>Whether a pickaxe's export takes its own effects along (the Effects pick of its page).</summary>
+    public bool EffectsPick;
+
+    /// <summary>
+    /// A pickaxe's own effects (its weapon definition's trail, swing and idle effects) under its mesh,
+    /// each as its effect (Effect): the swing's and the idle's on their sockets, the trail told the two
+    /// sockets it runs between. In Blender they sit on the pickaxe's armature and read its sockets.
+    /// </summary>
+    public void PickaxeEffects(UObject weaponDefinition, List<ExportMesh> meshes)
+    {
+        if (meshes.FirstOrDefault() is not { } mesh) return;
+        foreach (var (property, name, socketProperty) in Effects.PickaxeEffects)
+        {
+            try
+            {
+                var path = weaponDefinition.GetDataListItem<FSoftObjectPath>(property);
+                if (!Effects.Named(path.AssetPathName) || !path.TryLoad(out UObject? system)) continue;
+                if (Effect(system) is not MaterialPorterMesh effect) continue;
+                var node = effect.MPEffect ??= new Dictionary<string, object> { ["Kind"] = "System" };
+                node["Role"] = name;
+                if (socketProperty is not null)
+                {
+                    var socket = weaponDefinition.GetDataListItem<FName>(socketProperty);
+                    if (Effects.Named(socket)) effect.MPParentBone = socket.Text;
+                }
+                else
+                {
+                    var sockets = new[] { Effects.TrailFirstSocket, Effects.TrailSecondSocket }
+                        .Select(p => weaponDefinition.GetDataListItem<FName>(p)).Where(Effects.Named).Select(s => s.Text).ToArray();
+                    if (sockets.Length > 0) node["Sockets"] = sockets;
+                }
+                mesh.Children.Add(effect);
+            }
+            catch (Exception e)
+            {
+                Serilog.Log.Warning("[Material Porter] {Weapon}: its {Effect} effect wasn't read ({Error})", weaponDefinition.Name, name, e.Message);
+            }
+        }
+    }
+
     public ExportMesh Effect(UObject system)
     {
         var emitters = Effects.Emitters(system);

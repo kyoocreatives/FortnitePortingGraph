@@ -27,9 +27,10 @@ from . import effects, niagara
 
 GROUP = "MP Effect Particles"
 RIBBONS = "MP Effect Ribbons"
-GROUP_VERSION = 4
+GROUP_VERSION = 7
 # how a particle's piece is turned (the modifier's Turn): as the renderer says
 TURN_OWN, TURN_CAMERA, TURN_CAMERA_VELOCITY, TURN_FACING, TURN_MESH_VELOCITY, TURN_MESH_CAMERA = range(6)
+FACINGS = "What a ribbon's width runs across: 0: the view (it faces the camera); 1: each particle's facing; "           "2: along each particle's side vector (a trail between two sockets)"
 TURNS = "0: the particle's own rotation (a mesh); 1: a sprite facing the camera; 2: a sprite facing the camera, its length " \
         "along the velocity; 3: a sprite facing the particle's own direction; 4: a mesh, its X axis along the velocity; " \
         "5: a mesh, its X axis to the camera"
@@ -37,6 +38,7 @@ MOST_POINTS = 2_000_000     # over all frames, per effect
 KEY_PROGRAM = "mp_effect_program"   # on an effect's empty: the text that keeps what its replay takes
 KEY_SCALE = "mp_effect_scale"       # and the import's scale (Blender units per UE unit)
 KEY_ROOT = "mp_effect_root"         # on a particles object: its effect's empty
+KEY_SOCKETS = "mp_effect_sockets"   # on a pickaxe's trail's empty: the two sockets it runs between ("a,b")
 KEY_START = "Start Frame"           # on an effect's empty: the scene frame its replay starts on (the user's to set)
 
 
@@ -68,7 +70,8 @@ def _ue(matrix, scale):
 
 
 def roots(objects):
-    """The effects among the objects: each one's empty, from itself, a piece or its particles."""
+    """The effects among the objects: each one's empty, from itself, a piece or its particles; with
+    none, the effects on the objects (a pickaxe's own, a character's contrail)."""
     found = []
     for obj in objects:
         at = obj.get(KEY_ROOT) if obj.get(effects.KEY) == "Particles" else obj
@@ -76,6 +79,9 @@ def roots(objects):
             at = at.parent
         if at is not None and at.get(KEY_PROGRAM) and at not in found:
             found.append(at)
+    if not found:
+        for obj in objects:
+            found += [c for c in obj.children_recursive if c.get(effects.KEY) == "System" and c.get(KEY_PROGRAM) and c not in found]
     return found
 
 
@@ -103,31 +109,48 @@ def _moves(root):
     return root.parent is not None or root.animation_data is not None
 
 
+def _animated(root):
+    """Whether anything could move the effect or its armature's bones from frame to frame."""
+    at = root
+    while at is not None:
+        data = at.animation_data
+        if data is not None and (data.action is not None or len(data.nla_tracks) or len(data.drivers)):
+            return True
+        if len(at.constraints) or (at.type == 'ARMATURE' and any(len(b.constraints) for b in at.pose.bones)):
+            return True
+        at = at.parent
+    return False
+
+
 class Stand:
     """Where the effect and its character stand, frame by frame: the effect's empty's transform,
     the armature's, and the bones and sockets the effect's scripts read."""
 
     def __init__(self, scene, root, rig, reads, scale):
         self.scene, self.root, self.rig, self.scale = scene, root, rig, scale
+        self.still = None if _animated(root) else False     # unmoving: one frame's stand serves them all
         self.bones = {}
         if rig is not None:
             by_name = {b.name.lower(): b for b in rig.pose.bones}
             self.bones = {name: by_name[name] for name in reads if name in by_name}
-        self.missing = sorted(name for name in reads if name not in self.bones) if rig is not None else []
 
     def at(self, frame):
         """(the owner's matrix, the character's, its pose) on a scene frame, in UE's terms."""
-        self.scene.frame_set(frame)
+        if self.still:
+            return self.still
+        if self.still is None:
+            self.scene.frame_set(frame)
         bpy.context.view_layer.update()
         owner = _ue(self.root.matrix_world, self.scale)
-        if self.rig is None:
-            return owner, owner, {}
         pose = {}
         for name, bone in self.bones.items():
             m = _ue(bone.matrix, self.scale)
             rows = m[:3, :3]
             pose[name] = (m[3, :3].copy(), niagara._quaternion(rows / np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), 1e-9)))
-        return owner, _ue(self.rig.matrix_world, self.scale), pose
+        stand = (owner, _ue(self.rig.matrix_world, self.scale) if self.rig is not None else owner, pose)
+        if self.still is False:
+            self.still = stand
+        return stand
 
 
 def _between(a, b, t):
@@ -420,7 +443,8 @@ def ribbons():
     face.new_socket(name="Start Frame", in_out='INPUT', socket_type='NodeSocketInt', description="The scene frame the effect starts on").default_value = 1
     face.new_socket(name="Frames", in_out='INPUT', socket_type='NodeSocketInt', description="How many frames were replayed").default_value = 1
     face.new_socket(name="Loop", in_out='INPUT', socket_type='NodeSocketBool', description="Start over after the last replayed frame")
-    face.new_socket(name="Face Camera", in_out='INPUT', socket_type='NodeSocketBool', description="The ribbon's face turned to the scene camera (else to each particle's own facing)").default_value = True
+    facing = face.new_socket(name="Facing", in_out='INPUT', socket_type='NodeSocketInt', description=FACINGS)
+    facing.min_value, facing.max_value = 0, 2
 
     nodes, links = g.nodes, g.links
     column = [0]
@@ -487,11 +511,16 @@ def ribbons():
     camera = node("GeometryNodeObjectInfo", transform_space='RELATIVE')
     links.new(node("GeometryNodeInputActiveCamera").outputs[0], camera.inputs["Object"])
     toward = vector('SUBTRACT', camera.outputs["Location"], node("GeometryNodeInputPosition").outputs[0])
-    facing = node("GeometryNodeSwitch", input_type='VECTOR')
-    links.new(inputs.outputs["Face Camera"], facing.inputs["Switch"])
-    links.new(attribute("mp_facing", 'FLOAT_VECTOR'), facing.inputs["False"])
-    links.new(toward, facing.inputs["True"])
-    side = vector('NORMALIZE', vector('CROSS_PRODUCT', node("GeometryNodeInputTangent").outputs[0], facing.outputs[0]))
+    tangent = node("GeometryNodeInputTangent").outputs[0]
+    own = attribute("mp_facing", 'FLOAT_VECTOR')
+    facing = node("GeometryNodeIndexSwitch", data_type='VECTOR')
+    while len(facing.index_switch_items) < 3:
+        facing.index_switch_items.new()
+    links.new(inputs.outputs["Facing"], facing.inputs["Index"])
+    links.new(vector('CROSS_PRODUCT', tangent, toward), facing.inputs[1])      # across the view
+    links.new(vector('CROSS_PRODUCT', tangent, own), facing.inputs[2])         # across the particles' facing
+    links.new(own, facing.inputs[3])                                           # along the particles' side vector
+    side = vector('NORMALIZE', facing.outputs[0])
     turned = node("GeometryNodeSetCurveNormal")
     links.new(wide.outputs[0], turned.inputs["Curve"])
     if "Mode" in turned.inputs:
@@ -504,26 +533,30 @@ def ribbons():
     along = node("GeometryNodeCaptureAttribute", domain='POINT')
     along.capture_items.new('FLOAT', "U")
     links.new(turned.outputs[0], along.inputs[0])
-    links.new(node("GeometryNodeSplineParameter").outputs["Factor"], along.inputs[1])
+    links.new(node("GeometryNodeSplineParameter").outputs["Factor"], along.inputs["U"])
     profile = node("GeometryNodeCurvePrimitiveLine")
     profile.inputs["Start"].default_value = (-0.5, 0.0, 0.0)
     profile.inputs["End"].default_value = (0.5, 0.0, 0.0)
     across = node("GeometryNodeCaptureAttribute", domain='POINT')
     across.capture_items.new('FLOAT', "V")
     links.new(profile.outputs[0], across.inputs[0])
-    links.new(node("GeometryNodeSplineParameter").outputs["Factor"], across.inputs[1])
+    links.new(node("GeometryNodeSplineParameter").outputs["Factor"], across.inputs["V"])
     ribbon = node("GeometryNodeCurveToMesh")
     links.new(along.outputs[0], ribbon.inputs["Curve"])
     links.new(across.outputs[0], ribbon.inputs["Profile Curve"])
     if "Scale" in ribbon.inputs:        # Blender 5: the profile's scale is the node's own input, not the curve's radius
         links.new(width, ribbon.inputs["Scale"])
     uv = node("ShaderNodeCombineXYZ")
-    links.new(along.outputs[1], uv.inputs[0])
-    links.new(across.outputs[1], uv.inputs[1])
-    mapped = node("GeometryNodeStoreNamedAttribute", data_type='FLOAT2', domain='CORNER')
-    mapped.inputs["Name"].default_value = "UV0"
-    links.new(ribbon.outputs[0], mapped.inputs[0])
-    links.new(uv.outputs[0], mapped.inputs["Value"])
+    links.new(along.outputs["U"], uv.inputs[0])
+    links.new(across.outputs["V"], uv.inputs[1])
+    # (a ribbon has two UV sets, both laid along it unless the renderer says otherwise: a trail's fades read the second)
+    mapped = ribbon
+    for name in ("UV0", "UV1"):
+        store = node("GeometryNodeStoreNamedAttribute", data_type='FLOAT2', domain='CORNER')
+        store.inputs["Name"].default_value = name
+        links.new(mapped.outputs[0], store.inputs[0])
+        links.new(uv.outputs[0], store.inputs["Value"])
+        mapped = store
     material = node("GeometryNodeSetMaterial")
     links.new(mapped.outputs[0], material.inputs[0])
     links.new(inputs.outputs["Material"], material.inputs["Material"])
@@ -576,6 +609,12 @@ def _user(root, system):
         system.set_user(name, list(value) if hasattr(value, "__len__") else value)
 
 
+def _title(root):
+    """An effect as the log names it: a pickaxe's own with what it is."""
+    role = root.get(effects.KEY_ROLE)
+    return "%s (%s)" % (root.name, role) if role else root.name
+
+
 def play(root):
     """Replay the effect under the root (its emitters' empties, their pieces) over the scene's frame
     range, and make its pieces play. An effect under an armature reads that character's bones and
@@ -589,7 +628,7 @@ def play(root):
     scale = float(root.get(KEY_SCALE, 0.01))
     scene = bpy.context.scene
     clear(root)
-    system = niagara.System(exports, fields=fields)
+    system = niagara.System(exports, fields=fields, sockets=[s for s in str(root.get(KEY_SOCKETS) or "").split(",") if s])
     _user(root, system)
     rig = rig_of(root)
     fps = scene.render.fps / scene.render.fps_base
@@ -645,7 +684,8 @@ def play(root):
             _set(modifier, tree, "Frames", len(track.frames))
             if kind == "Ribbon":
                 _set(modifier, tree, "Material", piece.material_slots[0].material if piece.material_slots else None)
-                _set(modifier, tree, "Face Camera", "Custom" not in str(renderer.get("FacingMode")))
+                facing = str(renderer.get("FacingMode"))
+                _set(modifier, tree, "Facing", 2 if "CustomSideVector" in facing else 1 if "Custom" in facing else 0)
                 piece.hide_render = True
                 piece.hide_viewport = True
                 drawn += 1
@@ -671,24 +711,33 @@ def play(root):
             played.append(emitter.name)
             most = max(most, int(track.counts.max()))
             length = max(length, len(track.frames))
-    if played:
+    # an effect on something (a character's contrail, a pickaxe's own): what isn't played is put out of sight
+    worn = rig is not None or bool(root.get(effects.KEY_ROLE))
+    if played or worn:
         # the emitters left as pieces: in a row beside the effect, 2 m apart
         left = [node for node in root.children if node.get(effects.KEY_EMITTER) and node.get(effects.KEY_EMITTER) not in played]
         for at, node in enumerate(left):
-            node.location = (0.0, -200.0 * (at + 1) * scale, 0.0)
+            node.location = (0.0, 0.0, 0.0) if worn else (0.0, -200.0 * (at + 1) * scale, 0.0)
+            for piece in node.children if worn else ():
+                piece.hide_render = piece.hide_viewport = True
+    if played:
         yield "%s: %s played over %d frames from frame %d (%d particles at most)%s" % (
-            root.name, ", ".join(played), length, start, most, ", on %s" % rig.name if rig is not None else "")
+            _title(root), ", ".join(played), length, start, most, ", on %s" % rig.name if rig is not None else "")
+        if root.get(effects.KEY_ROLE) in ("trail", "swing") and stand is not None and stand.still:
+            yield "%s: a pickaxe's %s shows on a swing: animate it, set the effect's Start Frame on the swing, then Replay Effect" % (
+                _title(root), root[effects.KEY_ROLE])
     approximate = [name for name in played if name in system.approximate]
     if approximate:
         yield "%s: %s: stateless emitters, played from their settings (the engine's random draws apart)" % (root.name, ", ".join(approximate))
     idle = [e.name for e in system.emitters if e.name not in played and not sum(f[0].shape[1] for f in tracks.get(e.name) or [])]
     if idle:
-        yield "%s: %s spawned nothing in the replay (waiting on something the game sets, or on an emitter left out): left as pieces" % (root.name, ", ".join(idle))
+        yield "%s: %s spawned nothing in the replay (waiting on something the game sets, or on an emitter left out): %s" % (
+            root.name, ", ".join(idle), "hidden" if worn else "left as pieces")
     if system.reads and rig is None:
         yield "%s: reads a character's bones or sockets (%s): with none, each sits at the effect's origin. Select the effect and an armature, then Replay Effect" % (
             root.name, ", ".join(sorted(system.reads)[:6]))
-    elif stand is not None and stand.missing:
-        yield "%s: %s has no bone or socket named %s: each sits at its origin" % (root.name, rig.name, ", ".join(stand.missing[:8]))
+    elif rig is not None and system.unresolved():
+        yield "%s: %s has no bone or socket named %s: each sits at its origin" % (root.name, rig.name, ", ".join(system.unresolved()[:8]))
     left = ["%s (%s)" % s for s in system.skipped]
     if left:
-        yield "%s: left as pieces: %s" % (root.name, ", ".join(left))
+        yield "%s: %s: %s" % (root.name, "not played, their pieces hidden" if worn else "left as pieces", ", ".join(left))

@@ -16,10 +16,12 @@ frame), mp_age. On a still piece they are the object's properties, to set by han
 one, each particle's own (its instance's attributes).
 """
 import bpy
+from mathutils import Matrix
 
 KEY = "mp_effect"           # on an effect's objects: "System", "Emitter (GPU)", "Sprite", "Mesh"...
 KEY_EMITTER = "mp_emitter"  # on an emitter's empty: the emitter's name
 KEY_RENDERER = "mp_renderer"    # on a drawn piece: its renderer's name in the asset
+KEY_ROLE = "mp_effect_role"     # on a pickaxe's own effect's empty: "trail", "swing" or "idle"
 
 
 def particle_values(obj):
@@ -83,15 +85,38 @@ def tag_mesh(obj, fx):
     obj.visible_shadow = False
 
 
+def on_bone(obj, bone):
+    """Put an object on a bone (a socket) of the armature it is under: at the bone, following it."""
+    armature = obj.parent
+    if armature is None or armature.type != 'ARMATURE':
+        return
+    rest = next((b for b in armature.data.bones if b.name.lower() == bone.lower()), None)
+    if rest is None:
+        return
+    obj.parent_type = 'BONE'
+    obj.parent_bone = rest.name
+    obj.matrix_parent_inverse = Matrix.Identity(4)
+    obj.matrix_basis = Matrix.Translation((0.0, -rest.length, 0.0))     # a bone's children hang from its tail
+
+
 def finish(context, mesh, root):
     """Once a system's tree is imported: its CPU emitters replayed, their pieces played on the particles."""
     fx = mesh.get("MPEffect") or {}
-    if fx.get("Kind") != "System" or not fx.get("Exports"):
+    if fx.get("Kind") != "System":
+        return
+    # a pickaxe's own effect: on its socket, and named for what it is
+    if bone := mesh.get("MPParentBone"):
+        on_bone(root, bone)
+    if role := fx.get("Role"):
+        root[KEY_ROLE] = role
+    if not fx.get("Exports"):
         return
     from . import effect_replay
     from .hook import _log
     try:
         effect_replay.store(root, fx["Exports"], fx.get("Fields"), context.scale)
+        if fx.get("Sockets"):       # the two sockets a pickaxe's trail runs between
+            root[effect_replay.KEY_SOCKETS] = ",".join(fx["Sockets"])
         for name, value in (fx.get("User") or {}).items():
             root[name] = value
         # a contrail goes on the character: the armature selected when it was sent

@@ -380,7 +380,17 @@ class Skeleton:
         self.sockets = [str(b) for b in props.get("FilteredSockets") or []]
         self.names = self.bones + self.sockets
         system.reads.update(n.lower() for n in self.names)
+        system.reads.update(system.sockets)
         self.cached = None
+
+    def held(self, pose, index):
+        """A bone's or socket's (position, rotation) in a pose; a socket without its own name there: the one the game points it at."""
+        name = self.names[index].lower()
+        at = index - len(self.bones)
+        found = pose.get(name)
+        if found is None and 0 <= at < len(self.system.sockets):
+            found = pose.get(self.system.sockets[at])
+        return found
 
     def tables(self):
         """The bones' positions and rotations now and a tick ago: in the character's space, and in the world."""
@@ -389,7 +399,7 @@ class Skeleton:
             return self.cached[1]
         built = []
         for pose, component in ((system.pose, system.component), (system.pose_before, system.component_before)):
-            held = [pose.get(n.lower()) for n in self.names] or [None]
+            held = [self.held(pose, i) for i in range(len(self.names))] or [None]
             position = np.array([h[0] if h else (0.0, 0.0, 0.0) for h in held], np.float64)
             rotation = np.array([h[1] if h else (0.0, 0.0, 0.0, 1.0) for h in held], np.float64)
             rows = component[:3, :3]
@@ -776,10 +786,13 @@ class Emitter:
 class System:
     """A Niagara system, ticked. exports: the package's exports; fields: the vector fields they
     sample, by package (both as the app exports them). user: {parameter name: floats} over the
-    asset's own. strict: an emitter's script failing raises (tests) instead of leaving the emitter out."""
+    asset's own. sockets: the sockets a trail's filtered sockets stand for. strict: an emitter's script failing raises (tests) instead of leaving the emitter out."""
 
-    def __init__(self, exports, seed=1, user=None, strict=False, fields=None):
+    def __init__(self, exports, seed=1, user=None, strict=False, fields=None, sockets=None):
         self.exports, self.strict = exports, strict
+        # the sockets the game points a trail at (a pickaxe's first and second): what its filtered sockets,
+        # in their order, stand for where the character has none of their own names
+        self.sockets = [str(s).lower() for s in sockets or []]
         self.fields = fields or {}  # the vector fields its scripts sample, by package
         self.interfaces = {}        # export index: its data interface (one for all the scripts that call it)
         # the character the effect sits on: the bones and sockets its scripts read (lower case), and where each
@@ -847,6 +860,14 @@ class System:
         for e in self.emitters:
             for h in e.handlers:
                 h.source = next((o for o in self.emitters if o.id == h.source_id), None)
+
+    def unresolved(self):
+        """The bones and sockets its scripts read that the character's pose doesn't have."""
+        names = set()
+        for interface in self.interfaces.values():
+            if isinstance(interface, Skeleton):
+                names.update(interface.names[i] for i in range(len(interface.names)) if interface.held(self.pose, i) is None)
+        return sorted(names)
 
     def users(self):
         """The system's user parameters a number or a few say: [(name, type, value)]."""
