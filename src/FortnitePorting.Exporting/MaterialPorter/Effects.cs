@@ -40,7 +40,25 @@ public static class Effects
 
     /// <summary>Which of its own effects a pickaxe's weapon definition has: "trail", "swing", "idle".</summary>
     public static List<string> PickaxeEffectNames(UObject weaponDefinition) =>
-        PickaxeEffects.Where(e => Named(weaponDefinition.GetDataListItem<FSoftObjectPath>(e.Property).AssetPathName)).Select(e => e.Name).ToList();
+        PickaxeEffects.Where(e => Named(weaponDefinition.GetDataListItem<FSoftObjectPath>(e.Property).AssetPathName)).Select(e => e.Name)
+            .Concat(PickaxeImpacts(weaponDefinition).Count > 0 ? ["impact"] : []).ToList();
+
+    /// <summary>A weapon definition's hit effects: each system with the surfaces it is for (most have one for all, Default).</summary>
+    public static List<(FSoftObjectPath System, List<string> Surfaces)> PickaxeImpacts(UObject weaponDefinition)
+    {
+        var found = new List<(FSoftObjectPath, List<string>)>();
+        if (weaponDefinition.GetDataListItem<global::CUE4Parse.UE4.Assets.Objects.UScriptMap>("ImpactNiagaraPhysicalSurfaceEffectsMap") is not { } map) return found;
+        foreach (var (key, value) in map.Properties)
+        {
+            if (value?.GetValue(typeof(FSoftObjectPath)) is not FSoftObjectPath path || !Named(path.AssetPathName)) continue;
+            var surface = key.GenericValue?.ToString() ?? "";
+            surface = surface[(surface.LastIndexOf(':') + 1)..].Replace("SurfaceType_", "");
+            var at = found.FindIndex(f => f.Item1.AssetPathName == path.AssetPathName);
+            if (at < 0) found.Add((path, [surface]));
+            else found[at].Item2.Add(surface);
+        }
+        return found;
+    }
 
     public const string PartEffect = "IdleEffectNiagara", PartSocket = "IdleFXSocketName";
 

@@ -933,7 +933,7 @@ def play(root):
     frames = max(1, scene.frame_end - start + 1)
     # looping, but for one timed by an animation or played on a swing or an event
     if KEY_LOOP not in root:
-        root[KEY_LOOP] = not root.get(KEY_REPEATS) and root.get(effects.KEY_ROLE) not in ("trail", "swing", "event")
+        root[KEY_LOOP] = not root.get(KEY_REPEATS) and root.get(effects.KEY_ROLE) not in ("trail", "swing", "event", "impact")
     loop = bool(root[KEY_LOOP])
     stand = Stand(scene, root, rig, system.reads, scale, table) if _moves(root) else None
     camera = _camera(scene, root, scale, stand is not None)

@@ -87,7 +87,9 @@ public partial class ExportContext
 
     /// <summary>
     /// A pickaxe's own effects (its weapon definition's trail, swing and idle effects): the swing's and
-    /// the idle's on their sockets, the trail told the two sockets it runs between.
+    /// the idle's on their sockets, the trail told the two sockets it runs between. Its hit effects
+    /// ("impact": what a swing leaves where it hits, a system a surface) sit at its trail's far socket
+    /// (the head, where it hits), unplayed until a swing's hits or Replay Effect.
     /// </summary>
     public void PickaxeEffects(UObject weaponDefinition, List<ExportMesh> meshes)
     {
@@ -108,6 +110,21 @@ public partial class ExportContext
             {
                 Serilog.Log.Warning("[Material Porter] {Weapon}: its {Effect} effect wasn't read ({Error})", weaponDefinition.Name, name, e.Message);
             }
+        }
+        try
+        {
+            var head = new[] { Effects.TrailSecondSocket, Effects.TrailFirstSocket, "SwingFXSocketName" }
+                .Select(p => weaponDefinition.GetDataListItem<FName>(p)).FirstOrDefault(Effects.Named);
+            foreach (var (path, surfaces) in Effects.PickaxeImpacts(weaponDefinition))
+            {
+                if (!path.TryLoad(out UObject? system)) continue;
+                if (OwnEffect(mesh, system, "impact", Effects.Named(head) ? head.Text : null) is { MPEffect: { } node })
+                    node["Surfaces"] = surfaces;
+            }
+        }
+        catch (Exception e)
+        {
+            Serilog.Log.Warning("[Material Porter] {Weapon}: its hit effects weren't read ({Error})", weaponDefinition.Name, e.Message);
         }
     }
 

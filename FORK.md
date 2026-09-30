@@ -287,7 +287,15 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     `GetTime`). Imported onto a character, the windows go to the trail and swing effects of the
     pickaxe under its armature (`effects.swing`; with none there, to every pickaxe trail in the
     scene), which are replayed once per swing. The held pickaxe's idle effect is replayed too (its
-    world-space particles were left where the pickaxe was when it was imported).
+    world-space particles were left where the pickaxe was when it was imported). A pickaxe the
+    armature doesn't hold yet, the scene's only one, is put in its hand first (on `weapon_r`, else
+    `hand_r`), so: import the outfit, the pickaxe with its effects, then the swing onto the outfit.
+  - **Hits.** A pickaxe's hit effects (its weapon definition's `ImpactNiagaraPhysicalSurfaceEffectsMap`:
+    a system a surface, most one for all - Default) come with its effects (role "impact"), at its
+    trail's far socket (the head), unplayed. A swing's hits are its `FortAnimNotify_TriggerGameplayAbility`
+    notifies (the melee ability each swing triggers: `AnimExport.MPHits`); the held pickaxe's hit
+    effects play at each (the harvesting combo: 4 swings, 4 hits). Replay Effect plays one from its
+    Start Frame. Hit effects and events don't loop.
   - **Ribbons.** A ribbon's width runs across the view, the particles' facing, or along their side
     vector (a trail between two sockets), as the renderer says (the modifier's Facing). Its two UV
     sets are laid along it as the renderer's `UV0Settings` / `UV1Settings` say (`_ribbon_uv`: over

@@ -327,10 +327,10 @@ class AnimImportContext:
                 master_skeleton.hide_set(True)
             effects.from_animation(self, data.get("MPEffects"), target_skeleton, data.get("MPSockets"), master_skeleton)
 
-        # Material Porter fork: a swing's trail windows, given to the trails of the pickaxe the armature holds
-        if data.get("MPTrails"):
+        # Material Porter fork: a swing's trail windows and hits, given to the effects of the pickaxe the armature holds
+        if data.get("MPTrails") or data.get("MPHits"):
             from ...material_porter import effects
-            effects.swing(data.get("MPTrails"), target_skeleton)
+            effects.swing(data.get("MPTrails") or [], target_skeleton, data.get("MPHits") or [])
 
     def import_anim(self, path: str, override_skeleton=None) -> tuple[bpy.types.Action, AnimDto]:
         path = path[1:] if path.startswith("/") else path

@@ -34,6 +34,8 @@ public class AnimExport : BaseExport
     public readonly Dictionary<string, MaterialPorter.ExportSocket> MPSockets = new(StringComparer.OrdinalIgnoreCase);
     // and when a swing turns the held pickaxe's trails on and off: [on, off] times (its MeleeAnimTrails notifies)
     public List<float[]> MPTrails = [];
+    // and when its swings hit (the melee ability each one triggers): times, for the pickaxe's hit effects
+    public List<float> MPHits = [];
     private readonly List<float> _trailsOn = [], _trailsOff = [];
     private readonly HashSet<FAnimNotifyEvent> _effectNotifies = [];
     private readonly Dictionary<string, MaterialPorter.ExportAnimEffect> _effects = [];
@@ -186,6 +188,11 @@ public class AnimExport : BaseExport
             var timed = notify.NotifyStateClass?.Load<UObject>();
             var played = timed ?? notify.Notify?.Load<UObject>();
             // a swing's trail switch
+            if (played?.ExportType is "FortAnimNotify_TriggerGameplayAbility")
+            {
+                MPHits = MPHits.Append(sectionTime + notify.GetTime()).Distinct().OrderBy(t => t).ToList();
+                return;
+            }
             if (played?.ExportType is "FortAnimNotify_MeleeAnimTrails_On" or "FortAnimNotify_MeleeAnimTrails_Off")
             {
                 (played.ExportType.EndsWith("_On") ? _trailsOn : _trailsOff).Add(sectionTime + notify.GetTime());

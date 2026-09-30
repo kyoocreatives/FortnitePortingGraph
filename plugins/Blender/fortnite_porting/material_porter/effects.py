@@ -182,37 +182,79 @@ def from_animation(context, entries, rig, sockets=None, skeleton=None):
         context.import_model(mesh)
 
 
-def swing(windows, rig):
-    """A swing animation's trail windows ([on, off] times) given to the pickaxe effects that show on
-    a swing (a pickaxe's own trail and swing effects: on the armature's pickaxe, else any in the
-    scene), which are replayed on them."""
+PICKAXE_ROLES = ("trail", "swing", "idle", "impact")
+
+
+def _hold(rig):
+    """The pickaxe the armature is to swing, put in its hand (on weapon_r, else hand_r, as the game
+    holds it) when the scene has one pickaxe not held yet: its topmost object. None if there is
+    none, or several."""
+    tops = set()
+    for o in bpy.context.scene.objects:
+        if o.get(KEY) == "System" and o.get(KEY_ROLE) in PICKAXE_ROLES:
+            top = o
+            while top.parent is not None:
+                top = top.parent
+            tops.add(top)
+    loose = [t for t in tops if t is not rig]
+    if len(loose) != 1:
+        return None
+    hand = next((b for b in rig.data.bones if b.name.lower() == "weapon_r"), None) or         next((b for b in rig.data.bones if b.name.lower() == "hand_r"), None)
+    if hand is None:
+        return None
+    axe = loose[0]
+    axe.parent, axe.parent_type, axe.parent_bone = rig, 'BONE', hand.name
+    axe.matrix_parent_inverse = Matrix.Identity(4)
+    # (a bone child sits at the bone's tail: back to its head, where the hand grips)
+    axe.matrix_basis = Matrix.Translation((0.0, -hand.length, 0.0))
+    return axe
+
+
+def swing(windows, rig, hits=()):
+    """A swing animation's trail windows ([on, off] times) and hits (times) given to the effects of
+    the pickaxe the armature holds (put in its hand first when the scene has one that isn't held):
+    its trail and swing effects play in each window, its hit effects at each hit; all replayed on
+    it (its idle effect too: it moves now). Without a held pickaxe: every pickaxe's in the scene,
+    where they are."""
     from . import effect_replay
     from .hook import _log
     from ..processing.utils import time_to_frame
-    held = [o for o in rig.children_recursive if o.get(KEY) == "System" and o.get(KEY_ROLE) in ("trail", "swing")]
-    found = held or [o for o in bpy.context.scene.objects if o.get(KEY) == "System" and o.get(KEY_ROLE) in ("trail", "swing")]
-    if not found:
-        return
-    frames = sorted((time_to_frame(on), time_to_frame(off)) for on, off in windows)
-    for root in found:
-        root[effect_replay.KEY_START] = frames[0][0]
-        root[effect_replay.KEY_REPEATS] = [on - frames[0][0] for on, _ in frames]
-        root[effect_replay.KEY_LENGTHS] = [max(off - on, 1) for on, off in frames]
+
+    def under(roles):
+        return [o for o in rig.children_recursive if o.get(KEY) == "System" and o.get(KEY_ROLE) in roles]
+    if not under(PICKAXE_ROLES) and (axe := _hold(rig)) is not None:
+        _log("%s put in %s's hand for the swing" % (axe.name, rig.name))
+    held = bool(under(PICKAXE_ROLES))
+    everywhere = [o for o in bpy.context.scene.objects if o.get(KEY) == "System"]
+
+    def replay(root):
         try:
             for line in effect_replay.play(root):
                 _log(line)
         except Exception as e:
             _log("%s: not replayed on the swing (%s: %s)" % (root.name, type(e).__name__, e))
-    _log("the swing's %d trail window(s) given to %s%s" % (len(frames), ", ".join(o.name for o in found),
-                                                        "" if held else " (no pickaxe under the armature: every pickaxe trail in the scene)"))
-    # the held pickaxe's idle effect now moves with the swing: played again on it (its particles were
-    # left where the pickaxe was when it was imported)
-    for root in [o for o in rig.children_recursive if o.get(KEY) == "System" and o.get(KEY_ROLE) == "idle"] if held else []:
-        try:
-            for line in effect_replay.play(root):
-                _log(line)
-        except Exception as e:
-            _log("%s: not replayed on the swing (%s: %s)" % (root.name, type(e).__name__, e))
+
+    trails = under(("trail", "swing")) if held else [o for o in everywhere if o.get(KEY_ROLE) in ("trail", "swing")]
+    if windows and trails:
+        frames = sorted((time_to_frame(on), time_to_frame(off)) for on, off in windows)
+        for root in trails:
+            root[effect_replay.KEY_START] = frames[0][0]
+            root[effect_replay.KEY_REPEATS] = [on - frames[0][0] for on, _ in frames]
+            root[effect_replay.KEY_LENGTHS] = [max(off - on, 1) for on, off in frames]
+            replay(root)
+        _log("the swing's %d trail window(s) given to %s%s" % (len(frames), ", ".join(o.name for o in trails),
+                                                            "" if held else " (no pickaxe held: every pickaxe trail in the scene)"))
+    impacts = under(("impact",)) if held else [o for o in everywhere if o.get(KEY_ROLE) == "impact"]
+    if hits and impacts:
+        frames = sorted({time_to_frame(t) for t in hits})
+        for root in impacts:
+            root[effect_replay.KEY_START] = frames[0]
+            root[effect_replay.KEY_REPEATS] = [f - frames[0] for f in frames]
+            root[effect_replay.KEY_LENGTHS] = []
+            replay(root)
+        _log("the swing's %d hit(s) given to %s" % (len(frames), ", ".join(o.name for o in impacts)))
+    for root in under(("idle",)) if held else []:
+        replay(root)
 
 
 def finish(context, mesh, root):
@@ -275,12 +317,15 @@ def finish(context, mesh, root):
             root[effect_replay.KEY_SOCKETS] = ",".join(fx["Sockets"])
         for name, value in (fx.get("User") or {}).items():
             root[name] = value
-        if fx.get("Role") == "event":
-            # one the game plays on an event (a weapon's reload, its level up): it waits for Replay Effect
+        if fx.get("Role") in ("event", "impact"):
+            # one the game plays on an event (a weapon's reload, its level up) or where a swing hits: it
+            # waits for a swing animation's hits or Replay Effect
             for node in root.children:
                 for piece in node.children:
                     piece.hide_render = piece.hide_viewport = True
-            _log("%s: the game plays it on an event: select it and press Replay Effect to play it (from its Start Frame)" % root.name)
+            _log("%s: %s: select it and press Replay Effect to play it (from its Start Frame)" % (
+                root.name, "a hit's effect (%s): a swing animation on the character holding the pickaxe plays it at each hit" % ", ".join(fx.get("Surfaces") or ["Default"])
+                if fx.get("Role") == "impact" else "the game plays it on an event"))
             return
         for line in effect_replay.play(root):
             _log(line)
