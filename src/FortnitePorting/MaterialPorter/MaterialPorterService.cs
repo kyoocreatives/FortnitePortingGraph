@@ -80,6 +80,18 @@ public class MaterialPorterService : IService
             _bridge.Extra = ExtraRouteAsync;
             _bridge.Start(Port);
             Log.Information("[Material Porter] exact materials served on localhost:{Port} ({Build})", Port, Game.BuildVersion);
+            // exact materials are translated from the masters' editor graphs (<master>.o.uasset), which only an
+            // install with Unreal Editor for Fortnite has (its editor data, about 5 GB in the game's Paks): say so
+            // once, rather than every material coming out approximated
+            _ = Task.Run(() =>
+            {
+                if (provider.Files.Keys.Any(k => k.EndsWith(".o.uasset", StringComparison.OrdinalIgnoreCase))) return;
+                Log.Warning("[Material Porter] no editor graphs in this install: materials are approximated (install Unreal Editor for Fortnite)");
+                Avalonia.Threading.Dispatcher.UIThread.Post(() => AppServices.Info.Message("Exact materials need UEFN",
+                    "This Fortnite install has no editor data, so materials are approximated. Install Unreal Editor for Fortnite " +
+                    "from the Epic Games Launcher (it adds its editor data to the game's folder), then restart the app.",
+                    FluentAvalonia.UI.Controls.InfoBarSeverity.Warning, autoClose: false));
+            });
         }
         catch (Exception e)
         {
