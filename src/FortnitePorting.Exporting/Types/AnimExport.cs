@@ -268,7 +268,8 @@ public class AnimExport : BaseExport
                     Sounds.Add(new ExportSound
                     {
                         Path = Context.Export(sound.SoundWave.Load<USoundWave>()),
-                        Time = sound.Time + notify.LinkValue ,
+                        // Material Porter fork: the notify's own time (one linked from its segment's start: LinkValue alone is early)
+                        Time = sound.Time + notify.GetTime(),
                         Loop = sound.Loop
                     });
                 }

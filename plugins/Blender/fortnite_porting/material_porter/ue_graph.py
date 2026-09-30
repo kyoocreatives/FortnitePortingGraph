@@ -391,6 +391,8 @@ CUSTOM_SNIPPETS = {
     "Texture2DSample(Tex, GetMaterialSharedSampler(TexSampler, View_MaterialTextureBilinearWrapedSampler), UVs)); } "
     "return Normal;": "custom_conditional_normal",
     "float2 box = step(float2(0, 0), uv) - step(float2(1,1), uv); return (box.x * box.y) * color;": "custom_uv_box",
+    # the post-process ambient cubemap's tint (GetAmbientCubemapTint): none is set, the view keeps the default
+    "View.AmbientCubemapTint": "custom_white4",
 }
 
 
@@ -2740,6 +2742,9 @@ class Translator:
 
     def custom_one(self, ins, p):
         return self.const(1.0)
+
+    def custom_white4(self, ins, p):
+        return self.with_alpha(self.const((1.0, 1.0, 1.0), 3), self.const(1.0))
 
     def custom_dither5(self, ins, p):
         # Mod((uint)p.x + 2 * (uint)p.y, 5): pixel coordinates are positive,
