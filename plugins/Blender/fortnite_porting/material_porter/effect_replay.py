@@ -7,10 +7,19 @@ and puts the piece (the sprite's plane, the mesh renderer's mesh) on each: turne
 or along its velocity as the renderer says, sized, and carrying the particle's colour and
 material values as instance attributes, which the exact materials read.
 
-The replay is the engine's at 60 ticks a second or so (a whole number of ticks per frame), the
-effect's owner still at the origin. It stops where the system completes; an effect that never
-does fills the scene's frame range.
+The replay is the engine's at 60 ticks a second or so (a whole number of ticks per frame). It
+stops where the system completes; an effect that never does fills the scene's frame range.
+
+What the replay takes is kept with the effect (a text in the file), so it can be replayed: over
+another frame range (from the empty's Start Frame), with other user parameters (its User.* properties), or on
+a character - an effect under an armature reads its bones and sockets frame by frame (a
+contrail's hands and feet, a pickaxe's trail sockets), and one that moves (its own animation, or
+its parent's) leaves its world-space particles where they were spawned, as a trail.
 """
+import base64
+import json
+import zlib
+
 import bpy
 import numpy as np
 
@@ -18,38 +27,156 @@ from . import effects, niagara
 
 GROUP = "MP Effect Particles"
 RIBBONS = "MP Effect Ribbons"
-GROUP_VERSION = 3
+GROUP_VERSION = 4
 # how a particle's piece is turned (the modifier's Turn): as the renderer says
 TURN_OWN, TURN_CAMERA, TURN_CAMERA_VELOCITY, TURN_FACING, TURN_MESH_VELOCITY, TURN_MESH_CAMERA = range(6)
 TURNS = "0: the particle's own rotation (a mesh); 1: a sprite facing the camera; 2: a sprite facing the camera, its length " \
         "along the velocity; 3: a sprite facing the particle's own direction; 4: a mesh, its X axis along the velocity; " \
         "5: a mesh, its X axis to the camera"
 MOST_POINTS = 2_000_000     # over all frames, per effect
+KEY_PROGRAM = "mp_effect_program"   # on an effect's empty: the text that keeps what its replay takes
+KEY_SCALE = "mp_effect_scale"       # and the import's scale (Blender units per UE unit)
+KEY_ROOT = "mp_effect_root"         # on a particles object: its effect's empty
+KEY_START = "Start Frame"           # on an effect's empty: the scene frame its replay starts on (the user's to set)
 
 
-def replay(exports, fields, fps, frames, camera=None):
-    """The system ticked through the frames: (system, {emitter name: [(floats, ints) per frame]})."""
-    system = niagara.System(exports, fields=fields)
-    if camera is not None:
-        system.camera = camera
+def store(root, exports, fields, scale):
+    """Keep what the effect's replay takes with the effect (a text in the file), to replay it again."""
+    packed = base64.b64encode(zlib.compress(json.dumps({"Exports": exports, "Fields": fields or {}}).encode("utf-8"))).decode("ascii")
+    text = bpy.data.texts.new(root.name + " replay")
+    text.use_fake_user = True
+    text.write("\n".join(packed[i:i + 4000] for i in range(0, len(packed), 4000)))
+    root[KEY_PROGRAM] = text.name
+    root[KEY_SCALE] = float(scale)
+
+
+def program(root):
+    """What the effect's replay takes, as stored with it: (exports, fields), or None."""
+    text = bpy.data.texts.get(str(root.get(KEY_PROGRAM) or ""))
+    if text is None:
+        return None
+    data = json.loads(zlib.decompress(base64.b64decode(text.as_string().replace("\n", ""))).decode("utf-8"))
+    return data["Exports"], data["Fields"]
+
+
+def _ue(matrix, scale):
+    """A Blender transform as UE's matrix: its rows the axes then the origin, Y the other way, UE's units."""
+    flip = np.diag([1.0, -1.0, 1.0, 1.0])
+    m = flip @ np.array(matrix, np.float64) @ flip
+    m[:3, 3] /= scale
+    return m.T
+
+
+def roots(objects):
+    """The effects among the objects: each one's empty, from itself, a piece or its particles."""
+    found = []
+    for obj in objects:
+        at = obj.get(KEY_ROOT) if obj.get(effects.KEY) == "Particles" else obj
+        while at is not None and at.get(effects.KEY) != "System":
+            at = at.parent
+        if at is not None and at.get(KEY_PROGRAM) and at not in found:
+            found.append(at)
+    return found
+
+
+def attach(root, rig):
+    """Put an effect on an armature: at its origin, following it."""
+    root.parent = rig
+    root.parent_type = 'OBJECT'
+    root.matrix_parent_inverse.identity()
+    root.location = (0.0, 0.0, 0.0)
+    root.rotation_euler = (0.0, 0.0, 0.0)
+
+
+def rig_of(root):
+    """The armature the effect is on: the nearest among its parents, or None."""
+    parent = root.parent
+    while parent is not None:
+        if parent.type == 'ARMATURE':
+            return parent
+        parent = parent.parent
+    return None
+
+
+def _moves(root):
+    """Whether anything could move the effect over the frames: a parent, or its own animation."""
+    return root.parent is not None or root.animation_data is not None
+
+
+class Stand:
+    """Where the effect and its character stand, frame by frame: the effect's empty's transform,
+    the armature's, and the bones and sockets the effect's scripts read."""
+
+    def __init__(self, scene, root, rig, reads, scale):
+        self.scene, self.root, self.rig, self.scale = scene, root, rig, scale
+        self.bones = {}
+        if rig is not None:
+            by_name = {b.name.lower(): b for b in rig.pose.bones}
+            self.bones = {name: by_name[name] for name in reads if name in by_name}
+        self.missing = sorted(name for name in reads if name not in self.bones) if rig is not None else []
+
+    def at(self, frame):
+        """(the owner's matrix, the character's, its pose) on a scene frame, in UE's terms."""
+        self.scene.frame_set(frame)
+        bpy.context.view_layer.update()
+        owner = _ue(self.root.matrix_world, self.scale)
+        if self.rig is None:
+            return owner, owner, {}
+        pose = {}
+        for name, bone in self.bones.items():
+            m = _ue(bone.matrix, self.scale)
+            rows = m[:3, :3]
+            pose[name] = (m[3, :3].copy(), niagara._quaternion(rows / np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), 1e-9)))
+        return owner, _ue(self.rig.matrix_world, self.scale), pose
+
+
+def _between(a, b, t):
+    """The stand a fraction of the way from one frame's to the next's."""
+    if t >= 1.0:
+        return b
+    pose = {}
+    for name, (position, rotation) in b[2].items():
+        p0, q0 = a[2].get(name, (position, rotation))
+        q0 = -q0 if float(np.dot(q0, rotation)) < 0 else q0
+        q = q0 + (rotation - q0) * t
+        pose[name] = (p0 + (position - p0) * t, q / max(float(np.linalg.norm(q)), 1e-9))
+    return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, pose
+
+
+def replay(system, fps, frames, stand=None, first=1):
+    """The system ticked through the frames: {emitter name: [(floats, ints) per frame]}. stand: where
+    the effect and its character are on each scene frame (a Stand), for an effect that moves or sits
+    on a character; without one it stays at its origin."""
     ticks = max(1, round(60.0 / fps))
     dt = 1.0 / (fps * ticks)
     props = system.props
+    before = stand.at(first) if stand is not None else None
+    if before is not None:
+        system.place(*before)
+        system.place(*before)       # a tick ago: the same
     warm = int(props.get("WarmupTickCount") or 0)
     for _ in range(min(warm, 600)):
         system.tick(float(props.get("WarmupTickDelta") or 1.0 / 15.0))
     tracks = {e.name: [] for e in system.emitters}
     total = 0
-    for _ in range(frames):
-        for _ in range(ticks):
+    for frame in range(frames):
+        now = stand.at(first + frame) if stand is not None else None
+        for tick in range(ticks):
+            if now is not None:
+                system.place(*_between(before, now, (tick + 1) / ticks))
             system.tick(dt)
+        before = now
         for e in system.emitters:
             n = e.data.count
             tracks[e.name].append((e.data.floats[:, :n].copy(), e.data.ints[:, :n].copy()))
             total += n
         if system.done or total > MOST_POINTS:
             break
-    return system, tracks
+    # the frames after the last particle hold nothing to play
+    kept = max([i + 1 for frames in tracks.values() for i, f in enumerate(frames) if f[0].shape[1]] or [0])
+    for frames in tracks.values():
+        del frames[kept:]
+    return tracks
 
 
 class Track:
@@ -353,7 +480,8 @@ def ribbons():
     fine.inputs["Resolution"].default_value = 4
     wide = node("GeometryNodeSetCurveRadius")
     links.new(fine.outputs[0], wide.inputs["Curve"])
-    links.new(attribute("mp_width", 'FLOAT'), wide.inputs["Radius"])
+    width = attribute("mp_width", 'FLOAT')
+    links.new(width, wide.inputs["Radius"])
 
     # the ribbon's width runs across what it faces: the camera, or the particles' own facing
     camera = node("GeometryNodeObjectInfo", transform_space='RELATIVE')
@@ -387,6 +515,8 @@ def ribbons():
     ribbon = node("GeometryNodeCurveToMesh")
     links.new(along.outputs[0], ribbon.inputs["Curve"])
     links.new(across.outputs[0], ribbon.inputs["Profile Curve"])
+    if "Scale" in ribbon.inputs:        # Blender 5: the profile's scale is the node's own input, not the curve's radius
+        links.new(width, ribbon.inputs["Scale"])
     uv = node("ShaderNodeCombineXYZ")
     links.new(along.outputs[1], uv.inputs[0])
     links.new(across.outputs[1], uv.inputs[1])
@@ -407,26 +537,79 @@ def _set(modifier, tree, name, value):
     getattr(modifier.properties.inputs, identifier).value = value
 
 
-def _camera(scene, root, scale):
-    """The scene camera as a script sees it: its position, forward, up and right in the effect's
-    own space, UE's axes and units. None without a camera."""
+def _camera(scene, root, scale, world):
+    """The scene camera as a script sees it: its position, forward, up and right in UE's axes and
+    units, in the world or in the effect's own space. None without a camera."""
     if scene.camera is None:
         return None
     bpy.context.view_layer.update()
-    m = root.matrix_world.inverted() @ scene.camera.matrix_world
+    m = scene.camera.matrix_world if world else root.matrix_world.inverted() @ scene.camera.matrix_world
     flip = lambda v: (v.x, -v.y, v.z)
     position = tuple(c / scale for c in flip(m.translation))
     return (position, flip(-m.col[2].xyz.normalized()), flip(m.col[1].xyz.normalized()), flip(m.col[0].xyz.normalized()))
 
 
-def play(root, exports, fields, scale):
-    """Replay the system under the root (its emitters' empties, their pieces) and make its CPU
-    emitters' pieces play. Yields what to tell the user."""
+def clear(root):
+    """Take an effect's played particles away, its pieces back in sight: as it was imported."""
+    for obj in [o for o in bpy.data.objects if o.get(effects.KEY) == "Particles" and o.get(KEY_ROOT) == root]:
+        data = obj.data
+        bpy.data.objects.remove(obj, do_unlink=True)
+        if data is not None and not data.users:
+            bpy.data.meshes.remove(data)
+    for node in root.children:
+        for piece in node.children:
+            if piece.get(effects.KEY) in ("Sprite", "Mesh", "Ribbon"):
+                piece.hide_render = piece.hide_viewport = False
+
+
+def _user(root, system):
+    """The system's user parameters as the effect's empty's properties (made from the asset's own
+    values the first time), and those told to the system."""
+    for name, kind, value in system.users():
+        if name not in root:
+            root[name] = value
+    for name in [k for k in root.keys() if k.startswith("User.")]:
+        if name not in system.user.offsets:     # one the export set that this system doesn't take
+            del root[name]
+            continue
+        value = root[name]
+        system.set_user(name, list(value) if hasattr(value, "__len__") else value)
+
+
+def play(root):
+    """Replay the effect under the root (its emitters' empties, their pieces) over the scene's frame
+    range, and make its pieces play. An effect under an armature reads that character's bones and
+    sockets; one that moves leaves its world-space particles where they were spawned. Yields what to
+    tell the user."""
+    stored = program(root)
+    if stored is None:
+        yield "%s: nothing to replay it from" % root.name
+        return
+    exports, fields = stored
+    scale = float(root.get(KEY_SCALE, 0.01))
     scene = bpy.context.scene
+    clear(root)
+    system = niagara.System(exports, fields=fields)
+    _user(root, system)
+    rig = rig_of(root)
     fps = scene.render.fps / scene.render.fps_base
-    system, tracks = replay(exports, fields, fps, max(1, scene.frame_end - scene.frame_start + 1), _camera(scene, root, scale))
+    # the scene frame the effect starts on: the frame range's first, until its Start Frame property says another
+    if KEY_START not in root:
+        root[KEY_START] = scene.frame_start
+    start = int(root[KEY_START])
+    frames = max(1, scene.frame_end - start + 1)
+    stand = Stand(scene, root, rig, system.reads, scale) if _moves(root) else None
+    camera = _camera(scene, root, scale, stand is not None)
+    if camera is not None:
+        system.camera = camera
+    now = scene.frame_current
+    try:
+        tracks = replay(system, fps, frames, stand, start)
+    finally:
+        if stand is not None:
+            scene.frame_set(now)
     emitters = {e.name: e for e in system.emitters}
-    played, most, frames = [], 0, 0
+    played, most, length = [], 0, 0
     for node in root.children:
         emitter = emitters.get(node.get(effects.KEY_EMITTER))
         if emitter is None or not tracks.get(emitter.name):
@@ -448,14 +631,17 @@ def play(root, exports, fields, scale):
             tree = ribbons() if kind == "Ribbon" else group()
             data = points(piece.name + " particles", track, renderer, kind, scale, keep)
             obj = bpy.data.objects.new(piece.name + " particles", data)
-            obj.parent = node
+            # a moving effect's world-space particles stay where they were spawned: not under the effect
+            if stand is None or emitter.local:
+                obj.parent = node
             obj[effects.KEY] = "Particles"
+            obj[KEY_ROOT] = root
             obj.visible_shadow = False
             for collection in piece.users_collection:
                 collection.objects.link(obj)
             modifier = obj.modifiers.new("Particles", 'NODES')
             modifier.node_group = tree
-            _set(modifier, tree, "Start Frame", scene.frame_start)
+            _set(modifier, tree, "Start Frame", start)
             _set(modifier, tree, "Frames", len(track.frames))
             if kind == "Ribbon":
                 _set(modifier, tree, "Material", piece.material_slots[0].material if piece.material_slots else None)
@@ -484,22 +670,25 @@ def play(root, exports, fields, scale):
             node.location = (0.0, 0.0, 0.0)     # played where the effect is, not in the row of pieces
             played.append(emitter.name)
             most = max(most, int(track.counts.max()))
-            frames = max(frames, len(track.frames))
+            length = max(length, len(track.frames))
     if played:
         # the emitters left as pieces: in a row beside the effect, 2 m apart
         left = [node for node in root.children if node.get(effects.KEY_EMITTER) and node.get(effects.KEY_EMITTER) not in played]
         for at, node in enumerate(left):
             node.location = (0.0, -200.0 * (at + 1) * scale, 0.0)
-        yield "%s: %s played over %d frames from frame %d (%d particles at most)" % (
-            root.name, ", ".join(played), frames, scene.frame_start, most)
+        yield "%s: %s played over %d frames from frame %d (%d particles at most)%s" % (
+            root.name, ", ".join(played), length, start, most, ", on %s" % rig.name if rig is not None else "")
     approximate = [name for name in played if name in system.approximate]
     if approximate:
         yield "%s: %s: stateless emitters, played from their settings (the engine's random draws apart)" % (root.name, ", ".join(approximate))
     idle = [e.name for e in system.emitters if e.name not in played and not sum(f[0].shape[1] for f in tracks.get(e.name) or [])]
     if idle:
         yield "%s: %s spawned nothing in the replay (waiting on something the game sets, or on an emitter left out): left as pieces" % (root.name, ", ".join(idle))
-    if system.unattached:
-        yield "%s: reads a character's bones or sockets: there is none here, each sits at the effect's origin" % root.name
+    if system.reads and rig is None:
+        yield "%s: reads a character's bones or sockets (%s): with none, each sits at the effect's origin. Select the effect and an armature, then Replay Effect" % (
+            root.name, ", ".join(sorted(system.reads)[:6]))
+    elif stand is not None and stand.missing:
+        yield "%s: %s has no bone or socket named %s: each sits at its origin" % (root.name, rig.name, ", ".join(stand.missing[:8]))
     left = ["%s (%s)" % s for s in system.skipped]
     if left:
         yield "%s: left as pieces: %s" % (root.name, ", ".join(left))

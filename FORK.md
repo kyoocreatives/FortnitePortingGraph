@@ -161,10 +161,26 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   - **UE's mesh particle normals.** UE turns a mesh particle's normals by its scale, not by the
     scale's inverse (a sphere flattened into a camera-facing card keeps a round one's falloff: the
     explosions' mesh smoke). The modifier sets the normals that come out so.
+  - **On a character, and again.** What the replay takes is kept with the effect (a text in the
+    file: `effect_replay.store`), and the panel's **Replay Effect** runs it again over the scene's
+    frame range: from the empty's `Start Frame`, with its `User.*` properties (the system's user
+    parameters). With an armature selected too, the effect is put on it first
+    (`effect_replay.attach`): its scripts then read that armature's bones and sockets frame by
+    frame (`niagara.Skeleton`, `System.place`), and an effect that moves (its parent's animation
+    or its own) leaves its world-space particles where they were spawned, as a trail.
+  - **Contrails.** Assets > Cosmetics > Contrails lists the skydiving contrails with a Niagara
+    effect (267); the export is the item's effect with the locker's flags on
+    (`User.bIsFrontEnd`, `User.bIsFrontEndPreview`: the character needn't fall), put on the
+    armature selected in Blender when it is sent. A pickaxe's trail (its weapon definition's
+    `AnimTrailsNiagara`, `SwingEffectNiagara`, `IdleEffectNiagara`) is exported from the Files tab
+    and put on the pickaxe's armature with Replay Effect: it reads the pickaxe's trail sockets
+    (imported as bones), so it needs a swing animation, and its `Start Frame` on the swing.
+  - A renderer's material kept inside the system (an instance with the renderer's parameters) is
+    exported as the asset it is an instance of, with its values.
   - **Not replayed:** GPU emitters (7% of the game's own emitters, 4 of 5 of the islands') keep
-    only a compiled shader; their pieces stay as imported, in a row beside the effect. A script
-    that reads a character's bones or sockets finds them all at the effect's origin (no character
-    is attached). Collisions find nothing to hit. The owner stands still.
+    only a compiled shader; their pieces stay as imported, in a row beside the effect. Without an
+    armature, a script that reads a character's bones or sockets finds them all at the effect's
+    origin. Collisions find nothing to hit.
   - Of 293 of the game's own systems sampled, 282 play, 1,115 of their 1,197 emitters.
     Test route: `fork-effect-program?path=` (what the export carries for the replay).
   Build revision 12: an additive material's light is Emissive * Opacity (it was Emissive alone: a

@@ -597,6 +597,23 @@ public class MeshExport : BaseExport
                 Meshes.Add(Context.Effect(asset));
                 break;
             }
+            case EExportType.Contrail:
+            {
+                // Material Porter fork: a contrail is its item's effect (put on a character in Blender: Replay Effect)
+                if (asset.GetOrDefault<FSoftObjectPath>(MaterialPorter.Effects.ContrailEffect).TryLoad(out UObject? contrail))
+                {
+                    var effect = Context.Effect(contrail);
+                    // as the locker shows it (the character needn't fall), and on the armature selected in Blender
+                    if (effect is MaterialPorter.MaterialPorterMesh { MPEffect: { } node })
+                    {
+                        node["User"] = new Dictionary<string, object> { ["User.bIsFrontEnd"] = true, ["User.bIsFrontEndPreview"] = true };
+                        node["Attach"] = true;
+                    }
+                    Meshes.Add(effect);
+                }
+                Type = EExportType.Effect;      // the plugins import it as an effect
+                break;
+            }
             case EExportType.LegoWildlife:
             {
                 // Material Porter fork: a LEGO creature's meshes, their materials in its colours

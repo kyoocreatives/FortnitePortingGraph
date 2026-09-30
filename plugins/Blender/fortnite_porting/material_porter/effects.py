@@ -91,7 +91,14 @@ def finish(context, mesh, root):
     from . import effect_replay
     from .hook import _log
     try:
-        for line in effect_replay.play(root, fx["Exports"], fx.get("Fields"), context.scale):
+        effect_replay.store(root, fx["Exports"], fx.get("Fields"), context.scale)
+        for name, value in (fx.get("User") or {}).items():
+            root[name] = value
+        # a contrail goes on the character: the armature selected when it was sent
+        rig = getattr(context, "mp_selected_armature", None)
+        if fx.get("Attach") and rig is not None:
+            effect_replay.attach(root, rig)
+        for line in effect_replay.play(root):
             _log(line)
     except Exception as e:      # the pieces stay as imported
         import os

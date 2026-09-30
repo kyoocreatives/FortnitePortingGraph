@@ -132,6 +132,11 @@ public enum EExportType
     [Description("Effects"), Export(EPrimitiveExportType.Mesh)]
     Effect = ExportCategory.Gameplay + 9,
 
+    // Material Porter fork: a skydiving contrail (its item's Niagara system); sent to Blender as an Effect
+    [Description("Contrails"), Export(EPrimitiveExportType.Mesh)]
+    [CosmeticAsset]
+    Contrail = ExportCategory.Cosmetic + 40,
+
     // FESTIVAL
 
     [Description("Guitars"), Export(EPrimitiveExportType.Mesh)]

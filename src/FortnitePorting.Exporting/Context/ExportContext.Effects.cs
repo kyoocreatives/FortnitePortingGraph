@@ -28,7 +28,7 @@ public partial class ExportContext
     {
         var emitters = Effects.Emitters(system);
         var root = new MaterialPorterMesh { Name = system.Name, IsEmpty = true };
-        if (emitters.Any(e => e.Sim == "CPU"))
+        if (emitters.Any(e => e.Sim != "GPU"))
         {
             try
             {
@@ -89,6 +89,18 @@ public partial class ExportContext
 
     private ExportMaterial? EffectMaterial(UMaterialInterface? material, int slot, ParamSet? values)
     {
+        // an instance the system keeps inside itself (a renderer's own, with its parameters): the asset it
+        // is an instance of, with the instance's values over it
+        while (material is UMaterialInstanceConstant { Parent: UMaterialInterface parent } inner && inner.GetPathName().Contains(':'))
+        {
+            values ??= new ParamSet();
+            foreach (var p in inner.ScalarParameterValues) values.Scalars.TryAdd(p.Name, p.ParameterValue);
+            foreach (var p in inner.VectorParameterValues)
+                if (p.ParameterValue is { } c) values.Vectors.TryAdd(p.Name, [c.R, c.G, c.B, c.A]);
+            foreach (var p in inner.TextureParameterValues)
+                if (p.ParameterValue.Load<UTexture>() is { } texture) values.Textures.TryAdd(p.Name, texture.GetPathName());
+            material = parent;
+        }
         if (material is null || Material(material, slot) is not { } export) return null;
         if (values is null) return export;
         return new MaterialPorterMaterial(export) { MPValues = values, Hash = HashCode.Combine(export.Hash, values.Key()) };

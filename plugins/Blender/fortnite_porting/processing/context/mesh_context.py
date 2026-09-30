@@ -27,6 +27,8 @@ class MeshImportContext:
         self.override_morph_targets = data.get("OverrideMorphTargets")
 
         pre_import_selected_armature = get_selected_armature()
+        # Material Porter fork: a contrail goes on the character selected when it was sent (effects.finish)
+        self.mp_selected_armature = pre_import_selected_armature
         pre_import_selected_armature_active = pre_import_selected_armature is not None and pre_import_selected_armature.select_get()
         
         self.collection = create_or_get_collection(self.name) if self.options.get("ImportIntoCollection") else bpy.context.scene.collection

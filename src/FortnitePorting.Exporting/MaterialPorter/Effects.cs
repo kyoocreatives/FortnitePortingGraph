@@ -19,6 +19,10 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 /// </summary>
 public static class Effects
 {
+    public const string ContrailClass = "AthenaSkyDiveContrailItemDefinition";
+    /// <summary>A contrail item's effect (older ones name only a Cascade effect: none to replay).</summary>
+    public const string ContrailEffect = "NiagaraContrailEffect";
+
     /// <summary>An enabled emitter: its name, how it is simulated (CPU, GPU, Stateless) and its enabled renderers.</summary>
     public sealed record Emitter(string Name, string Sim, UObject Asset, FStructFallback? Version, List<UObject> Renderers);
 

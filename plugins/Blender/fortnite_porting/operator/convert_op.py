@@ -163,6 +163,30 @@ class FPMP_OT_RemoveWrap(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class FPMP_OT_ReplayEffect(bpy.types.Operator):
+    """Replay the selected particle effects over the scene's frame range, with their User properties.
+    With an armature selected too, the effects are put on it first: they read its bones and sockets,
+    and follow its animation (a contrail on a character, a trail on a swinging pickaxe)"""
+    bl_idname = "fpmp.replay_effect"
+    bl_label = "Replay Effect"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        from ..material_porter import effect_replay
+        roots = effect_replay.roots(context.selected_objects)
+        if not roots:
+            self.report({'INFO'}, "Select an imported effect (its empty, or anything under it)")
+            return {'CANCELLED'}
+        rigs = [o for o in context.selected_objects if o.type == 'ARMATURE']
+        rig = context.active_object if context.active_object in rigs else rigs[0] if len(rigs) == 1 else None
+        for root in roots:
+            if rig is not None and effect_replay.rig_of(root) is not rig:
+                effect_replay.attach(root, rig)
+            for line in effect_replay.play(root):
+                self.report({'INFO'}, line)
+        return {'FINISHED'}
+
+
 class FPMP_PT_Exact(bpy.types.Panel):
     bl_label = "Exact Materials"
     bl_idname = "FPMP_PT_exact"
@@ -179,9 +203,12 @@ class FPMP_PT_Exact(bpy.types.Panel):
         # a wrap goes on in the app (the Wrap list of a weapon's or vehicle's page); it comes off here
         col.separator()
         col.operator(FPMP_OT_RemoveWrap.bl_idname, text="Remove Wrap from Selected")
+        # an effect is replayed at import; again here: on a character, over another frame range
+        col.separator()
+        col.operator(FPMP_OT_ReplayEffect.bl_idname, text="Replay Effect")
 
 
-classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_PT_Exact)
+classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_OT_ReplayEffect, FPMP_PT_Exact)
 
 
 def register():

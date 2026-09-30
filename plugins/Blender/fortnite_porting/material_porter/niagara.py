@@ -340,26 +340,106 @@ class RendererInfo:
         raise Unsupported("%s.%s" % (self.kind.replace("NiagaraDataInterface", ""), name))
 
 
-class Unattached:
-    """A skeletal mesh's bones and sockets, or an actor's sockets: there is no character here, so
-    every one sits at the effect's origin, unturned and unscaled (one of each the asset lists)."""
+def _quaternion(rows):
+    """A rotation matrix (UE's: its rows the axes) as UE's quaternion (x, y, z, w)."""
+    m = np.asarray(rows, np.float64)
+    trace = m[0, 0] + m[1, 1] + m[2, 2]
+    if trace > 0:
+        s = np.sqrt(trace + 1.0)
+        k = 0.5 / s
+        return np.array([(m[1, 2] - m[2, 1]) * k, (m[2, 0] - m[0, 2]) * k, (m[0, 1] - m[1, 0]) * k, 0.5 * s])
+    i = int(np.argmax([m[0, 0], m[1, 1], m[2, 2]]))
+    j, k = (i + 1) % 3, (i + 2) % 3
+    s = np.sqrt(max(m[i, i] - m[j, j] - m[k, k] + 1.0, 1e-20))
+    q = np.zeros(4)
+    q[i] = 0.5 * s
+    f = 0.5 / s
+    q[3] = (m[j, k] - m[k, j]) * f
+    q[j] = (m[i, j] + m[j, i]) * f
+    q[k] = (m[i, k] + m[k, i]) * f
+    return q
+
+
+def _multiply(a, b):
+    """Quaternions (x, y, z, w; a one, b many): b's rotation, then a's."""
+    ax, ay, az, aw = a
+    bx, by, bz, bw = b[:, 0], b[:, 1], b[:, 2], b[:, 3]
+    return np.stack([aw * bx + ax * bw + ay * bz - az * by, aw * by - ax * bz + ay * bw + az * bx,
+                     aw * bz + ax * by - ay * bx + az * bw, aw * bw - ax * bx - ay * by - az * bz], axis=1)
+
+
+class Skeleton:
+    """A skeletal mesh's bones and sockets (or an actor's sockets), as the replay was told they
+    stand (System.place: the character's pose). Without a character every one sits at the
+    character's origin, unturned."""
 
     def __init__(self, system, kind, props):
-        self.bones = max(len(props.get("FilteredBones") or []), 1)
-        self.sockets = max(len(props.get("FilteredSockets") or []), 1)
-        system.unattached = True
+        self.system = system
+        self.reader = kind.endswith("SocketReader")
+        self.bones = [] if self.reader else [str(b) for b in props.get("FilteredBones") or []]
+        self.sockets = [str(b) for b in props.get("FilteredSockets") or []]
+        self.names = self.bones + self.sockets
+        system.reads.update(n.lower() for n in self.names)
+        self.cached = None
+
+    def tables(self):
+        """The bones' positions and rotations now and a tick ago: in the character's space, and in the world."""
+        system = self.system
+        if self.cached is not None and self.cached[0] == system.ticks:
+            return self.cached[1]
+        built = []
+        for pose, component in ((system.pose, system.component), (system.pose_before, system.component_before)):
+            held = [pose.get(n.lower()) for n in self.names] or [None]
+            position = np.array([h[0] if h else (0.0, 0.0, 0.0) for h in held], np.float64)
+            rotation = np.array([h[1] if h else (0.0, 0.0, 0.0, 1.0) for h in held], np.float64)
+            rows = component[:3, :3]
+            unit = rows / np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), 1e-9)
+            built.append((position, rotation, position @ rows + component[3, :3], _multiply(_quaternion(unit), rotation)))
+        self.cached = (system.ticks, built)
+        return built
 
     def function(self, name, specifiers, inputs, outputs):
+        bones, sockets = max(len(self.bones), 1), max(len(self.sockets), 1)
         if name.endswith("Count"):
-            n = self.sockets if "Socket" in name else self.bones
+            n = sockets if "Socket" in name and "OrBone" not in name else bones if "Socket" not in name else bones + sockets
             return lambda count, args: [np.full(count, n, I)]
-        if outputs == 1:       # an index: a bone's, a socket's
-            return _zeros(1)
+        if name.startswith("Random"):
+            first, n = (len(self.bones), sockets) if "Socket" in name and "OrBone" not in name else (0, bones if "Socket" not in name else len(self.names) or 1)
+            return lambda count, args: [(first + self.system.rng.integers(0, n, count)).astype(I)]
+        if name == "GetComponentToWorld":
+            def component(count, args):
+                m = self.system.component
+                rows = m[:3, :3]
+                scale = np.linalg.norm(rows, axis=1)
+                q = _quaternion(rows / np.maximum(scale, 1e-9)[:, None])
+                return [np.full(count, v, F) for v in (*m[3, :3], *q, *scale)][:outputs]
+            return component
+        if outputs == 1:
+            # a filtered bone's or socket's index: bones first, then sockets
+            first = len(self.bones) if name == "GetFilteredSocket" else 0
+            return lambda count, args: [(first + np.broadcast_to(vm.it(args[-1]), (count,))).astype(I)]
         if outputs in (10, 13):
-            # position, rotation (a quaternion), scale, and with 13 a velocity
+            interpolated = name.endswith("Interpolated")
+            world = self.reader or "WS" in name
+            takes_flag = name == "GetFilteredSocketTransform" and not self.reader      # its last input: whether in the world
+            sockets_only = "Socket" in name and not self.reader
+
             def transform(count, args):
-                zero, one = np.zeros(count, F), np.ones(count, F)
-                return [zero, zero, zero, zero, zero, zero, one, one, one, one] + [zero] * (outputs - 10)
+                now, before = self.tables()
+                at = -2 if interpolated or takes_flag else -1
+                index = np.broadcast_to(vm.it(args[at]), (count,)) + (len(self.bones) if sockets_only else 0)
+                index = np.clip(index, 0, len(now[0]) - 1)
+                pick = 2 if world or (takes_flag and np.any(vm.it(args[-1]) != 0)) else 0
+                p1, q1, p0, q0 = now[pick][index], now[pick + 1][index], before[pick][index], before[pick + 1][index]
+                t = np.broadcast_to(vm.fl(args[-1]), (count,))[:, None].astype(np.float64) if interpolated else 1.0
+                position = p0 + (p1 - p0) * t
+                q0 = np.where(np.sum(q0 * q1, axis=1, keepdims=True) < 0, -q0, q0)
+                rotation = q0 + (q1 - q0) * t
+                rotation = rotation / np.maximum(np.linalg.norm(rotation, axis=1, keepdims=True), 1e-9)
+                velocity = (p1 - p0) / max(self.system.dt, 1e-6)
+                columns = [position[:, 0], position[:, 1], position[:, 2], rotation[:, 0], rotation[:, 1], rotation[:, 2], rotation[:, 3],
+                           np.ones(count), np.ones(count), np.ones(count), velocity[:, 0], velocity[:, 1], velocity[:, 2]]
+                return [c.astype(F) for c in columns[:outputs]]
             return transform
         raise Unsupported("SkeletalMesh.%s" % name)
 
@@ -450,7 +530,7 @@ INTERFACES["NiagaraDataInterfaceCamera"] = Camera
 INTERFACES["NiagaraDataInterfacePlatformSet"] = PlatformSet
 INTERFACES["NiagaraDataInterfaceVectorField"] = VectorField
 for _kind in ("SkeletalMesh", "SocketReader"):
-    INTERFACES["NiagaraDataInterface" + _kind] = Unattached
+    INTERFACES["NiagaraDataInterface" + _kind] = Skeleton
 for _kind in ("Float", "Float2", "Float3", "Float4", "Position", "Color", "Quat", "Int32", "Bool"):
     INTERFACES["NiagaraDataInterfaceArray" + _kind] = Array
 for _kind in ("AudioPlayer", "AudioOscilloscope", "AudioSpectrum", "Export", "DebugDraw", "CollisionQuery", "SimpleCounter"):
@@ -702,7 +782,11 @@ class System:
         self.exports, self.strict = exports, strict
         self.fields = fields or {}  # the vector fields its scripts sample, by package
         self.interfaces = {}        # export index: its data interface (one for all the scripts that call it)
-        self.unattached = False     # whether a script reads a character's bones or sockets (none here)
+        # the character the effect sits on: the bones and sockets its scripts read (lower case), and where each
+        # stands now and a tick ago (name: (position, quaternion) in the character's space; place() tells)
+        self.reads, self.pose, self.pose_before = set(), {}, {}
+        self.component = self.component_before = np.eye(4)
+        self.placed, self.dt = None, 1.0 / 60.0
         # where a script that asks finds the camera: position, forward, up, right (UE's axes, cm)
         self.camera = ((-500.0, 0.0, 0.0), (1.0, 0.0, 0.0), (0.0, 0.0, 1.0), (0.0, 1.0, 0.0))
         self.asset = next(e for e in exports if e["type"] == "NiagaraSystem")
@@ -714,8 +798,8 @@ class System:
         self.layout = Layout(compiled["DataSetCompiledData"]["Variables"])
         self.data, self.next = self.layout.buffer(1), self.layout.buffer(1)
         self.user = Store(compiled.get("InstanceParamStore") or {})
-        for name, values in (user or {}).items():
-            self.user.put(name if name.startswith("User.") else "User." + name, "<%df" % len(values), *values)
+        for name, value in (user or {}).items():
+            self.set_user(name, value)
         self.cooked = {(k["Key"]["EmitterHandleId"], k["Key"]["ScriptUsage"].split("::")[-1], k["Key"].get("ScriptUsageId") or NO_ID): k["Value"]
                        for k in props.get("ScriptRuntimeCookedDataMap") or []}
         self.age, self.ticks, self.state = 0.0, 0, ACTIVE
@@ -763,6 +847,66 @@ class System:
         for e in self.emitters:
             for h in e.handlers:
                 h.source = next((o for o in self.emitters if o.id == h.source_id), None)
+
+    def users(self):
+        """The system's user parameters a number or a few say: [(name, type, value)]."""
+        found = []
+        for name, (offset, tname) in sorted(self.user.offsets.items()):
+            nf, ni = TYPES.get(tname, (0, 0))
+            if tname == "NiagaraBool":
+                found.append((name, tname, struct.unpack_from("<i", self.user.data, offset)[0] != 0))
+            elif ni == 1 and not nf:
+                found.append((name, tname, struct.unpack_from("<i", self.user.data, offset)[0]))
+            elif nf and not ni:
+                values = struct.unpack_from("<%df" % nf, self.user.data, offset)
+                found.append((name, tname, values[0] if nf == 1 else list(values)))
+        return found
+
+    def set_user(self, name, value):
+        """A user parameter's value over the asset's own (a number, a bool, or floats)."""
+        name = name if name.startswith("User.") else "User." + name
+        if name not in self.user.offsets:
+            return
+        tname = self.user.offsets[name][1]
+        nf, ni = TYPES.get(tname, (0, 0))
+        if tname == "NiagaraBool":
+            self.user.put(name, "<i", -1 if value else 0)
+        elif ni == 1 and not nf:
+            self.user.put(name, "<i", int(value))
+        elif nf:
+            values = list(value) if hasattr(value, "__len__") else [value]
+            self.user.put(name, "<%df" % nf, *[float(v) for v in (values + [0.0] * nf)[:nf]])
+
+    def place(self, owner=None, component=None, pose=None):
+        """Where the effect stands for the next tick: its owner's transform and its character's (4x4,
+        UE's: rows the axes then the origin, cm), and the character's pose ({bone or socket name,
+        lower case: (position, quaternion)} in the character's space). What was told last becomes a tick ago's."""
+        self.component_before, self.pose_before = self.component, self.pose
+        if component is not None:
+            self.component = np.asarray(component, np.float64).reshape(4, 4)
+        if pose is not None:
+            self.pose = pose
+        if owner is not None:
+            self.placed = np.asarray(owner, np.float64).reshape(4, 4)
+
+    def _owner(self, dt):
+        """The owner's constant block, from where it was placed (its velocity: from where it was)."""
+        m = self.placed
+        if m is None:
+            return
+        rows = m[:3, :3]
+        scale = np.linalg.norm(rows, axis=1)
+        unit = rows / np.maximum(scale, 1e-9)[:, None]
+        plain = np.eye(4)
+        plain[:3, :3], plain[3, :3] = unit, m[3, :3]
+        inverse, plain_inverse = np.linalg.inv(m), np.linalg.inv(plain)
+        before = struct.unpack_from("<3f", self.owner, 400)
+        velocity = (m[3, :3] - before) / dt if self.ticks else np.zeros(3)
+        for at, matrix in enumerate((m, inverse, m.T, inverse.T, plain, plain_inverse)):
+            self.owner[64 * at:64 * at + 64] = matrix.astype(F).tobytes()
+        struct.pack_into("<4f", self.owner, 384, *_quaternion(unit))
+        for at, v in ((400, m[3, :3]), (416, velocity), (432, unit[0]), (448, unit[1]), (464, unit[2]), (480, scale)):
+            struct.pack_into("<3f", self.owner, at, *v)
 
     def export(self, ref):
         """The export a reference points at, when it is in this package."""
@@ -846,6 +990,8 @@ class System:
         return buffer
 
     def tick(self, dt):
+        self.dt = dt
+        self._owner(dt)
         struct.pack_into("<5fi", self.globals, 0, dt, dt, 1.0 / dt, self.age, self.age, QUALITY)
         # time since rendered, LOD distance and its fraction, age, execution state, ticks, emitters, alive emitters, significance, seed
         alive = sum(1 for e in self.emitters if e.state != COMPLETE)
