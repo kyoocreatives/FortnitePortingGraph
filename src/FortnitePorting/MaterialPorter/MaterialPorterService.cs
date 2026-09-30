@@ -326,6 +326,14 @@ public class MaterialPorterService : IService
                 .Take(int.TryParse(query["count"], out var max) ? max : 400)
                 .Select(a => $"{a.AssetClass.Text} {a.PackageName.Text}"));
         }
+        if (route == "fork-find-files")
+        {
+            // tests: the game files whose path holds every word of ?path= (space-separated), whatever their type
+            var words = (query["path"] ?? throw new ArgumentException("path missing")).Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            return new JArray(Game.Provider.Files.Keys
+                .Where(k => words.All(w => k.Contains(w, StringComparison.OrdinalIgnoreCase)))
+                .Take(int.TryParse(query["count"], out var most) ? most : 400));
+        }
         if (route == "fork-dump")
         {
             // tests: a package's exports (name, type, outer, properties) as CUE4Parse reads them; full=1: each
