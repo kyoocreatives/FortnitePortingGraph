@@ -45,6 +45,8 @@ KEY_SOCKETS = "mp_effect_sockets"   # on a pickaxe's trail's empty: the two sock
 # the first is 0), and for each how many frames a timed notify keeps it going (0: it plays out by itself)
 KEY_REPEATS, KEY_LENGTHS = "mp_effect_repeats", "mp_effect_lengths"
 KEY_START = "Start Frame"           # on an effect's empty: the scene frame its replay starts on (the user's to set)
+KEY_LOOP = "Loop"                   # on an effect's empty: whether the replay starts over after its last frame (the user's to set)
+LIGHTS_MAX = 32                     # a light renderer's lights at most (one a particle alive at once)
 
 
 def store(root, exports, fields, scale, sockets=None):
@@ -400,6 +402,84 @@ def points(name, track, renderer, kind, scale, keep=None):
     return mesh
 
 
+def _keys(target, path, index, frames, values, loop):
+    """An animation curve of a property over the replay's frames (held from one to the next); looped,
+    it starts over after the last one."""
+    ad = target.animation_data or target.animation_data_create()
+    if ad.action is None:
+        ad.action = bpy.data.actions.new("%s replay" % target.name)
+    curve = ad.action.fcurve_ensure_for_datablock(target, path, index=index)
+    frames, values = list(frames), list(values)
+    if loop and frames:
+        frames.append(frames[-1] + 1)     # back to the first value one frame on: a period of the whole replay
+        values.append(values[0])
+    curve.keyframe_points.add(len(frames))
+    curve.keyframe_points.foreach_set("co", np.stack([np.asarray(frames, np.float32), np.asarray(values, np.float32)], axis=1).ravel())
+    curve.keyframe_points.foreach_set("interpolation", np.full(len(frames), bpy.types.Keyframe.bl_rna.properties["interpolation"].enum_items["CONSTANT"].value, np.int32))
+    curve.update()
+    if loop:
+        curve.modifiers.new('CYCLES')
+
+
+def _lights(piece, track, renderer, keep, scale, start, loop, parent, root):
+    """A light renderer's particles as point lights, one a particle alive at once (up to LIGHTS_MAX),
+    keyed frame by frame: where each is, its colour (Color, alpha scaling it if the renderer says,
+    plus ColorAdd) and its reach (LightRadius x RadiusScale). Its power gives what UE's light gives
+    a surface: a third of the way out for a light with an exponent falloff, anywhere for an inverse
+    square one (UE's particle light colour is per cm², Blender's watts per m²). Returns the lights."""
+    flip = np.array([1.0, -1.0, 1.0], np.float32)
+    frame = track.frame if keep is None else track.frame[keep]
+    pick = (lambda a: a) if keep is None else (lambda a: a[keep])
+    if not len(frame):
+        return []
+    position = pick(track.get(bound(renderer, "PositionBinding", "Position"), (0, 0, 0))) * flip * scale
+    color = pick(track.get(bound(renderer, "ColorBinding", "Color"), (1, 1, 1, 1))).astype(np.float64)
+    rgb = color[:, :3] * (color[:, 3:4] if renderer.get("bAlphaScalesBrightness") else 1.0)
+    add = renderer.get("ColorAdd") or {}
+    rgb = np.maximum(rgb + np.array([add.get("X", 0.0), add.get("Y", 0.0), add.get("Z", 0.0)]), 0.0)
+    radius = pick(track.get(bound(renderer, "RadiusBinding", "LightRadius"), (100,)))[:, 0] * float(renderer.get("RadiusScale", 1.0)) * scale
+    exponent = pick(track.get(bound(renderer, "LightExponentBinding", "LightExponent"), (float(renderer.get("DefaultExponent", 1.0)),)))[:, 0]
+    enabled = pick(track.get(bound(renderer, "LightRenderingEnabledBinding", "LightEnabled"), (1,)))[:, 0] != 0
+    radius = np.maximum(radius, 1e-3)
+    if renderer.get("bUseInverseSquaredFalloff", True):
+        falloff = np.full(len(radius), 4.0 * np.pi / 1e4)      # C / d(cm)^2 = W / (4 pi d(m)^2)
+    else:
+        falloff = 4.0 * np.pi * (radius / 3.0) ** 2 * (8.0 / 9.0) ** np.maximum(exponent, 0.0)
+    strength = rgb.max(axis=1)
+    power = np.where(enabled, strength * falloff, 0.0)
+    tint = rgb / np.maximum(strength, 1e-6)[:, None]
+    # each frame's particles, in order: the n-th alive is the n-th light's
+    order = np.argsort(frame, kind="stable")
+    first = np.searchsorted(frame[order], np.arange(len(track.frames)))
+    counts = np.bincount(frame, minlength=len(track.frames))
+    count = int(min(counts.max(), LIGHTS_MAX))
+    made = []
+    name = piece.name
+    for slot in range(count):
+        light = bpy.data.lights.new("%s %d" % (name, slot + 1), 'POINT')
+        light.shadow_soft_size = 0.05
+        light.use_custom_distance = True
+        light.diffuse_factor = float(renderer.get("DiffuseScale", 1.0))
+        light.specular_factor = float(renderer.get("SpecularScale", 1.0))
+        obj = bpy.data.objects.new(light.name, light)
+        obj[effects.KEY] = "Particles"
+        obj[KEY_ROOT] = root
+        obj.parent = parent
+        for collection in piece.users_collection:
+            collection.objects.link(obj)
+        at = [first[f] + slot if slot < counts[f] else -1 for f in range(len(track.frames))]
+        rows = [order[i] if i >= 0 else -1 for i in at]
+        frames = [start + f for f in range(len(track.frames))]
+        for axis in range(3):
+            _keys(obj, "location", axis, frames, [position[r, axis] if r >= 0 else 0.0 for r in rows], loop)
+        _keys(light, "energy", 0, frames, [power[r] if r >= 0 else 0.0 for r in rows], loop)
+        _keys(light, "cutoff_distance", 0, frames, [radius[r] if r >= 0 else 1.0 for r in rows], loop)
+        for channel in range(3):
+            _keys(light, "color", channel, frames, [tint[r, channel] if r >= 0 else 1.0 for r in rows], loop)
+        made.append(obj)
+    return made
+
+
 def group():
     """The node group that plays a points mesh: the current frame's points, the piece on each."""
     g = bpy.data.node_groups.get(GROUP)
@@ -751,12 +831,16 @@ def clear(root):
     """Take an effect's played particles away, its pieces back in sight: as it was imported."""
     for obj in [o for o in bpy.data.objects if o.get(effects.KEY) == "Particles" and o.get(KEY_ROOT) == root]:
         data = obj.data
+        actions = [a.action for a in (obj.animation_data, getattr(data, "animation_data", None)) if a is not None and a.action is not None]
         bpy.data.objects.remove(obj, do_unlink=True)
         if data is not None and not data.users:
-            bpy.data.meshes.remove(data)
+            (bpy.data.lights if isinstance(data, bpy.types.Light) else bpy.data.meshes).remove(data)
+        for action in actions:
+            if not action.users:
+                bpy.data.actions.remove(action)
     for node in root.children:
         for piece in node.children:
-            if piece.get(effects.KEY) in ("Sprite", "Mesh", "Ribbon", "Decal"):
+            if piece.get(effects.KEY) in ("Sprite", "Mesh", "Ribbon", "Decal", "Light"):
                 piece.hide_render = piece.hide_viewport = bool(piece.get(effects.KEY_SKIP))
 
 
@@ -847,6 +931,10 @@ def play(root):
         root[KEY_START] = scene.frame_start
     start = int(root[KEY_START])
     frames = max(1, scene.frame_end - start + 1)
+    # looping, but for one timed by an animation or played on a swing or an event
+    if KEY_LOOP not in root:
+        root[KEY_LOOP] = not root.get(KEY_REPEATS) and root.get(effects.KEY_ROLE) not in ("trail", "swing", "event")
+    loop = bool(root[KEY_LOOP])
     stand = Stand(scene, root, rig, system.reads, scale, table) if _moves(root) else None
     camera = _camera(scene, root, scale, stand is not None)
     if camera is not None:
@@ -884,7 +972,7 @@ def play(root):
         for piece in list(node.children):
             kind = piece.get(effects.KEY)
             renderer = next((e["props"] for e in exports if e["name"] == piece.get(effects.KEY_RENDERER) and e["outer"] == emitter.export["name"]), None)
-            if kind not in ("Sprite", "Mesh", "Ribbon", "Decal") or renderer is None or piece.type != 'MESH' or piece.get(effects.KEY_SKIP):
+            if kind not in ("Sprite", "Mesh", "Ribbon", "Decal", "Light") or renderer is None or piece.type not in ('MESH', 'LIGHT') or piece.get(effects.KEY_SKIP):
                 continue
             if not _enabled(system, emitter, renderer):
                 # a renderer the system switches off (a variant's: System.IsGold): its piece out of sight
@@ -904,6 +992,11 @@ def play(root):
             if keep is not None and not keep.any():
                 piece.hide_render = piece.hide_viewport = True      # none of this replay's particles are its
                 continue
+            if kind == "Light":
+                made = _lights(piece, track, renderer, keep, scale, start, loop, node if stand is None or emitter.local else None, root)
+                piece.hide_render = piece.hide_viewport = True
+                drawn += bool(made)
+                continue
             tree = ribbons() if kind == "Ribbon" else group()
             data = points(piece.name + " particles", track, renderer, kind, scale, keep)
             obj = bpy.data.objects.new(piece.name + " particles", data)
@@ -919,6 +1012,7 @@ def play(root):
             modifier.node_group = tree
             _set(modifier, tree, "Start Frame", start)
             _set(modifier, tree, "Frames", len(track.frames))
+            _set(modifier, tree, "Loop", loop)
             if kind == "Ribbon":
                 _set(modifier, tree, "Material", piece.material_slots[0].material if piece.material_slots else None)
                 facing = str(renderer.get("FacingMode"))

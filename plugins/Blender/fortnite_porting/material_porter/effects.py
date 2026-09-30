@@ -40,6 +40,14 @@ def make(context, mesh, name):
     kind = fx.get("Kind")
     if kind == "Decal":
         return _decal(context, fx, name)
+    if kind == "Light":
+        # a light renderer's piece: a point light (a played one's particles each get their own)
+        light = bpy.data.lights.new(name, 'POINT')
+        light.energy, light.shadow_soft_size = 5.0, 0.05
+        obj = bpy.data.objects.new(name, light)
+        obj[KEY] = "Light"
+        obj[KEY_RENDERER] = fx.get("Renderer") or ""
+        return obj
     if kind not in ("Sprite", "Ribbon"):
         obj = bpy.data.objects.new(name, None)
         if kind == "Emitter":

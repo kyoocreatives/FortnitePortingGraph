@@ -324,6 +324,17 @@ public partial class ExportContext
                 };
                 break;
             }
+            case "NiagaraLightRendererProperties":
+            {
+                // a point light a particle: the plugin makes the lights (no material)
+                yield return new MaterialPorterMesh
+                {
+                    Name = $"{emitter.Name} light",
+                    IsEmpty = true,
+                    MPEffect = new Dictionary<string, object> { ["Kind"] = "Light", ["Renderer"] = renderer.Name },
+                };
+                break;
+            }
             case "NiagaraDecalRendererProperties":
             {
                 // a decal a particle: the plugin draws it as a quad across its projection (a decal lies on

@@ -286,6 +286,15 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     down, where the emitter sets none), both sides drawn; its material's Decal Color is the
     particle's `DecalColor`, its Decal Lifetime Opacity the particle's `DecalFade`
     (`mp_decal_fade`). The scene it projects onto isn't here: a ground decal lies flat.
+  - **Lights.** A light renderer's particles are point lights, one a particle alive at once (up to
+    32), keyed frame by frame (`_lights`): where each is, its colour (`Color`, alpha scaling it if the
+    renderer says, plus `ColorAdd`), its reach (`LightRadius` x `RadiusScale`: the light's custom
+    distance) and its power - what UE's light gives a surface a third of the way out (exponent
+    falloff), or anywhere (inverse square: UE's particle light colour is per cm²). Diffuse and
+    specular scales carry over. A component renderer's lights aren't drawn.
+  - **Looping.** An effect loops by default (its empty's `Loop`, the modifiers' Loop, the lights'
+    curves cycling): one timed by an animation, or played on a swing or an event, doesn't. Clear
+    `Loop` and Replay Effect to play it once.
   - **Which renderers draw.** A renderer bound to a visibility tag draws only the particles whose
     tag is its `RendererVisibility` (one emitter, several looks); one whose `RendererEnabledBinding`
     reads false draws nothing; a piece with no particles of its own is hidden.
@@ -326,8 +335,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     armature, a script that reads a character's bones or sockets finds them all at the effect's
     origin. Collisions find nothing to hit. An emitter that samples a skinned mesh's surface,
     water, or reads a data channel is left out. A material that reads the scene behind it (a
-    particle decal, a refraction) draws nothing. Light renderers and component renderers (lights,
-    post process) draw nothing.
+    particle decal, a refraction) draws nothing. Component renderers (lights, post process) draw
+    nothing.
   - Of 2,000 of the game's own systems sampled, all but 3 (uncooked templates) play; of their
     7,330 emitters 498 are GPU and 66 are left out for what they read.
     Test route: `fork-effect-program?path=` (what the export carries for the replay).
