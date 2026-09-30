@@ -2421,7 +2421,8 @@ class Translator:
             if ref is not None and isinstance(ref.s, TexRef):
                 tex = ref.s.name
             coords = self.input(g, p.get("Coordinates"), scope, None) or env.uv(0)
-            self.warnings.append("stand-in: %s sampled whole (no particle sub-image)" % t)
+            if not getattr(env, "entry", {}).get("sprite"):
+                self.warnings.append("stand-in: %s sampled whole (no particle sub-image)" % t)
             return self.sample(tex, coords, out, p.get("SamplerType", ""))
         if t == "TextureSampleParameter2DArray":
             tex = self.tex_param(p, self.tex_key(p.get("Texture")))
@@ -2451,13 +2452,16 @@ class Translator:
             return self.evaluate_geometry(g, x, "ObjectRadius", out, scope, p, P)
         if t == "ParticleMacroUV":
             return self.evaluate_geometry(g, x, "ScreenPosition", 0, scope, p, P)
-        if t in ("ParticleRelativeTime", "ParticleSpeed", "PerInstanceFadeAmount", "ShellMeshNormalizedShellLayer",
-                 "ShellMeshShellLayerIndex"):
+        if t == "ParticleRelativeTime":
+            return self._hook("particle_time", lambda: self.stand_in("ParticleRelativeTime as 0", self.const(0.0)))
+        if t == "ParticleSpeed":
+            return self._hook("particle_speed", lambda: self.stand_in("ParticleSpeed as 0", self.const(0.0)))
+        if t in ("PerInstanceFadeAmount", "ShellMeshNormalizedShellLayer", "ShellMeshShellLayerIndex"):
             return self.stand_in("%s as 0" % t, self.const(0.0))
         if t in ("ParticleMotionBlurFade", "SphericalParticleOpacity", "ShellMeshShellCount"):
             return self.stand_in("%s as 1" % t, self.const(1.0))
         if t == "ParticleSize":
-            return self.stand_in("ParticleSize as 1 m", self.const((100.0, 100.0), 2))
+            return self._hook("particle_size", lambda: self.stand_in("ParticleSize as 1 m", self.const((100.0, 100.0), 2)))
         if t in ("ParticleDirection", "SamplePhysicsVectorField", "ShellMeshLocalShellOffset"):
             return self.stand_in("%s as 0" % t, self.const((0.0, 0.0, 0.0), 3))
         if t == "LandscapeLayerCoords":

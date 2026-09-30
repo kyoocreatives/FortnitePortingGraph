@@ -128,23 +128,47 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   Test routes: `fork-weapon-mods?path=`, `fork-asset-page?type=&name=[&pick=Channel:Option;...][&export=1]`
   (an asset's page as the Assets view builds it, and its export through `ExportService`'s styles),
   `fork-export-asset` takes `wrap=` and `mods=Slot:path;...`.
-- **Particle effects, as what they are made of.** Assets > Gameplay > Effects lists the Niagara
-  systems the asset registry knows (about 1,400); the Files tab exports any of the game's 26,000
-  (`DetermineExportType` falls back on the tabs' classes). An effect's export
+- **Particle effects, played.** Assets > Gameplay > Effects lists the Niagara systems the asset
+  registry knows (about 1,400, most of them islands'); the Files tab exports any of the game's
+  19,000 (`DetermineExportType` falls back on the tabs' classes). An effect's export
   (`ExportContext.Effects.cs`, `MaterialPorter/Effects.cs`) is a tree: an empty per enabled emitter
-  (2 m apart, a palette; tagged CPU, GPU or Stateless), and under it what its renderers draw - a
-  mesh renderer's meshes with the materials it puts on them, a sprite or ribbon renderer's material
-  on a plane the plugin makes (`material_porter/effects.py`). A renderer's own material parameters
-  ride on the material as `MPValues`. The item's description says what each emitter is.
-  How the particles move isn't exported: a GPU emitter (3 of 4) keeps only its compiled shader,
-  a CPU emitter its compiled script (readable bytecode: not run yet), a stateless one plain settings.
-  The exact materials read what a particle system gives a particle from the object
-  (`env.particle_color`, `env.dynamic_parameter`): `mp_particle` = 1 with `mp_particle_color`,
-  `mp_dynamic` = 1 with `mp_dynamic0..3`; elsewhere white, and the material's own defaults - so a
-  piece whose look hangs on those (a spark stretched by its speed, a ring that erodes) can come out
-  empty.
+  (tagged CPU, GPU or Stateless), and under it what its renderers draw - a mesh renderer's meshes
+  with the materials it puts on them, a sprite or ribbon renderer's material on a plane the plugin
+  makes (`material_porter/effects.py`). A renderer's own material parameters ride on the material
+  as `MPValues`. The item's description says what each emitter is.
+  - **CPU emitters are replayed.** A CPU emitter keeps its compiled scripts in the cooked asset
+    (VectorVM bytecode). The system's node carries the package's exports (`Effects.Program`) and
+    the vector fields its scripts sample (`Effects.Fields`); the plugin runs them:
+    `niagara_vm.py` is the VM in numpy (every particle at once, as the engine does), `niagara.py`
+    what the engine does around the scripts (the system's spawn and update scripts, each emitter's
+    update then spawn, events between emitters, the constant blocks laid out as the engine's
+    structs, the parameter stores as cooked, data interfaces: curves, arrays, vector fields,
+    particle reads, renderer info, camera). `niagara_stateless.py` works a stateless emitter's
+    particles out from its modules' settings (same ranges and curves, not the engine's random
+    draws). `effect_replay.py` runs the system over the scene's frame range (a whole number of
+    ticks per frame, 60 a second or so; it stops where the system completes) and keeps every
+    frame's particles as a mesh of points per drawn piece; a geometry nodes modifier
+    ("MP Effect Particles") keeps the current frame's points and instances the piece on each,
+    turned as the renderer says (Turn), and "MP Effect Ribbons" strings a ribbon's points into
+    ribbons. The modifier's Start Frame and Loop move and repeat the replay.
+  - **What a particle gives its material** reaches it as instance attributes (the exact materials'
+    Attribute nodes are of type Instancer, which falls back on the object's own properties on a
+    still piece): `mp_particle` = 1 with `mp_particle_color`, `mp_dynamic` (four flags: which
+    Dynamic Parameters the emitter writes, from the renderer's MaterialParamValidMask) with
+    `mp_dynamic0..3`, `mp_subimage` (a flipbook's frame: a sprite's material carries `MPSprite`,
+    its sub-image counts, and its UV0 picks the sub-image), `mp_age`, `mp_velocity`, `mp_size`.
+    A ribbon's run along it: its material (`MPRibbon`) reads them off the ribbon's mesh.
+  - **UE's mesh particle normals.** UE turns a mesh particle's normals by its scale, not by the
+    scale's inverse (a sphere flattened into a camera-facing card keeps a round one's falloff: the
+    explosions' mesh smoke). The modifier sets the normals that come out so.
+  - **Not replayed:** GPU emitters (7% of the game's own emitters, 4 of 5 of the islands') keep
+    only a compiled shader; their pieces stay as imported, in a row beside the effect. A script
+    that reads a character's bones or sockets finds them all at the effect's origin (no character
+    is attached). Collisions find nothing to hit. The owner stands still.
+  - Of 293 of the game's own systems sampled, 282 play, 1,115 of their 1,197 emitters.
+    Test route: `fork-effect-program?path=` (what the export carries for the replay).
   Build revision 12: an additive material's light is Emissive * Opacity (it was Emissive alone: a
-  flash drew as its whole quad).
+  flash drew as its whole quad). 13: particle values from the instance, a sprite's sub-image.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the

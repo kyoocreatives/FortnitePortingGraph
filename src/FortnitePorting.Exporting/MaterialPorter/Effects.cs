@@ -3,8 +3,12 @@ using System.Collections.Generic;
 using System.Linq;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
+using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.Core.Misc;
+using CUE4Parse.UE4.Objects.Engine.VectorField;
 using CUE4Parse.UE4.Objects.UObject;
+using Newtonsoft.Json;
+using Newtonsoft.Json.Linq;
 
 namespace FortnitePorting.Exporting.MaterialPorter;
 
@@ -41,6 +45,75 @@ public static class Effects
             emitters.Add(new Emitter(name, sim, emitter, version, Enabled(version.GetOrDefault("RendererProperties", Array.Empty<UObject>()))));
         }
         return emitters;
+    }
+
+    // compiled data only the engine's own VM and the editor read
+    private static readonly HashSet<string> Unread =
+        ["ExperimentalContextData", "StatScopes", "CompileTags", "ShaderScriptParametersMetadata", "SimulationStageMetaData"];
+
+    /// <summary>
+    /// What a replay of the system is made from: its package's exports (name, type, outer,
+    /// properties) in the package's order, which holds each CPU emitter's compiled scripts, their
+    /// parameters and curves. The plugin runs them (material_porter/niagara.py).
+    /// </summary>
+    public static JArray Program(UObject system)
+    {
+        var serializer = JsonSerializer.Create(new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore });
+        var exports = new JArray();
+        foreach (var export in system.Owner!.GetExports())
+        {
+            var props = new JObject();
+            foreach (var p in export.Properties)
+                if (p.Tag?.GenericValue is { } value && !props.ContainsKey(p.Name.Text))
+                    props[p.Name.Text] = JToken.FromObject(value, serializer);
+            Prune(props);
+            exports.Add(new JObject { ["name"] = export.Name, ["type"] = export.ExportType, ["outer"] = export.Outer?.Name.Text, ["props"] = props });
+        }
+        return exports;
+    }
+
+    /// <summary>
+    /// The vector fields the system's scripts sample (a vector field data interface's Field), by
+    /// package: its grid size, bounds and vectors (four half floats a cell, as the asset keeps them).
+    /// </summary>
+    public static JObject Fields(UObject system)
+    {
+        var fields = new JObject();
+        foreach (var export in system.Owner!.GetExports())
+        {
+            if (export.ExportType != "NiagaraDataInterfaceVectorField") continue;
+            try
+            {
+                if (export.GetOrDefault<UVectorFieldStatic?>("Field") is not { } field || field.Owner is not { } package) continue;
+                if (fields.ContainsKey(package.Name) || field.SourceData?.Data is not { Length: > 0 } data) continue;
+                var bounds = field.GetOrDefault<FBox>("Bounds");
+                fields[package.Name] = new JObject
+                {
+                    ["Size"] = new JArray(field.GetOrDefault<int>("SizeX"), field.GetOrDefault<int>("SizeY"), field.GetOrDefault<int>("SizeZ")),
+                    ["Min"] = new JArray(bounds.Min.X, bounds.Min.Y, bounds.Min.Z),
+                    ["Max"] = new JArray(bounds.Max.X, bounds.Max.Y, bounds.Max.Z),
+                    ["Data"] = Convert.ToBase64String(data),
+                };
+            }
+            catch (Exception e)
+            {
+                Serilog.Log.Warning("[Material Porter] {System}: {Field}'s vector field wasn't read ({Error})", system.Name, export.Name, e.Message);
+            }
+        }
+        return fields;
+    }
+
+    private static void Prune(JToken token)
+    {
+        if (token is JObject o)
+        {
+            foreach (var name in o.Properties().Select(p => p.Name).Where(Unread.Contains).ToList()) o.Remove(name);
+            foreach (var p in o.Properties()) Prune(p.Value);
+        }
+        else if (token is JArray a && a.Count > 0 && a[0] is JContainer)
+        {
+            foreach (var item in a) Prune(item);
+        }
     }
 
     private static List<UObject> Enabled(IEnumerable<UObject?> renderers) =>

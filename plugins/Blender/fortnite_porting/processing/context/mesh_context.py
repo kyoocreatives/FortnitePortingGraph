@@ -147,7 +147,9 @@ class MeshImportContext:
             
             for child in mesh.get("Children"):
                 self.import_model(child, parent=empty_object)
-                
+
+            # Material Porter fork: a particle effect's CPU emitters, replayed over the scene's frames
+            effects.finish(self, mesh, empty_object)
             return
         
         if self.type in [EExportType.PREFAB, EExportType.WORLD] and (index := self.mesh_index.get(id(mesh))) is not None:

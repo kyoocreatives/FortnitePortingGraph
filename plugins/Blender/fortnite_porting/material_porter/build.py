@@ -19,7 +19,7 @@ from .ue_graph import SHADING_MODELS, Translator, Val
 PREFIX = "MP "            # built materials: "MP MI_Foo"
 KEY_PATH = "mp_path"      # the game object a built material translates
 KEY_REV = "mp_rev"        # the build revision that made it (older ones are rebuilt, not reused)
-BUILD_REVISION = 12       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity
+BUILD_REVISION = 13       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity; 13: a particle's values from its instance (a replayed effect), a sprite's sub-image
                           # 4: instance overrides to the default (Opaque, DefaultLit, one-sided) honoured
                           # 6: vector parameters without a stored default are (0, 0, 0, 0), not alpha 1
                           # 8: single layer water (the medium, refraction, water info stand-ins); graph clip()s
@@ -571,7 +571,7 @@ def shape_key(entry):
     subsurface profile. Instances alike in all of it differ only in their
     parameters' values (the material's group-node inputs) and their
     textures' images."""
-    k = {g: entry.get(g) for g in ("graph", "master", "switches", "masks", "overrides", "asset", "subsurface")}
+    k = {g: entry.get(g) for g in ("graph", "master", "switches", "masks", "overrides", "asset", "subsurface", "sprite", "ribbon")}
     return hashlib.sha1(json.dumps(k, sort_keys=True, default=str).encode()).hexdigest()[:16]
 
 

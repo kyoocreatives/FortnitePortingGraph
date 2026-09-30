@@ -159,6 +159,14 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
         for kind, values in overlay.items():
             entry[kind] = dict(entry.get(kind) or {}, **values)
         entry["variant"] = hashlib.sha1(json.dumps(overlay, sort_keys=True).encode("utf-8")).hexdigest()[:8]
+    # a sprite with a flipbook: its UV0 is the sub-image its particle shows (env.uv)
+    if sprite := material_data.get("MPSprite"):
+        entry["sprite"] = [float(x) for x in sprite]
+        entry["variant"] = hashlib.sha1(("%s %s" % (entry.get("variant", ""), entry["sprite"])).encode("utf-8")).hexdigest()[:8]
+    # a ribbon's: its particles' values are its mesh's attributes (env._particle_attr)
+    if material_data.get("MPRibbon"):
+        entry["ribbon"] = True
+        entry["variant"] = hashlib.sha1(("%s ribbon" % entry.get("variant", "")).encode("utf-8")).hexdigest()[:8]
     # a world's hundreds of materials: each tree laid out when a node editor first shows it
     build.LAZY_LAYOUT = getattr(getattr(context, "type", None), "name", "") in ("WORLD", "PREFAB")
     try:

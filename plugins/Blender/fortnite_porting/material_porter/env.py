@@ -170,8 +170,22 @@ class MaterialEnv:
             n.uv_map = "UV%d" % index
             u, v = self.tr.comps(Val(n.outputs[0], 3))[:2]
             # UE's V runs down
-            return self.tr.combine([u, self.tr.binop('SUBTRACT', self.tr.const(1.0), v)])
+            v = self.tr.binop('SUBTRACT', self.tr.const(1.0), v)
+            sprite = self.entry.get("sprite") if index == 0 else None
+            if sprite and sprite[0] * sprite[1] > 1:
+                u, v = self._sub_image(u, v, float(sprite[0]), float(sprite[1]))
+            return self.tr.combine([u, v])
         return self.once("uv%d" % index, make)
+
+    def _sub_image(self, u, v, across, down):
+        """A sprite's UV0 over a flipbook: the sub-image its particle shows (mp_subimage on the
+        object or the instance: the first where it has none), as UE's sprites carry it."""
+        tr = self.tr
+        index = tr.math('FLOOR', self._particle_attr("mp_subimage")[2])
+        column = tr.math('FLOORED_MODULO', index, tr.const(across))
+        row = tr.math('FLOORED_MODULO', tr.math('FLOOR', tr.math('DIVIDE', index, tr.const(across))), tr.const(down))
+        return (tr.math('DIVIDE', tr.math('ADD', u, column), tr.const(across)),
+                tr.math('DIVIDE', tr.math('ADD', v, row), tr.const(down)))
 
     def landscape_weight(self, name):
         """A landscape layer's weight: the exported landscape's colour layer of
@@ -343,13 +357,15 @@ class MaterialEnv:
         return tr.vmath('ADD', v, tr.vmath('SCALE', tr.vmath('SUBTRACT', data, v, out_w=3), flag, out_w=3), out_w=3)
 
     def _particle_attr(self, name):
-        """An object's particle value (four floats) as (rgb, alpha) sockets."""
+        """A particle's value (four floats) as (rgb, alpha, scalar) sockets: the instance's
+        attribute where geometry nodes instance the object (a replayed effect's particles), else
+        the object's own property. A ribbon's run along it: its mesh's attribute."""
         tr = self.tr
 
         def make():
             with tr.at("Parameters"):
                 n = tr.node("ShaderNodeAttribute", name)
-            n.attribute_type = 'OBJECT'
+            n.attribute_type = 'GEOMETRY' if self.entry.get("ribbon") else 'INSTANCER'
             n.attribute_name = name
             return Val(n.outputs["Color"], 3), Val(n.outputs["Alpha"], 1), Val(n.outputs["Fac"], 1)
         return self.once("attr4 " + name, make)
@@ -366,15 +382,32 @@ class MaterialEnv:
         return (tr.vmath('ADD', white, tr.vmath('SCALE', tr.vmath('SUBTRACT', rgb, white, out_w=3), flag, out_w=3), out_w=3),
                 tr.math('ADD', one, tr.math('MULTIPLY', tr.math('SUBTRACT', alpha, one), flag)))
 
+    def particle_time(self):
+        """UE's Particle Relative Time: a particle's age over its lifetime (mp_age; 0 where there is none)."""
+        return self._particle_attr("mp_age")[2]
+
+    def particle_speed(self):
+        """UE's Particle Speed: how fast a particle moves (mp_velocity's length; 0 where there is none)."""
+        return self.tr.vmath('LENGTH', self._particle_attr("mp_velocity")[0], out_w=1)
+
+    def particle_size(self):
+        """UE's Particle Size: a sprite's width and height (mp_size; 1 m where there is none)."""
+        tr = self.tr
+        x, y = tr.comps(self._particle_attr("mp_size")[0])[:2]
+        has = tr.math('GREATER_THAN', tr.math('ADD', x, y), tr.const(0.0))
+        usual = tr.const(100.0)
+        return tr.combine([tr.math('ADD', usual, tr.math('MULTIPLY', tr.math('SUBTRACT', v, usual), has)) for v in (x, y)])
+
     def dynamic_parameter(self, index, default=None):
         """UE's Dynamic Parameter <index>: four floats a particle system sets per particle, from
-        the object's mp_dynamic<index> where mp_dynamic is 1 (a baked effect sets all four); the
-        expression's default elsewhere."""
+        mp_dynamic<index> where mp_dynamic (four flags, one per parameter) says the effect sets
+        it; the expression's default elsewhere."""
         if default is None:
             return None
         tr = self.tr
         rgb, alpha, _ = self._particle_attr("mp_dynamic%d" % index)
-        flag = self._particle_attr("mp_dynamic")[2]
+        flags = self._particle_attr("mp_dynamic")
+        flag = tr.comps(flags[0])[index] if index < 3 else flags[1]
         d3 = tr.mask(default, [0, 1, 2])
         da = default.a if default.a is not None else tr.const(1.0)
         out = tr.vmath('ADD', d3, tr.vmath('SCALE', tr.vmath('SUBTRACT', rgb, d3, out_w=3), flag, out_w=3), out_w=3)

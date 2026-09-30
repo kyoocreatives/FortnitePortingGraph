@@ -27,9 +27,10 @@ public record MaterialPorterMesh : ExportMesh
     /// <summary>The parent's bone the mesh follows (a weapon mod on its attach bone), or null: the parent itself.</summary>
     public string? MPParentBone;
     /// <summary>
-    /// A particle effect's node (ExportContext.Effects): Kind "Emitter" (Sim: CPU, GPU or Stateless),
-    /// "Mesh" (a mesh renderer's mesh), or "Sprite" / "Ribbon" (no mesh: the plugin makes a plane for
-    /// its Material; SubImages, Facing).
+    /// A particle effect's node (ExportContext.Effects): Kind "System" (Exports, Fields: what the
+    /// plugin replays its CPU emitters from), "Emitter" (Sim: CPU, GPU or Stateless), "Mesh" (a mesh
+    /// renderer's mesh; Index: which of its meshes), or "Sprite" / "Ribbon" (no mesh: the plugin makes
+    /// a plane for its Material; SubImages, Facing). A renderer's node names it (Renderer).
     /// </summary>
     public Dictionary<string, object>? MPEffect;
 }
@@ -46,4 +47,8 @@ public record MaterialPorterMaterial : ExportMaterial
     public ParamSet? MPWrap;
     /// <summary>A LEGO figure's face: where its rig puts the character accents for each mouth pose (FigureRecipe.AccentRigAsync).</summary>
     public string? MPFaceRig;
+    /// <summary>A sprite's flipbook: how many sub-images across and down (each particle shows one), or null.</summary>
+    public float[]? MPSprite;
+    /// <summary>A ribbon's material: its particles' values run along the ribbon (the plugin reads them off the ribbon's mesh).</summary>
+    public bool MPRibbon;
 }

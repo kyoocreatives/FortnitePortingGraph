@@ -385,6 +385,13 @@ public class MaterialPorterService : IService
                 .Where(k => words.All(w => k.Contains(w, StringComparison.OrdinalIgnoreCase)))
                 .Take(int.TryParse(query["count"], out var most) ? most : 400));
         }
+        if (route == "fork-effect-program")
+        {
+            // tests: what an effect's export carries for its replay (Effects.Program and Fields)
+            var effect = await Game.Provider.LoadPackageAsync(query["path"] ?? throw new ArgumentException("path missing"));
+            var niagara = effect.GetExports().FirstOrDefault(e => e.ExportType == "NiagaraSystem") ?? throw new ArgumentException("no Niagara system in the package");
+            return new JObject { ["Exports"] = Exporting.MaterialPorter.Effects.Program(niagara), ["Fields"] = Exporting.MaterialPorter.Effects.Fields(niagara) };
+        }
         if (route == "fork-dump")
         {
             // tests: a package's exports (name, type, outer, properties) as CUE4Parse reads them; full=1: each

@@ -17,17 +17,33 @@ namespace FortnitePorting.Exporting.Context;
 /// Material Porter fork: a particle effect (a Niagara system) as what it is made of. Each enabled
 /// emitter becomes an empty, and under it what its renderers draw: a mesh renderer's meshes with
 /// the materials it puts on them, a sprite or ribbon renderer's material on a plane the plugin
-/// makes. A renderer's own material parameters ride on the material (MPValues). How the particles
-/// move isn't here: a GPU emitter keeps only its compiled shader, a CPU emitter its compiled
-/// script (Effects.Describe says which each is).
+/// makes. A renderer's own material parameters ride on the material (MPValues). A CPU emitter
+/// keeps its compiled scripts, which the plugin runs to play its particles (the system's node
+/// carries what that takes: Effects.Program); a GPU emitter keeps only a compiled shader, and
+/// stays the pieces it draws.
 /// </summary>
 public partial class ExportContext
 {
     public ExportMesh Effect(UObject system)
     {
-        var root = new ExportMesh { Name = system.Name, IsEmpty = true };
+        var emitters = Effects.Emitters(system);
+        var root = new MaterialPorterMesh { Name = system.Name, IsEmpty = true };
+        if (emitters.Any(e => e.Sim == "CPU"))
+        {
+            try
+            {
+                root.MPEffect = new Dictionary<string, object>
+                {
+                    ["Kind"] = "System", ["Exports"] = Effects.Program(system), ["Fields"] = Effects.Fields(system),
+                };
+            }
+            catch (Exception e)
+            {
+                Serilog.Log.Warning("[Material Porter] {System}: not read for a replay ({Error})", system.Name, e.Message);
+            }
+        }
         var at = 0;
-        foreach (var emitter in Effects.Emitters(system))
+        foreach (var emitter in emitters)
         {
             // laid out in a row, 2 m apart: a palette to pick from (in the game they all sit at the system's origin)
             var node = new MaterialPorterMesh
@@ -88,14 +104,16 @@ public partial class ExportContext
                 var overrides = renderer.GetOrDefault("bOverrideMaterials", false)
                     ? renderer.GetOrDefault("OverrideMaterials", Array.Empty<FStructFallback>())
                     : [];
+                var index = -1;
                 foreach (var entry in renderer.GetOrDefault("Meshes", Array.Empty<FStructFallback>()))
                 {
+                    index++;
                     if (entry.GetOrDefault<UStaticMesh?>("Mesh") is not { } staticMesh || Mesh(staticMesh) is not { } mesh) continue;
                     var export = new MaterialPorterMesh(mesh)
                     {
                         Scale = entry.GetOrDefault("Scale", FVector.OneVector),
                         Rotation = entry.GetOrDefault("Rotation", FRotator.ZeroRotator),
-                        MPEffect = new Dictionary<string, object> { ["Kind"] = "Mesh" },
+                        MPEffect = new Dictionary<string, object> { ["Kind"] = "Mesh", ["Renderer"] = renderer.Name, ["Index"] = index },
                     };
                     // each slot: the renderer's override, else the mesh's own, with the renderer's parameters
                     foreach (var slot in mesh.Materials.Select(m => m.Slot).Distinct())
@@ -118,6 +136,21 @@ public partial class ExportContext
             {
                 if (EffectMaterial(renderer.GetOrDefault<UMaterialInterface?>("Material"), 0, values) is not { } material) break;
                 var sub = renderer.GetOrDefault("SubImageSize", new FVector2D(1, 1));
+                // a flipbook: each particle shows one sub-image, which the material picks (the plugin's env.uv)
+                if (renderer.ExportType.Contains("Ribbon"))
+                    material = new MaterialPorterMaterial(material)
+                    {
+                        MPValues = (material as MaterialPorterMaterial)?.MPValues,
+                        MPRibbon = true,
+                        Hash = HashCode.Combine(material.Hash, "ribbon"),
+                    };
+                else if (sub.X * sub.Y > 1)
+                    material = new MaterialPorterMaterial(material)
+                    {
+                        MPValues = (material as MaterialPorterMaterial)?.MPValues,
+                        MPSprite = [(float) sub.X, (float) sub.Y],
+                        Hash = HashCode.Combine(material.Hash, sub.X, sub.Y),
+                    };
                 yield return new MaterialPorterMesh
                 {
                     Name = $"{emitter.Name} {(renderer.ExportType.Contains("Ribbon") ? "ribbon" : "sprite")}",
@@ -125,6 +158,7 @@ public partial class ExportContext
                     MPEffect = new Dictionary<string, object>
                     {
                         ["Kind"] = renderer.ExportType.Contains("Ribbon") ? "Ribbon" : "Sprite",
+                        ["Renderer"] = renderer.Name,
                         ["Material"] = material,
                         ["SubImages"] = new[] { sub.X, sub.Y },
                         ["Facing"] = renderer.GetOrDefault<FName>("FacingMode").Text.Split("::").Last(),
