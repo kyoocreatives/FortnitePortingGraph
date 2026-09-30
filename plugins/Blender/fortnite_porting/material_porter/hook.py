@@ -25,6 +25,10 @@ URL = os.environ.get("MATERIAL_PORTER_BRIDGE", "http://localhost:24320")
 _job = {"key": None, "app": None, "down": False, "built": {}, "shapes": {}, "notes": []}
 
 
+KEY_OVERLAY = "mp_overlay"    # the values a material was built with (JSON), but for its wrap's
+KEY_WRAP = "mp_wrap"          # the wrap over it (its item's name)
+
+
 def _session(context):
     """The current import's state, begun afresh for each import (context)."""
     if _job["key"] is not context:
@@ -135,6 +139,19 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
             _log("%s: %s - FP's own material" % (material_data.get("Name"), e))
         return None
     overlay = _overlay(texture_data, override_parameters, material_data.get("MPValues"))
+    # a material built before, built again (wrap.py): what it was built with then
+    for kind, values in (material_data.get("MPOverlay") or {}).items():
+        overlay[kind] = dict(values, **(overlay.get(kind) or {}))
+    base = json.dumps(overlay, sort_keys=True) if overlay else ""
+    # a wrap: its values over those, but for the textures the material (or its style) sets itself -
+    # a weapon's diffuse, normals, masks and customization mask stay its own
+    wrap = material_data.get("MPWrap")
+    if wrap:
+        own = set(entry.get("textures") or {}) | set(overlay.get("textures") or {})
+        for kind, values in _overlay(None, None, wrap).items():
+            if kind == "textures":
+                values = {k: v for k, v in values.items() if k not in own}
+            overlay[kind] = dict(overlay.get(kind) or {}, **values)
     # "Rim Light" off (the default): the character materials' rim light (MF_RimV3's baseBrightness) at 0
     if not (getattr(context, "options", None) or {}).get("RimLight"):
         overlay.setdefault("scalars", {})["baseBrightness"] = 0.0
@@ -159,4 +176,10 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
     # a LEGO figure's face: where its rig puts the character accents for each mouth pose (face_anim.py)
     if rig := material_data.get("MPFaceRig"):
         mat["mp_face_rig"] = rig
+    # what it was built with under its wrap, and the wrap's name: to change or remove the wrap later
+    for key, value in ((KEY_OVERLAY, base), (KEY_WRAP, str(wrap.get("Label") or "wrap") if wrap else "")):
+        if value:
+            mat[key] = value
+        elif key in mat:
+            del mat[key]
     return mat

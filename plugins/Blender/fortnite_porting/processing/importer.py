@@ -32,10 +32,13 @@ class Importer:
         t0 = time.perf_counter()
         objects0 = set(o.name for o in bpy.data.objects)
         failed = None
+        summaries = []      # what an export that imports nothing says it did (a wrap, over the selection)
         try:
             for export in exports:
                 context = context_type(meta)
                 context.run(export)
+                if summary := getattr(context, "mp_summary", None):
+                    summaries.append(summary)
         except Exception as e:
             failed = e
             raise
@@ -49,9 +52,12 @@ class Importer:
             meshes = [o for o in bpy.data.objects if o.name not in objects0 and o.type == 'MESH' and len(o.material_slots) > 0]
             used = {s.material.name: s.material for o in meshes for s in o.material_slots if s.material is not None}
             exact = sum(1 for m in used.values() if m.name.startswith("MP "))
-            status.post("%s %s: %d meshes, %d materials (%d exact) in %.1f s" % (
-                "Import failed" if failed else "Imported", names, len(meshes), len(used), exact,
-                time.perf_counter() - t0) + (" - %s: %s" % (type(failed).__name__, failed) if failed else ""), state="end")
+            if summaries and not failed and not meshes:
+                status.post("; ".join(summaries), state="end")
+            else:
+                status.post("%s %s: %d meshes, %d materials (%d exact) in %.1f s" % (
+                    "Import failed" if failed else "Imported", names, len(meshes), len(used), exact,
+                    time.perf_counter() - t0) + (" - %s: %s" % (type(failed).__name__, failed) if failed else ""), state="end")
 
     @staticmethod
     def _check_version(meta: dict):

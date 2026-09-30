@@ -39,6 +39,8 @@ public class MeshExport : BaseExport
     public readonly List<ExportOverrideMorphTargets> OverrideMorphTargets = [];
     public ExportLightCollection Lights = new();
     public AnimExport? Animation;
+    /// <summary>Material Porter fork: a wrap's values, for the materials of what is selected in Blender.</summary>
+    public MaterialPorter.ParamSet? MPWrap;
     [Newtonsoft.Json.JsonIgnore] public Dictionary<int, int> CarPicks = [];
     [Newtonsoft.Json.JsonIgnore] public Dictionary<string, int> FacePicks = [];
     
@@ -567,6 +569,12 @@ public class MeshExport : BaseExport
                 // Material Porter fork: the body, its wheels on their sockets, Mutable's colours
                 Meshes.AddRange(Context.MaterialPorterCar(asset, CarPicks));
                 Type = EExportType.Vehicle;     // the plugins import it as a vehicle
+                break;
+            }
+            case EExportType.Wrap:
+            {
+                // Material Porter fork: no mesh, the wrap's values (Context.WrapValues)
+                MPWrap = Context.WrapValues(asset);
                 break;
             }
             case EExportType.LegoWildlife:

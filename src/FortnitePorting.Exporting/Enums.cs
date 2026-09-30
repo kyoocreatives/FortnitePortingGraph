@@ -93,6 +93,11 @@ public enum EExportType
     [CosmeticAsset]
     Kicks = ExportCategory.Cosmetic + 14,
 
+    // Material Porter fork: a wrap, laid over the materials of what is selected in Blender (no mesh of its own)
+    [Description("Wraps"), Export(EPrimitiveExportType.Mesh)]
+    [CosmeticAsset]
+    Wrap = ExportCategory.Cosmetic + 15,
+
     // CREATIVE
 
     [Description("Props"), Export(EPrimitiveExportType.Mesh)]

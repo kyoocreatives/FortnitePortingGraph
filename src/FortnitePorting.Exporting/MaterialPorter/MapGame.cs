@@ -31,6 +31,11 @@ public record MaterialPorterMaterial : ExportMaterial
 {
     public MaterialPorterMaterial(ExportMaterial material) : base(material) { }
     public ParamSet? MPValues;
+    /// <summary>
+    /// A wrap over the material (ExportContext.Weapons): its values, which the plugin lays over the
+    /// material's own and MPValues, but for the textures those set.
+    /// </summary>
+    public ParamSet? MPWrap;
     /// <summary>A LEGO figure's face: where its rig puts the character accents for each mouth pose (FigureRecipe.AccentRigAsync).</summary>
     public string? MPFaceRig;
 }

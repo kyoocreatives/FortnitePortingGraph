@@ -115,8 +115,9 @@ public partial class ExportContext
     }
 
     /// <summary>
-    /// A wrap over each of a mesh's materials: its values, but for the textures the material sets itself
-    /// (the weapon's diffuse, normals, masks and customization mask stay its own).
+    /// A wrap over each of a mesh's materials. The plugin lays its values over the material's own, but
+    /// for the textures the material sets itself (the weapon's diffuse, normals, masks and customization
+    /// mask stay its own).
     /// </summary>
     public void ApplyWrap(ExportMesh mesh, ParamSet wrap)
     {
@@ -125,18 +126,11 @@ public partial class ExportContext
         {
             var at = mesh.OverrideMaterials.FindIndex(m => m.Slot == slot);
             var material = at >= 0 ? mesh.OverrideMaterials[at] : mesh.Materials.First(m => m.Slot == slot);
-            var own = material.Textures.Select(t => t.Name).ToHashSet();
-            var values = new ParamSet();
-            if (material is MaterialPorterMaterial { MPValues: { } already }) values.MergeFrom(already);
-            values.MergeFrom(new ParamSet
-            {
-                Scalars = wrap.Scalars, Vectors = wrap.Vectors, Switches = wrap.Switches, Label = wrap.Label,
-                Textures = wrap.Textures.Where(t => !own.Contains(t.Key)).ToDictionary(t => t.Key, t => t.Value),
-            });
             var wrapped = new MaterialPorterMaterial(material with { Slot = slot })
             {
-                MPValues = values,
-                Hash = HashCode.Combine(material.Hash, values.Key()),
+                MPValues = (material as MaterialPorterMaterial)?.MPValues,
+                MPWrap = wrap,
+                Hash = HashCode.Combine(material.Hash, wrap.Key()),
             };
             if (at >= 0) mesh.OverrideMaterials[at] = wrapped;
             else mesh.OverrideMaterials.Add(wrapped);

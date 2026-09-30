@@ -145,6 +145,24 @@ class FPMP_OT_ConvertExact(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class FPMP_OT_RemoveWrap(bpy.types.Operator):
+    """Take the wrap off the selected objects' materials (a wrap exported from the app's Wraps tab,
+    or a weapon's own), with the FP app open"""
+    bl_idname = "fpmp.remove_wrap"
+    bl_label = "Remove Wrap"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        from ..material_porter import wrap
+        job = types.SimpleNamespace(options={'RimLight': False}, type=types.SimpleNamespace(name='MESH'))
+        materials, objects, _ = wrap.lay(job, wrap.targets(context), None)
+        if materials == 0:
+            self.report({'INFO'}, "No wrapped materials on the selection")
+            return {'CANCELLED'}
+        self.report({'INFO'}, "Wrap removed from %d material(s) on %d object(s)" % (materials, objects))
+        return {'FINISHED'}
+
+
 class FPMP_PT_Exact(bpy.types.Panel):
     bl_label = "Exact Materials"
     bl_idname = "FPMP_PT_exact"
@@ -158,9 +176,12 @@ class FPMP_PT_Exact(bpy.types.Panel):
         row = col.row(align=True)
         row.operator(FPMP_OT_ConvertExact.bl_idname, text="Selected").scope = 'SELECTED'
         row.operator(FPMP_OT_ConvertExact.bl_idname, text="Scene").scope = 'SCENE'
+        # a wrap goes on from the app (Assets > Wraps, onto the selection); it comes off here
+        col.separator()
+        col.operator(FPMP_OT_RemoveWrap.bl_idname, text="Remove Wrap from Selected")
 
 
-classes = (FPMP_OT_ConvertExact, FPMP_PT_Exact)
+classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_PT_Exact)
 
 
 def register():

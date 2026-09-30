@@ -99,6 +99,16 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     material sets itself (diffuse, normals, masks, `CustomizationMask (_CM)`).
   Exact materials only: FP's own presets don't show either.
   Test routes: `fork-find-assets?path=&class=`, `fork-dump?path=[&full=1]`.
+- **Wraps.** Assets > Cosmetics > Wraps lists the wraps (`AthenaItemWrapDefinition`, about 1,200).
+  A wrap has no mesh: its export (`EExportType.Wrap`, `MeshExport.MPWrap`) carries its values, and
+  the plugin (`material_porter/wrap.py`) lays them over the exact materials of what is selected in
+  Blender - the selected meshes and those under a selected armature or empty - by building each
+  again with `MPWrap` (`hook.build_exact`). A material keeps what it was built with
+  (`mp_overlay`) and its wrap's name (`mp_wrap`), so a style's values stay under the wrap, another
+  wrap replaces the first (a weapon's own too), and "Remove Wrap from Selected" (sidebar >
+  Fortnite Porting > Exact Materials) takes it off. The values a wrap's projection needs of the
+  weapon (`DO NOT OVERRIDE-OBMIN`...) are the weapon's material's own. FP's own materials are
+  left as they are.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the
@@ -226,8 +236,8 @@ a commit's) ask neither.
   `SettingsService.cs`, `Program.cs`, `BlenderInstallation.cs`,
   `ExportClientService.cs`, `AppWindowModel.cs`, `AssetVideoPreview.axaml.cs` (libvlc in a
   single-file build), `ExportContext.Unreal.cs` and `MeshExport.cs` (Geometry Collections, LEGO
-  props), `ExportContext.Fortnite.cs` (weapon looks), `FortnitePorting.csproj`, `build-release.yml`, `build-commit.yml`, `README.md`, plugin
-  `server.py` and `material_context.py`.
+  props), `ExportContext.Fortnite.cs` (weapon looks), `Enums.cs` (the fork's export types), `FortnitePorting.csproj`, `build-release.yml`, `build-commit.yml`, `README.md`, plugin
+  `server.py`, `material_context.py`, `mesh_context.py`, `importer.py` and `enums.py`.
 
 Generated files come from Material Porter (`Documents/Claude/materialporter`):
 edit there, then `python tools/sync_fork.py`.
