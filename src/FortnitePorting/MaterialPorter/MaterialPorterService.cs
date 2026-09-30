@@ -324,6 +324,54 @@ public class MaterialPorterService : IService
                 return new { model.IsInitialized, Sidebar = model.SidebarItems.Count, Tabs = tabs.Count, WithoutOwnIcon = tabs.Where(t => !t.OwnIcon).Select(t => t.Type), tabs };
             });
         }
+        if (route == "fork-screenshot")
+        {
+            // tests: the window as it shows an asset tab (type=; search=, filters=Title,Title, select= a display
+            // name to open its info), rendered to a PNG (path=) after wait= seconds (icons load)
+            var window = AppServices.App.Lifetime.MainWindow!;
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                window.WindowState = Avalonia.Controls.WindowState.Normal;
+                window.Width = double.TryParse(query["width"], out var w) ? w : 1600;
+                window.Height = double.TryParse(query["height"], out var h) ? h : 950;
+                AppServices.Navigation.App.Open<Views.AssetsView>();
+            });
+            var assetsModel = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ViewModels.AssetsViewModel>(AppServices.Services);
+            for (var i = 0; i < 60 && !assetsModel.IsInitialized; i++) await Task.Delay(500);
+            if (query["type"] is { } shown)
+            {
+                // as a click on the tab does, then once it has listed
+                await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => AppServices.Navigation.Assets.Open(Enum.Parse<EExportType>(shown)));
+                var listing = AppServices.AssetLoading.Get(Enum.Parse<EExportType>(shown));
+                for (var i = 0; i < 600 && !listing.FinishedLoading; i++) await Task.Delay(500);
+            }
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                if (query["type"] is not null)
+                {
+                    var tab = AppServices.AssetLoading.ActiveLoader!;
+                    foreach (var active in tab.ActiveFilters.ToList()) tab.UpdateFilters(active, false);
+                    tab.SelectedAssetInfos = [];
+                    tab.SearchFilter = query["search"] ?? "";
+                    foreach (var title in (query["filters"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries))
+                        if (tab.FilterCategories.SelectMany(c => c.Filters).FirstOrDefault(f => f.Title == title) is { } filter)
+                            tab.UpdateFilters(filter, true);
+                    if (query["select"] is { } pick && tab.Source.Items.OfType<Models.Assets.Asset.AssetItem>()
+                            .FirstOrDefault(a => a.CreationData.DisplayName.Equals(pick, StringComparison.OrdinalIgnoreCase)) is { } item)
+                        tab.SelectedAssetInfos = [new Models.Assets.Asset.AssetInfo(item)];
+                }
+            });
+            await Task.Delay(TimeSpan.FromSeconds(double.TryParse(query["wait"], System.Globalization.CultureInfo.InvariantCulture, out var settle) ? settle : 8));
+            return await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                var size = new Avalonia.PixelSize((int) window.Bounds.Width, (int) window.Bounds.Height);
+                using var shot = new Avalonia.Media.Imaging.RenderTargetBitmap(size);
+                shot.Render(window);
+                var file = query["path"] ?? throw new ArgumentException("path missing");
+                shot.Save(file);
+                return new { file, size.Width, size.Height, AppServices.AssetLoading.ActiveLoader?.Filtered.Count };
+            });
+        }
         if (route == "fork-status")
         {
             // tests: the status line and the newest log lines, as the window shows them

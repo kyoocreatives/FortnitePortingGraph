@@ -139,9 +139,10 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   outlines are kept in `.data/mp_animations.tsv` (keyed by the file and archive counts), after
   which the tab lists in about a second. An export goes onto the armature selected in Blender, as
   from the Files tab (`AnimExport` reads the asset the tab listed unread).
-  An animation of an item shows the item's name and icon ("Vanguard Squadron X-wing · Maverick
-  Closed GLIDER"), and the tab sorts by name, so an item's animations sit together and the search
-  finds them by the item's name (`MaterialPorter/AnimationOwners.cs`, `Animations.Assign`): a
+  An animation of an item shows the item's icon, and its name is its own then the item's ("Closed
+  GLIDER · Vanguard Squadron X-wing": without what its folders already say, since a tile shows a
+  dozen letters; the whole name stays the object's), so the search finds an item's animations by
+  the item's name; the tab turns names on (its tiles share their item's icon) (`MaterialPorter/AnimationOwners.cs`, `Animations.Assign`): a
   glider's, a back bling's and a pickaxe's by the skeleton of the item's mesh (from the mesh's
   package's imports; a skeleton a few items share is theirs together, one of more than 3 none), an
   emote's by its montage's folder, and the animations beside or under one found so (a glider's
@@ -164,7 +165,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   with the materials it puts on them, a sprite or ribbon renderer's material on a plane the plugin
   makes (`material_porter/effects.py`), a decal renderer's on a quad across its projection. A
   renderer's own material parameters ride on the material as `MPValues`.
-  Test routes: `fork-loader?type=Effect&described=1` (the listing, its descriptions, how many play),
+  Test routes: `fork-screenshot?type=&search=&filters=A,B&select=&path=` (the window showing a tab,
+  rendered to a PNG), `fork-loader?type=Effect&described=1` (the listing, its descriptions, how many play),
   `fork-export-asset?type=Effect&listed=1&path=<object path>` (the export of the item as listed).
   - **CPU emitters are replayed.** A CPU emitter keeps its compiled scripts in the cooked asset
     (VectorVM bytecode). The system's node carries the package's exports (`Effects.Program`) and

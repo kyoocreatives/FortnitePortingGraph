@@ -112,11 +112,38 @@ public static partial class Animations
         }
     }
 
-    /// <summary>An animation's name in the tab: its item's name first, where it has one; underscores as spaces.</summary>
+    /// <summary>
+    /// An animation's name in the tab: its own (underscores as spaces: what a tile shows, under its
+    /// item's icon), then its item's, where it has one (what the search finds it by).
+    /// </summary>
     public static string DisplayName(UObject animation)
     {
-        var name = animation.Name.Replace('_', ' ');
-        return (Unloaded.Detail(animation) as Outline)?.Owner is { } owner ? $"{owner.Name} · {name}" : name;
+        var outline = Unloaded.Detail(animation) as Outline;
+        var name = Short(animation.Name, outline?.Folder ?? "").Replace('_', ' ');
+        return outline?.Owner is { } owner ? $"{name} · {owner.Name}" : name;
+    }
+
+    private static readonly string[] Prefixes = ["AM_", "AS_", "A_", "Anim_", "Emote_"];
+
+    /// <summary>
+    /// An animation's name without what its folders already say (a tile shows a dozen letters):
+    /// "Maverick_Closed_GLIDER" in .../ParaGlide/Maverick is "Closed_GLIDER", "Emote_Prance_CLF" in
+    /// .../Emotes/Prance "CLF". The whole name stays the object's, which the search also finds.
+    /// </summary>
+    private static string Short(string name, string folder)
+    {
+        var shorter = name;
+        foreach (var prefix in Prefixes)
+            if (shorter.StartsWith(prefix, StringComparison.OrdinalIgnoreCase) && shorter.Length > prefix.Length)
+                shorter = shorter[prefix.Length..];
+        var names = folder.Split('/', StringSplitOptions.RemoveEmptyEntries).Reverse().Take(4);
+        foreach (var part in names)
+            if (shorter.StartsWith(part + "_", StringComparison.OrdinalIgnoreCase) && shorter.Length > part.Length + 1)
+            {
+                shorter = shorter[(part.Length + 1)..];
+                break;
+            }
+        return shorter;
     }
 
     public static string? IconPath(UObject animation) => ((Unloaded.Detail(animation) as Outline)?.Owner)?.Icon;

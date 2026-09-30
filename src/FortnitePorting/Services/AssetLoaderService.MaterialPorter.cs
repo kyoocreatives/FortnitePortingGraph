@@ -46,7 +46,7 @@ public partial class AssetLoaderService
             ClassNames = Animations.Classes,
             HideRarity = true,
             // an animation of an item (a glider's, a back bling's, a pickaxe's, an emote's) shows the
-            // item's name and icon, so they can be found by the item: sorted by name, they sit together
+            // item's icon and its name after its own: the search finds an item's animations by its name
             SortType = EAssetSortType.AZ,
             DisplayNameHandler = Animations.DisplayName,
             DescriptionHandler = Animations.Describe,

@@ -75,6 +75,9 @@ public partial class AssetsViewModel(
         {
             if (e.PropertyName == nameof(AssetLoaderService.ActiveLoader))
                 OnPropertyChanged(nameof(IsTastyRigApplyVisible));
+            // Material Porter fork: the Animations tab's tiles share their item's icon: its names on
+            if (e.PropertyName == nameof(AssetLoaderService.ActiveLoader) && _assetLoader.ActiveLoader?.Type is EExportType.Animation)
+                ShowNames = true;
         };
 
         ShowNames = _settings.Application.ShowAssetNames;
