@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using System.Linq;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Material;
+using CUE4Parse.UE4.Assets.Exports.SkeletalMesh;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Engine;
@@ -37,7 +38,15 @@ public partial class ExportContext
         }
     }
 
-    /// <summary>The weapon's meshes (WeaponDefinition's) as its actor class and its own wrap show them.</summary>
+    /// <summary>The wrap picked on the asset's page: null for the item's own (if it has one), "" for none, else a wrap item's path.</summary>
+    public string? WrapPick;
+    /// <summary>The mods picked on a weapon's page, by slot: a mod item's path, "" for none; a slot left out keeps the weapon's own.</summary>
+    public Dictionary<string, string> WeaponModPicks = [];
+
+    /// <summary>
+    /// The weapon's meshes (WeaponDefinition's) as the game shows them: its actor class's look, its
+    /// mods on their attach points, and its own wrap (a picked one goes on after: MeshExport).
+    /// </summary>
     public void WeaponLook(UObject weaponDefinition, List<ExportMesh> meshes)
     {
         if (meshes.Count == 0) return;
@@ -50,10 +59,12 @@ public partial class ExportContext
                 WeaponComponentLook(defaults, "LeftHandWeaponMesh", meshes, 1);
             }
 
-            if (weaponDefinition.GetOrDefault<FSoftObjectPath>("IntrinsicOverrideWrap").TryLoad(out UObject? wrap)
+            WeaponModMeshes(weaponDefinition, meshes[0]);
+
+            if (WrapPick is null && weaponDefinition.GetOrDefault<FSoftObjectPath>("IntrinsicOverrideWrap").TryLoad(out UObject? wrap)
                 && WrapValues(wrap) is { } values)
             {
-                foreach (var mesh in meshes) ApplyWrap(mesh, values);
+                foreach (var mesh in meshes) ApplyWrapDeep(mesh, values);
             }
         }
         catch (Exception e)
@@ -61,6 +72,51 @@ public partial class ExportContext
             // the plain weapon, then
             Serilog.Log.Warning("[Material Porter] {Weapon}: its look wasn't read ({Error})", weaponDefinition.Name, e.Message);
         }
+    }
+
+    /// <summary>
+    /// The weapon's mods as children of its mesh, each on its attach point and following that bone: the
+    /// weapon's own (its WeaponModSlots, unless it hides them), or the ones picked on its page.
+    /// </summary>
+    private void WeaponModMeshes(UObject weaponDefinition, ExportMesh weapon)
+    {
+        var provider = FileProvider;
+        var own = WeaponMods.Defaults(provider, weaponDefinition);
+        if (own is null && WeaponModPicks.Count == 0) return;
+        if (WeaponDefinitionMeshes(weaponDefinition).FirstOrDefault() is not USkeletalMesh weaponMesh) return;
+        var hidden = weaponDefinition.GetOrDefault("bModsHidden", false);
+        var tags = WeaponMods.Tags(weaponDefinition);
+        foreach (var slot in WeaponMods.Slots)
+        {
+            WeaponMod? mod = null;
+            if (WeaponModPicks.TryGetValue(slot, out var picked))
+            {
+                if (picked.Length > 0) mod = WeaponMods.Find(provider, picked);
+            }
+            else if (!hidden) own?.TryGetValue(slot, out mod);
+            if (mod is null) continue;
+
+            if (WeaponMods.Place(provider, mod, tags, weaponMesh) is not { } placement || Mesh(placement.Mesh) is not { } mesh)
+            {
+                Serilog.Log.Information("[Material Porter] {Weapon}: {Mod} has no place on it", weaponDefinition.Name, mod.Name);
+                continue;
+            }
+            weapon.Children.Add(new MaterialPorterMesh(mesh)
+            {
+                Name = mod.Item.Name,
+                Location = placement.Transform.Translation,
+                Rotation = placement.Transform.Rotator(),
+                Scale = placement.Transform.Scale3D,
+                MPParentBone = placement.Bone,
+            });
+        }
+    }
+
+    /// <summary>A wrap over a mesh and the meshes under it (a weapon's mods).</summary>
+    public void ApplyWrapDeep(ExportMesh mesh, ParamSet wrap)
+    {
+        ApplyWrap(mesh, wrap);
+        foreach (var child in mesh.Children) ApplyWrapDeep(child, wrap);
     }
 
     /// <summary>A weapon mesh component's material overrides and custom primitive data, onto the mesh it shows.</summary>
@@ -94,6 +150,10 @@ public partial class ExportContext
         if (primitiveData is not null)
             meshes[index] = new MaterialPorterMesh(mesh) { MPPrimitiveData = primitiveData };
     }
+
+    /// <summary>A wrap item's values, by its path; null when there's no such wrap.</summary>
+    public ParamSet? WrapValuesAt(string path) =>
+        FileProvider.TryLoadPackageObject(path, out UObject? wrap) ? WrapValues(wrap) : null;
 
     /// <summary>A wrap's values: everything its material's instance chain sets (the child's win).</summary>
     public ParamSet? WrapValues(UObject wrap)

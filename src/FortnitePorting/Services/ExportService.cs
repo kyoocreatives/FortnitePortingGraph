@@ -293,6 +293,9 @@ public class ExportService(
             CarStyleData car => new Exporting.MaterialPorter.ExportCarStyle { Channel = car.Channel, Option = car.Option },
             // Material Porter fork: a LEGO figure's expression pick
             FigureFaceStyleData face => new Exporting.MaterialPorter.ExportFigureFaceStyle { Feature = face.Feature, Pose = face.Pose },
+            // Material Porter fork: the wrap and the weapon mods picked on the asset's page
+            WrapStyleData wrap => new Exporting.MaterialPorter.ExportWrapStyle { Path = wrap.Path },
+            WeaponModStyleData mod => new Exporting.MaterialPorter.ExportWeaponModStyle { Slot = mod.Slot, Path = mod.Path },
             AssetColorStyleData colorStyle => new ExportColorStyle
             {
                 StyleData = colorStyle.StyleData,

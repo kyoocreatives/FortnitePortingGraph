@@ -1,15 +1,13 @@
-"""Material Porter fork: a wrap laid over what is selected.
+"""Material Porter fork: a wrap over the selected objects' materials, changed or taken off.
 
-A wrap (Assets > Cosmetics > Wraps) has no mesh: its export carries the values its material sets
-(the app's ExportContext.WrapValues). The game lays those over a weapon's or vehicle's own
-material; here each exact material of the selected objects is built again with them over it
-(hook.build_exact's MPWrap), and takes the old one's slots. A material keeps what it was built
-with (hook.KEY_OVERLAY), so a style's values stay under the wrap, another wrap replaces the
-first, and the wrap can be taken off again. FP's own materials (not exact) are left as they are.
+A wrap is picked on a weapon's or a vehicle's page in the app and comes with the export
+(a material's MPWrap: the values the wrap's material sets, which the game lays over the asset's
+own material). A built material keeps what it was built with under its wrap (hook.KEY_OVERLAY),
+so each exact material of the selected objects can be built again with another wrap, or none
+(the panel's Remove Wrap), and take the old one's slots. FP's own materials (not exact) are left
+as they are.
 """
 import json
-
-import bpy
 
 from . import build, hook
 
@@ -65,21 +63,3 @@ def lay(job_context, objects, wrap):
                 slot.material = new
                 touched.add(o.name)
     return len(rebuilt), len(touched), sorted(skipped)
-
-
-def apply_export(import_context, data):
-    """A wrap's export (FP's import of it): over the selection. The line for the app's log."""
-    wrap = data.get("MPWrap")
-    name = data.get("Name") or "wrap"
-    if not wrap:
-        return "%s has no wrap material" % name
-    objects = targets(bpy.context)
-    if not objects:
-        return "%s: select the weapon (or vehicle) to wrap first" % name
-    materials, touched, skipped = lay(import_context, objects, wrap)
-    if materials == 0:
-        return "%s: nothing to wrap - the selection has no exact materials (%d of FP's own)" % (name, len(skipped))
-    line = "%s laid over %d material(s) on %d object(s)" % (name, materials, touched)
-    if skipped:
-        line += "; %d left as they are (not exact materials)" % len(skipped)
-    return line

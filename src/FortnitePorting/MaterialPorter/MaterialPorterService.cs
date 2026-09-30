@@ -326,6 +326,57 @@ public class MaterialPorterService : IService
                 .Take(int.TryParse(query["count"], out var max) ? max : 400)
                 .Select(a => $"{a.AssetClass.Text} {a.PackageName.Text}"));
         }
+        if (route == "fork-asset-page")
+        {
+            // tests: an asset's page as the Assets view builds it (type=, name= its display name): its style
+            // channels once they have filled in (wait= seconds); pick=Channel:Option;... picks options, and
+            // export=1 exports with the picks as the Export button does (the styles through ExportService)
+            var loader = AppServices.AssetLoading.Get(Enum.Parse<EExportType>(query["type"] ?? "Item"));
+            await loader.Load();
+            var wanted = query["name"] ?? throw new ArgumentException("name missing");
+            var item = loader.Source.Items.OfType<Models.Assets.Asset.AssetItem>()
+                           .FirstOrDefault(a => a.CreationData.DisplayName.Equals(wanted, StringComparison.OrdinalIgnoreCase))
+                       ?? throw new FileNotFoundException("no asset named " + wanted);
+            var stylePaths = loader.StyleDictionary.GetValueOrDefault(item.CreationData.DisplayName) ?? loader.StyleDictionary.GetValueOrDefault(item.CreationData.ID);
+            var info = await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => stylePaths is not null
+                ? new Models.Assets.Asset.AssetInfo(item, stylePaths.OrderBy(x => x.EndsWith(item.CreationData.ID, StringComparison.OrdinalIgnoreCase) ? 0 : 1))
+                : new Models.Assets.Asset.AssetInfo(item));
+            await Task.Delay(TimeSpan.FromSeconds(double.TryParse(query["wait"], System.Globalization.CultureInfo.InvariantCulture, out var seconds) ? seconds : 8));
+            return await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync<object>(async () =>
+            {
+                foreach (var pick in (query["pick"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':', 2)).Where(x => x.Length == 2))
+                {
+                    var channel = info.StyleInfos.First(c => c.ChannelName == pick[0]);
+                    channel.SelectedStyleIndex = channel.StyleDatas.ToList().FindIndex(d => d.StyleName == pick[1]);
+                }
+                var page = info.StyleInfos.Select(c => new
+                {
+                    c.ChannelName, options = c.StyleDatas.Count, c.IsPicker, selected = c.SelectedStyle.StyleName,
+                    images = c.StyleDatas.Count(d => d.StyleDisplayImage is not null), first = c.StyleDatas.Take(6).Select(d => d.StyleName),
+                }).ToList();
+                if (query["export"] != "1") return JToken.FromObject(new { page });
+                var convert = typeof(ExportService).GetMethod("ConvertStyles", System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)!;
+                var styles = (Exporting.Styles.ExportStyleBase[]) convert.Invoke(null, [info.GetSelectedStyles()])!;
+                using var pageMeta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
+                var pageSession = new ExportSession(pageMeta);
+                var pageData = await Task.Run(() => pageSession.RunAsync(() => [pageSession.CreateExport(item.CreationData.Object!.Name, item.CreationData.Object, item.CreationData.ExportType, styles)]));
+                return new JRaw(JsonConvert.SerializeObject(new { page, pageData.Exports }));
+            });
+        }
+        if (route == "fork-weapon-mods")
+        {
+            // tests: a weapon item's mod slots as its page lists them (its own mod, the mods that allow it)
+            var weapon = await Game.Provider.LoadPackageObjectAsync(query["path"] ?? throw new ArgumentException("path missing"));
+            return JToken.FromObject(new
+            {
+                tags = WeaponMods.Tags(weapon).OrderBy(t => t),
+                slots = WeaponMods.Plan(Game.Provider, weapon).Select(p => new
+                {
+                    p.Slot, own = p.Default?.Name, options = p.Options.Select(o => new { Name = WeaponMods.Labels(p.Options)[o], o.Path, o.Tag }),
+                }),
+                all = WeaponMods.All(Game.Provider).Count,
+            });
+        }
         if (route == "fork-find-files")
         {
             // tests: the game files whose path holds every word of ?path= (space-separated), whatever their type
@@ -387,6 +438,10 @@ public class MaterialPorterService : IService
                 .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportCarStyle { Channel = int.Parse(x[0]), Option = int.Parse(x[1]) })
                 .Concat((query["face"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))
                     .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportFigureFaceStyle { Feature = x[0], Pose = int.Parse(x[1]) }))
+                // wrap=<wrap item path, or empty for none>; mods=Optic:<mod item path>;Magazine: (empty: none)
+                .Concat(query["wrap"] is { } wrapPick ? [new ExportWrapStyle { Path = wrapPick }] : Array.Empty<Exporting.Styles.ExportStyleBase>())
+                .Concat((query["mods"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':', 2))
+                    .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportWeaponModStyle { Slot = x[0], Path = x[1] }))
                 .ToArray();
             using var assetMeta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
             var assetSession = new ExportSession(assetMeta);

@@ -4,7 +4,6 @@ using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Exports.Texture;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.i18N;
-using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.CUE4Parse.Extensions;
 using FortnitePorting.Exporting.MaterialPorter;
 using FortnitePorting.Models.Assets.Filters;
@@ -18,13 +17,6 @@ public partial class AssetLoaderService
 {
     public AssetLoaderService()
     {
-        // wraps: exporting one lays it over the materials of what is selected in Blender (weapons, vehicles...)
-        Categories.First(category => category.Category == EAssetCategory.Cosmetics).Loaders.Add(new AssetLoader(EExportType.Wrap)
-        {
-            ClassNames = ["AthenaItemWrapDefinition"],
-            HidePredicate = (_, asset, _) => asset.GetOrDefault<FSoftObjectPath>("ItemWrapMaterial").AssetPathName.IsNone,
-        });
-
         Categories.Add(new AssetLoaderCategory(EAssetCategory.RocketRacing)
         {
             Loaders =

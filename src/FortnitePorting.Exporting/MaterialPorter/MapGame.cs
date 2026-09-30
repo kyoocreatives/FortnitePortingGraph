@@ -24,6 +24,8 @@ public record MaterialPorterMesh : ExportMesh
     public Dictionary<string, object>? MPSpline;
     /// <summary>A landscape's weight layers: LayerInfo asset name (FP's colour layer name) -> LayerName.</summary>
     public Dictionary<string, string>? MPLayerNames;
+    /// <summary>The parent's bone the mesh follows (a weapon mod on its attach bone), or null: the parent itself.</summary>
+    public string? MPParentBone;
 }
 
 /// <summary>A material with values over it: a dynamic instance's, a building's texture data.</summary>

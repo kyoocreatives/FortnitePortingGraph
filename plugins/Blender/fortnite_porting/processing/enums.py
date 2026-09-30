@@ -45,8 +45,6 @@ class EExportType(IntEnum):
     EMOTE = ExportCategory.COSMETIC + 12
     SIDEKICK = ExportCategory.COSMETIC + 13
     KICKS = ExportCategory.COSMETIC + 14
-    # Material Porter fork: a wrap, laid over the selected objects' materials
-    WRAP = ExportCategory.COSMETIC + 15
 
     # CREATIVE
     PROP = ExportCategory.CREATIVE + 1

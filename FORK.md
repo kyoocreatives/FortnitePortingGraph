@@ -99,16 +99,35 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     material sets itself (diffuse, normals, masks, `CustomizationMask (_CM)`).
   Exact materials only: FP's own presets don't show either.
   Test routes: `fork-find-assets?path=&class=`, `fork-dump?path=[&full=1]`.
-- **Wraps.** Assets > Cosmetics > Wraps lists the wraps (`AthenaItemWrapDefinition`, about 1,200).
-  A wrap has no mesh: its export (`EExportType.Wrap`, `MeshExport.MPWrap`) carries its values, and
-  the plugin (`material_porter/wrap.py`) lays them over the exact materials of what is selected in
-  Blender - the selected meshes and those under a selected armature or empty - by building each
-  again with `MPWrap` (`hook.build_exact`). A material keeps what it was built with
-  (`mp_overlay`) and its wrap's name (`mp_wrap`), so a style's values stay under the wrap, another
-  wrap replaces the first (a weapon's own too), and "Remove Wrap from Selected" (sidebar >
-  Fortnite Porting > Exact Materials) takes it off. The values a wrap's projection needs of the
-  weapon (`DO NOT OVERRIDE-OBMIN`...) are the weapon's material's own. FP's own materials are
-  left as they are.
+- **Wraps on the asset's page.** A weapon's or a vehicle's page has a Wrap list (the searchable
+  picker, like a car's wheels): "Default" (the item as it is, an exotic's own wrap included),
+  "None" where the item has one, then every wrap (`AthenaItemWrapDefinition`, about 1,200; their
+  names and icon tiles are read once per run). Only on what takes wraps: an asset one of whose
+  materials sets the customization mask (`Wraps.Supports`: weapons, the ATK, the Baller; not a
+  potion or the battle bus). The pick (`WrapStyleData` > `ExportWrapStyle`) goes over every mesh
+  of the export, a weapon's mods too (`MeshExport.ApplyWrapPick`), as `MPWrap` on each material;
+  the plugin lays it over the material's own values and `MPValues`, but for the textures those
+  set. A built material keeps what it was built with (`mp_overlay`) and its wrap's name
+  (`mp_wrap`): "Remove Wrap from Selected" (sidebar > Fortnite Porting > Exact Materials,
+  `material_porter/wrap.py`) takes the wrap off in Blender. The values a wrap's projection needs
+  of the weapon (`DO NOT OVERRIDE-OBMIN`...) are the weapon's material's own.
+- **Weapon mods** (`MaterialPorter/WeaponMods.cs`). A weapon item lists the mods it comes with
+  (its DataList's `WeaponModSlots`: a magazine, a foregrip, its sights); FP exported the bare
+  mesh. Now they come with it, and the weapon's page has a list per slot (Optic, Magazine,
+  Barrel, Underbarrel): "Default" (the weapon's own), "None", and the mods that allow the weapon
+  (each mod's `AllowedWeaponTagQuery`, a gameplay tag query's token stream, against the weapon's
+  tags) and have a mesh for it; other weapons' iron sights are left out, and same-named mods say
+  which family they are (`WeaponMods.Labels`). A mod's mesh, attach point and offset on a weapon
+  are the row of the `*WeaponModOverrideData` tables (20 of them) for the weapon's tag and the
+  mod's tag (the most specific weapon tag wins), else the mod's `DefaultModData`. The attach
+  point (`attach_mag`, `attach_optic`, `attach_barrel`, `attach_under`, `attach_side`) is a bone
+  of the weapon's skeleton or a socket on one: the export places the mod there in the weapon's
+  space (the reference pose) as a child mesh with `MPParentBone`, and the plugin parents it to
+  that bone (`placement.follow_bone`), so it follows the weapon's animation. A weapon with
+  `bModsHidden` shows none of its own. `WeaponModStyleData` > `ExportWeaponModStyle`.
+  Test routes: `fork-weapon-mods?path=`, `fork-asset-page?type=&name=[&pick=Channel:Option;...][&export=1]`
+  (an asset's page as the Assets view builds it, and its export through `ExportService`'s styles),
+  `fork-export-asset` takes `wrap=` and `mods=Slot:path;...`.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the
@@ -236,7 +255,8 @@ a commit's) ask neither.
   `SettingsService.cs`, `Program.cs`, `BlenderInstallation.cs`,
   `ExportClientService.cs`, `AppWindowModel.cs`, `AssetVideoPreview.axaml.cs` (libvlc in a
   single-file build), `ExportContext.Unreal.cs` and `MeshExport.cs` (Geometry Collections, LEGO
-  props), `ExportContext.Fortnite.cs` (weapon looks), `Enums.cs` (the fork's export types), `FortnitePorting.csproj`, `build-release.yml`, `build-commit.yml`, `README.md`, plugin
+  props), `ExportContext.Fortnite.cs` (weapon looks), `Enums.cs` (the fork's export types), `AssetInfo.cs` and
+  `ExportService.cs` (the fork's style lists), `FortnitePorting.csproj`, `build-release.yml`, `build-commit.yml`, `README.md`, plugin
   `server.py`, `material_context.py`, `mesh_context.py`, `importer.py` and `enums.py`.
 
 Generated files come from Material Porter (`Documents/Claude/materialporter`):

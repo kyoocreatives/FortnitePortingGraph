@@ -1,6 +1,7 @@
 """Material Porter fork: what Material Porter's map reader adds to a placed mesh
 (the fork's MaterialPorterMesh fields), applied once FP has made its object."""
 import bpy
+from mathutils import Matrix
 
 from .meshes import spline_bend, white_colors
 
@@ -10,6 +11,8 @@ def after_import(mesh, obj, mesh_obj, scale):
     white vertex colours where the mesh has none (what UE reads there), and
     the component's custom primitive data / an instance's custom data as
     the object properties the exact materials read (mp_cpd<i>, mp_pic<i>)."""
+    if obj is not None and (bone := mesh.get("MPParentBone")):
+        follow_bone(obj, bone)
     target = mesh_obj if mesh_obj is not None else obj
     if target is None or target.type != 'MESH':
         return
@@ -30,6 +33,24 @@ def after_import(mesh, obj, mesh_obj, scale):
         target["mp_pic"] = float(len(pic))
         for j, x in enumerate(pic):
             target["mp_pic%d" % j] = float(x)
+
+
+def follow_bone(obj, bone):
+    """A weapon's mod follows its attach bone: the object FP parented to the weapon's armature
+    (placed in the armature's space) is parented to the bone instead, where it is."""
+    armature = obj.parent
+    if armature is None or armature.type != 'ARMATURE':
+        return
+    rest = armature.data.bones.get(bone)
+    if rest is None:
+        return
+    # a bone's children hang from its tail
+    bone_space = rest.matrix_local @ Matrix.Translation((0.0, rest.length, 0.0))
+    local = obj.matrix_basis.copy()
+    obj.parent_type = 'BONE'
+    obj.parent_bone = rest.name
+    obj.matrix_parent_inverse = Matrix.Identity(4)
+    obj.matrix_basis = bone_space.inverted() @ local
 
 
 def after_world(objects):

@@ -39,13 +39,16 @@ public class MeshExport : BaseExport
     public readonly List<ExportOverrideMorphTargets> OverrideMorphTargets = [];
     public ExportLightCollection Lights = new();
     public AnimExport? Animation;
-    /// <summary>Material Porter fork: a wrap's values, for the materials of what is selected in Blender.</summary>
-    public MaterialPorter.ParamSet? MPWrap;
     [Newtonsoft.Json.JsonIgnore] public Dictionary<int, int> CarPicks = [];
     [Newtonsoft.Json.JsonIgnore] public Dictionary<string, int> FacePicks = [];
     
     public MeshExport(string name, UObject asset, ExportStyleBase[] styles, EExportType exportType, ExportDataMeta metaData, IExportFileMeta? fileMeta) : base(name, exportType, metaData)
     {
+        // Material Porter fork: the wrap and the weapon mods picked on the asset's page
+        Context.WrapPick = styles.OfType<MaterialPorter.ExportWrapStyle>().FirstOrDefault()?.Path;
+        Context.WeaponModPicks = styles.OfType<MaterialPorter.ExportWeaponModStyle>().Where(s => s.Path is not null)
+            .GroupBy(s => s.Slot).ToDictionary(g => g.Key, g => g.Last().Path!);
+
         var objectStyles = styles.OfType<ExportObjectStyle>().ToArray();
         if (objectStyles.Length > 0)
         {
@@ -54,6 +57,7 @@ public class MeshExport : BaseExport
                 Export(objectStyle.StyleData, objectStyle.AssociatedExportType is not EExportType.None ? objectStyle.AssociatedExportType : exportType);
             }
 
+            ApplyWrapPick();
             return;
         }
 
@@ -65,6 +69,22 @@ public class MeshExport : BaseExport
 
         var assetStyles = styles.OfType<ExportStructStyle>();
         ExportStyles(asset, assetStyles);
+        ApplyWrapPick();
+    }
+
+    /// <summary>Material Porter fork: the wrap picked on the asset's page, over every mesh of the export.</summary>
+    private void ApplyWrapPick()
+    {
+        if (Context.WrapPick is not { Length: > 0 } path) return;
+        try
+        {
+            if (Context.WrapValuesAt(path) is not { } values) return;
+            foreach (var mesh in Meshes.Concat(OverrideMeshes)) Context.ApplyWrapDeep(mesh, values);
+        }
+        catch (Exception e)
+        {
+            Serilog.Log.Warning("[Material Porter] {Name}: the wrap wasn't laid over it ({Error})", Name, e.Message);
+        }
     }
 
     public MeshExport(string name, MeshDefinition mesh, Func<string, Stream> openCustomAssetResource, EExportType exportType, ExportDataMeta metaData) : base(name, exportType, metaData)
@@ -569,12 +589,6 @@ public class MeshExport : BaseExport
                 // Material Porter fork: the body, its wheels on their sockets, Mutable's colours
                 Meshes.AddRange(Context.MaterialPorterCar(asset, CarPicks));
                 Type = EExportType.Vehicle;     // the plugins import it as a vehicle
-                break;
-            }
-            case EExportType.Wrap:
-            {
-                // Material Porter fork: no mesh, the wrap's values (Context.WrapValues)
-                MPWrap = Context.WrapValues(asset);
                 break;
             }
             case EExportType.LegoWildlife:

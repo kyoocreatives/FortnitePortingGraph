@@ -16,15 +16,8 @@ FULL_VERTEX_CRUNCH_NAME = "FPv4 Full Vertex Crunch"
 
 class MeshImportContext:
     def import_mesh_data(self, data):
-        # Material Porter fork: a wrap has no mesh; it goes over the selected objects' materials
-        if self.type == EExportType.WRAP:
-            from ...material_porter import wrap
-            self.mp_summary = wrap.apply_export(self, data)
-            Log.info("[Material Porter] " + self.mp_summary)
-            return
-
         rig_type = ERigType(self.options.get("RigType"))
-
+        
         if rig_type == ERigType.TASTY:
             self.options["MergeArmatures"] = True
             self.options["ReorientBones"] = True

@@ -69,6 +69,8 @@ public partial class AssetInfo : Base.BaseAssetInfo
         if (Asset.CreationData.ExportType is EExportType.Car) AddCarStyles();
         // Material Porter fork: a LEGO figure's expression (the face rig's poses)
         if (Asset.CreationData.ExportType is EExportType.LegoOutfit) AddFigureFaceStyles();
+        // Material Porter fork: a weapon's mods by slot, and the wrap over a weapon or a vehicle
+        AddWeaponStyles();
 
         if (Asset.CreationData.ExportType is EExportType.Emote)
         {
@@ -153,6 +155,8 @@ public partial class AssetInfo : Base.BaseAssetInfo
         
         var styleInfo = new AssetStyleInfo("Styles", styleObjects, Asset.IconDisplayImage);
         if (styleInfo.StyleDatas.Count > 0) StyleInfos.Add(styleInfo);
+        // Material Porter fork: a weapon's mods by slot, and the wrap over a weapon or a vehicle
+        AddWeaponStyles();
     }
     
     public BaseStyleData[] GetSelectedStyles()
