@@ -196,6 +196,12 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     plays out. The skeleton's sockets come along (`MPSockets`): an armature without them still
     places an effect on a socket (on the socket's bone, where the skeleton puts it) and answers the
     scripts that read one.
+  - **A swing's trails.** A pickaxe swing animation (a harvesting montage, from the Files tab) turns
+    the held pickaxe's trails on and off with notifies (`FortAnimNotify_MeleeAnimTrails_On` /
+    `_Off`); they are exported as windows (`AnimExport.MPTrails`; a notify's time is its own link's:
+    `GetTime`). Imported onto a character, the windows go to the trail and swing effects of the
+    pickaxe under its armature (`effects.swing`; with none there, to every pickaxe trail in the
+    scene), which are replayed once per swing.
   - **Ribbons.** A ribbon's width runs across the view, the particles' facing, or along their side
     vector (a trail between two sockets), as the renderer says (the modifier's Facing); it has two
     UV sets along it (a trail's fades read the second).

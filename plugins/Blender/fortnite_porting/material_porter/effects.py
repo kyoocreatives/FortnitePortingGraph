@@ -148,6 +148,31 @@ def from_animation(context, entries, rig, sockets=None, skeleton=None):
         context.import_model(mesh)
 
 
+def swing(windows, rig):
+    """A swing animation's trail windows ([on, off] times) given to the pickaxe effects that show on
+    a swing (a pickaxe's own trail and swing effects: on the armature's pickaxe, else any in the
+    scene), which are replayed on them."""
+    from . import effect_replay
+    from .hook import _log
+    from ..processing.utils import time_to_frame
+    held = [o for o in rig.children_recursive if o.get(KEY) == "System" and o.get(KEY_ROLE) in ("trail", "swing")]
+    found = held or [o for o in bpy.context.scene.objects if o.get(KEY) == "System" and o.get(KEY_ROLE) in ("trail", "swing")]
+    if not found:
+        return
+    frames = sorted((time_to_frame(on), time_to_frame(off)) for on, off in windows)
+    for root in found:
+        root[effect_replay.KEY_START] = frames[0][0]
+        root[effect_replay.KEY_REPEATS] = [on - frames[0][0] for on, _ in frames]
+        root[effect_replay.KEY_LENGTHS] = [max(off - on, 1) for on, off in frames]
+        try:
+            for line in effect_replay.play(root):
+                _log(line)
+        except Exception as e:
+            _log("%s: not replayed on the swing (%s: %s)" % (root.name, type(e).__name__, e))
+    _log("the swing's %d trail window(s) given to %s%s" % (len(frames), ", ".join(o.name for o in found),
+                                                        "" if held else " (no pickaxe under the armature: every pickaxe trail in the scene)"))
+
+
 def finish(context, mesh, root):
     """Once a system's tree is imported: its CPU emitters replayed, their pieces played on the particles."""
     fx = mesh.get("MPEffect") or {}

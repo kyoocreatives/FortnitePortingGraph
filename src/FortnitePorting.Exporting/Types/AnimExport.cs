@@ -32,6 +32,9 @@ public class AnimExport : BaseExport
     public readonly List<MaterialPorter.ExportAnimEffect> MPEffects = new();
     // and the skeleton's sockets (an effect sits on one, or reads them; an armature in Blender may have none of them)
     public readonly Dictionary<string, MaterialPorter.ExportSocket> MPSockets = new(StringComparer.OrdinalIgnoreCase);
+    // and when a swing turns the held pickaxe's trails on and off: [on, off] times (its MeleeAnimTrails notifies)
+    public List<float[]> MPTrails = [];
+    private readonly List<float> _trailsOn = [], _trailsOff = [];
     private readonly HashSet<FAnimNotifyEvent> _effectNotifies = [];
     private readonly Dictionary<string, MaterialPorter.ExportAnimEffect> _effects = [];
     public List<ExportCurveMapping> LegacyToMetahumanMappings = [];
@@ -151,6 +154,13 @@ public class AnimExport : BaseExport
                 EffectNotify(notify, section.Time);
     }
 
+    /// <summary>Material Porter fork: the trail switches as windows: each "on" until the next "off" (half a second without one).</summary>
+    private void TrailWindows()
+    {
+        MPTrails = _trailsOn.Distinct().OrderBy(t => t)
+            .Select(on => new[] { on, _trailsOff.Where(off => off > on).DefaultIfEmpty(on + 0.5f).Min() }).ToList();
+    }
+
     /// <summary>Material Porter fork: a skeleton's sockets, by name.</summary>
     private void SkeletonSockets(USkeleton? skeleton)
     {
@@ -164,7 +174,8 @@ public class AnimExport : BaseExport
         }
     }
 
-    /// <summary>Material Porter fork: a notify that plays a Niagara system, as an effect on its socket from its time.</summary>
+    /// <summary>Material Porter fork: a notify that plays a Niagara system, as an effect on its socket from its time
+    /// (a notify's own: a montage's is linked to one of its segments, absolutely or from the segment's start).</summary>
     private void EffectNotify(FAnimNotifyEvent notify, float sectionTime)
     {
         if (!_effectNotifies.Add(notify)) return;
@@ -172,6 +183,13 @@ public class AnimExport : BaseExport
         {
             var timed = notify.NotifyStateClass?.Load<UObject>();
             var played = timed ?? notify.Notify?.Load<UObject>();
+            // a swing's trail switch
+            if (played?.ExportType is "FortAnimNotify_MeleeAnimTrails_On" or "FortAnimNotify_MeleeAnimTrails_Off")
+            {
+                (played.ExportType.EndsWith("_On") ? _trailsOn : _trailsOff).Add(sectionTime + notify.GetTime());
+                TrailWindows();
+                return;
+            }
             if (played?.GetOrDefault<UObject?>("Template") is not { ExportType: "NiagaraSystem" } system) return;
             var socket = played.GetOrDefault<FName>("SocketName");
             var location = played.GetOrDefault("LocationOffset", FVector.ZeroVector);
@@ -189,7 +207,7 @@ public class AnimExport : BaseExport
                 };
                 MPEffects.Add(effect);
             }
-            effect.Times.Add(sectionTime + notify.LinkValue);
+            effect.Times.Add(sectionTime + notify.GetTime());
             effect.Durations.Add(timed is not null ? notify.Duration : 0);
         }
         catch (Exception e)
