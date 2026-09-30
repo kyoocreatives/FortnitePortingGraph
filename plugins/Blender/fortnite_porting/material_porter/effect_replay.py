@@ -39,12 +39,16 @@ KEY_PROGRAM = "mp_effect_program"   # on an effect's empty: the text that keeps 
 KEY_SCALE = "mp_effect_scale"       # and the import's scale (Blender units per UE unit)
 KEY_ROOT = "mp_effect_root"         # on a particles object: its effect's empty
 KEY_SOCKETS = "mp_effect_sockets"   # on a pickaxe's trail's empty: the two sockets it runs between ("a,b")
+# on an animation's effect's empty: the frames after its Start Frame it is played again on (each of its notifies;
+# the first is 0), and for each how many frames a timed notify keeps it going (0: it plays out by itself)
+KEY_REPEATS, KEY_LENGTHS = "mp_effect_repeats", "mp_effect_lengths"
 KEY_START = "Start Frame"           # on an effect's empty: the scene frame its replay starts on (the user's to set)
 
 
-def store(root, exports, fields, scale):
-    """Keep what the effect's replay takes with the effect (a text in the file), to replay it again."""
-    packed = base64.b64encode(zlib.compress(json.dumps({"Exports": exports, "Fields": fields or {}}).encode("utf-8"))).decode("ascii")
+def store(root, exports, fields, scale, sockets=None):
+    """Keep what the effect's replay takes with the effect (a text in the file), to replay it again.
+    sockets: the skeleton's sockets ({name, lower case: its bone and place on it}), for an armature without them."""
+    packed = base64.b64encode(zlib.compress(json.dumps({"Exports": exports, "Fields": fields or {}, "Sockets": sockets or {}}).encode("utf-8"))).decode("ascii")
     text = bpy.data.texts.new(root.name + " replay")
     text.use_fake_user = True
     text.write("\n".join(packed[i:i + 4000] for i in range(0, len(packed), 4000)))
@@ -53,12 +57,12 @@ def store(root, exports, fields, scale):
 
 
 def program(root):
-    """What the effect's replay takes, as stored with it: (exports, fields), or None."""
+    """What the effect's replay takes, as stored with it: (exports, fields, the skeleton's sockets), or None."""
     text = bpy.data.texts.get(str(root.get(KEY_PROGRAM) or ""))
     if text is None:
         return None
     data = json.loads(zlib.decompress(base64.b64decode(text.as_string().replace("\n", ""))).decode("utf-8"))
-    return data["Exports"], data["Fields"]
+    return data["Exports"], data["Fields"], data.get("Sockets") or {}
 
 
 def _ue(matrix, scale):
@@ -126,30 +130,39 @@ class Stand:
     """Where the effect and its character stand, frame by frame: the effect's empty's transform,
     the armature's, and the bones and sockets the effect's scripts read."""
 
-    def __init__(self, scene, root, rig, reads, scale):
+    def __init__(self, scene, root, rig, reads, scale, sockets=None):
         self.scene, self.root, self.rig, self.scale = scene, root, rig, scale
+        self.seen = {}      # frame: its stand (an effect played several times asks for a frame again)
         self.still = None if _animated(root) else False     # unmoving: one frame's stand serves them all
-        self.bones = {}
+        self.bones = {}     # name read: (pose bone, where on it: a socket the armature doesn't have, else None)
         if rig is not None:
             by_name = {b.name.lower(): b for b in rig.pose.bones}
-            self.bones = {name: by_name[name] for name in reads if name in by_name}
+            for name in reads:
+                socket = (sockets or {}).get(name)
+                if name in by_name:
+                    self.bones[name] = (by_name[name], None)
+                elif socket is not None and str(socket.get("Bone")).lower() in by_name:
+                    self.bones[name] = (by_name[str(socket["Bone"]).lower()], effects.socket_matrix(socket, scale))
 
     def at(self, frame):
         """(the owner's matrix, the character's, its pose) on a scene frame, in UE's terms."""
         if self.still:
             return self.still
+        if frame in self.seen:
+            return self.seen[frame]
         if self.still is None:
             self.scene.frame_set(frame)
         bpy.context.view_layer.update()
         owner = _ue(self.root.matrix_world, self.scale)
         pose = {}
-        for name, bone in self.bones.items():
-            m = _ue(bone.matrix, self.scale)
+        for name, (bone, place) in self.bones.items():
+            m = _ue(bone.matrix @ place if place is not None else bone.matrix, self.scale)
             rows = m[:3, :3]
             pose[name] = (m[3, :3].copy(), niagara._quaternion(rows / np.maximum(np.linalg.norm(rows, axis=1, keepdims=True), 1e-9)))
         stand = (owner, _ue(self.rig.matrix_world, self.scale) if self.rig is not None else owner, pose)
         if self.still is False:
             self.still = stand
+        self.seen[frame] = stand
         return stand
 
 
@@ -166,10 +179,11 @@ def _between(a, b, t):
     return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, pose
 
 
-def replay(system, fps, frames, stand=None, first=1):
+def replay(system, fps, frames, stand=None, first=1, last=None):
     """The system ticked through the frames: {emitter name: [(floats, ints) per frame]}. stand: where
     the effect and its character are on each scene frame (a Stand), for an effect that moves or sits
-    on a character; without one it stays at its origin."""
+    on a character; without one it stays at its origin. last: the scene frame the game stops the
+    effect on (it spawns no more from there)."""
     ticks = max(1, round(60.0 / fps))
     dt = 1.0 / (fps * ticks)
     props = system.props
@@ -184,6 +198,8 @@ def replay(system, fps, frames, stand=None, first=1):
     total = 0
     for frame in range(frames):
         now = stand.at(first + frame) if stand is not None else None
+        if last is not None and first + frame >= last:
+            system.deactivate()
         for tick in range(ticks):
             if now is not None:
                 system.place(*_between(before, now, (tick + 1) / ticks))
@@ -210,6 +226,8 @@ class Track:
         self.counts = np.array([f[0].shape[1] for f in frames], np.int64)
         self.total = int(self.counts.sum())
         self.frame = np.repeat(np.arange(len(frames), dtype=np.int32), self.counts)
+        # which play of the effect each particle is of (an animation can play one several times)
+        self.run = np.concatenate([f[2] if len(f) > 2 else np.zeros(f[0].shape[1], np.int32) for f in frames]) if frames else np.zeros(0, np.int32)
 
     def has(self, name):
         return name in self.layout.vars
@@ -252,7 +270,8 @@ def points(name, track, renderer, kind, scale, keep=None):
         _attribute(mesh, "mp_width", 'FLOAT', pick(track.get(bound(renderer, "RibbonWidthBinding", "RibbonWidth"), (1,))) * scale)
         order = bound(renderer, "RibbonLinkOrderBinding", "RibbonLinkOrder")
         _attribute(mesh, "mp_order", 'FLOAT', pick(track.get(order if track.has(order) else bound(renderer, "NormalizedAgeBinding", "NormalizedAge"), (0,))))
-        _attribute(mesh, "mp_ribbon", 'INT', pick(track.get(bound(renderer, "RibbonIdBinding", "RibbonID"), (0,)))[:, 0].astype(np.int32))
+        ribbon = pick(track.get(bound(renderer, "RibbonIdBinding", "RibbonID"), (0,)))[:, 0].astype(np.int64)
+        _attribute(mesh, "mp_ribbon", 'INT', (ribbon % 100003 + pick(track.run) * 100003).astype(np.int32))      # each play's ribbons its own
         _attribute(mesh, "mp_facing", 'FLOAT_VECTOR', pick(track.get(bound(renderer, "RibbonFacingBinding", "RibbonFacing"), (0, 0, 1))) * flip)
     elif kind == "Sprite":
         size = pick(track.get(bound(renderer, "SpriteSizeBinding", "SpriteSize"), (50, 50)))
@@ -609,6 +628,26 @@ def _user(root, system):
         system.set_user(name, list(value) if hasattr(value, "__len__") else value)
 
 
+def _together(runs, names):
+    """Several plays of an effect as one: each frame holds every play's particles on it."""
+    length = max([offset + len(track) for offset, tracks in runs for track in tracks.values()] or [0])
+    merged = {}
+    for name in names:
+        frames = []
+        blank = next((t[name][0] for _, t in runs if t.get(name)), None)
+        for frame in range(length if blank is not None else 0):
+            parts = [(i, tracks[name][frame - offset]) for i, (offset, tracks) in enumerate(runs)
+                     if name in tracks and 0 <= frame - offset < len(tracks[name])]
+            parts = [(i, p) for i, p in parts if p[0].shape[1]]
+            if not parts:
+                frames.append((blank[0][:, :0], blank[1][:, :0], np.zeros(0, np.int32)))
+                continue
+            frames.append((np.concatenate([p[0] for _, p in parts], axis=1), np.concatenate([p[1] for _, p in parts], axis=1),
+                           np.concatenate([np.full(p[0].shape[1], i, np.int32) for i, p in parts])))
+        merged[name] = frames
+    return merged
+
+
 def _title(root):
     """An effect as the log names it: a pickaxe's own with what it is."""
     role = root.get(effects.KEY_ROLE)
@@ -624,7 +663,7 @@ def play(root):
     if stored is None:
         yield "%s: nothing to replay it from" % root.name
         return
-    exports, fields = stored
+    exports, fields, table = stored
     scale = float(root.get(KEY_SCALE, 0.01))
     scene = bpy.context.scene
     clear(root)
@@ -637,16 +676,30 @@ def play(root):
         root[KEY_START] = scene.frame_start
     start = int(root[KEY_START])
     frames = max(1, scene.frame_end - start + 1)
-    stand = Stand(scene, root, rig, system.reads, scale) if _moves(root) else None
+    stand = Stand(scene, root, rig, system.reads, scale, table) if _moves(root) else None
     camera = _camera(scene, root, scale, stand is not None)
     if camera is not None:
         system.camera = camera
     now = scene.frame_current
+    # each play of it (an animation's notifies; else the one): its own run of the system, from its frame
+    repeats = [int(x) for x in root.get(KEY_REPEATS) or [0]]
+    lengths = [int(x) for x in root.get(KEY_LENGTHS) or []]
+    runs = []
     try:
-        tracks = replay(system, fps, frames, stand, start)
+        for i, offset in enumerate(repeats):
+            if offset >= frames:
+                break
+            one = system
+            if i:
+                one = niagara.System(exports, fields=fields, seed=1 + i, sockets=[s for s in str(root.get(KEY_SOCKETS) or "").split(",") if s])
+                _user(root, one)
+                one.camera = system.camera
+            last = start + offset + lengths[i] if i < len(lengths) and lengths[i] > 0 else None
+            runs.append((offset, replay(one, fps, frames - offset, stand, start + offset, last)))
     finally:
         if stand is not None:
             scene.frame_set(now)
+    tracks = runs[0][1] if len(runs) == 1 else _together(runs, [e.name for e in system.emitters])
     emitters = {e.name: e for e in system.emitters}
     played, most, length = [], 0, 0
     for node in root.children:
@@ -721,8 +774,9 @@ def play(root):
             for piece in node.children if worn else ():
                 piece.hide_render = piece.hide_viewport = True
     if played:
-        yield "%s: %s played over %d frames from frame %d (%d particles at most)%s" % (
-            _title(root), ", ".join(played), length, start, most, ", on %s" % rig.name if rig is not None else "")
+        yield "%s: %s played %sover %d frames from frame %d (%d particles at most)%s" % (
+            _title(root), ", ".join(played), "%d times " % len(runs) if len(runs) > 1 else "", length, start, most,
+            ", on %s" % rig.name if rig is not None else "")
         if root.get(effects.KEY_ROLE) in ("trail", "swing") and stand is not None and stand.still:
             yield "%s: a pickaxe's %s shows on a swing: animate it, set the effect's Start Frame on the swing, then Replay Effect" % (
                 _title(root), root[effects.KEY_ROLE])

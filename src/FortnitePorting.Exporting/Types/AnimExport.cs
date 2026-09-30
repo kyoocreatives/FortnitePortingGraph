@@ -8,6 +8,7 @@ using CUE4Parse.UE4.Assets.Exports.Animation.CurveExpression;
 using CUE4Parse.UE4.Assets.Exports.MetaSound;
 using CUE4Parse.UE4.Assets.Exports.Sound;
 using CUE4Parse.UE4.Assets.Objects;
+using CUE4Parse.UE4.Objects.Core.Math;
 using CUE4Parse.UE4.Objects.Engine.Curves;
 using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.CUE4Parse.Extensions;
@@ -27,6 +28,12 @@ public class AnimExport : BaseExport
     public readonly List<ExportAnimSection> Sections = new();
     public readonly List<ExportSound> Sounds = new();
     public readonly List<ExportProp> Props = new();
+    // Material Porter fork: the particle effects the animation's notifies play
+    public readonly List<MaterialPorter.ExportAnimEffect> MPEffects = new();
+    // and the skeleton's sockets (an effect sits on one, or reads them; an armature in Blender may have none of them)
+    public readonly Dictionary<string, MaterialPorter.ExportSocket> MPSockets = new(StringComparer.OrdinalIgnoreCase);
+    private readonly HashSet<FAnimNotifyEvent> _effectNotifies = [];
+    private readonly Dictionary<string, MaterialPorter.ExportAnimEffect> _effects = [];
     public List<ExportCurveMapping> LegacyToMetahumanMappings = [];
     public List<ExportCurveMapping> MetahumanToLegacyMappings = [];
     
@@ -95,6 +102,14 @@ public class AnimExport : BaseExport
             }
         }
 
+        // Material Porter fork: a plain sequence's effect notifies (a montage's are read with it)
+        if (asset is UAnimSequenceBase sequence and not UAnimMontage)
+        {
+            SkeletonSockets(sequence.Skeleton.Load<USkeleton>());
+            foreach (var notify in sequence.Notifies ?? [])
+                EffectNotify(notify, 0);
+        }
+
         if (Context.Meta.Provider.Provider.TryLoadPackageObject<UCurveExpressionsDataAsset>(
                 "FortniteGame/Content/Characters/Player/Common/Fortnite_Base_Head/Facials/CurveMappings/FN_LegacyTo3L_Main_Mapping",
                 out var legacyToMetahumanCurves))
@@ -124,6 +139,62 @@ public class AnimExport : BaseExport
         foreach (var notify in notifies)
         {
             HandleNotify(notify);
+        }
+
+        // Material Porter fork: the Niagara effects its notifies play, each at its time (a section's own
+        // notifies: from the section's start)
+        SkeletonSockets(skeleton);
+        foreach (var notify in montage.GetOrDefault("Notifies", Array.Empty<FAnimNotifyEvent>()))
+            EffectNotify(notify, 0);
+        foreach (var section in Sections)
+            foreach (var notify in section.AssetRef?.Notifies ?? [])
+                EffectNotify(notify, section.Time);
+    }
+
+    /// <summary>Material Porter fork: a skeleton's sockets, by name.</summary>
+    private void SkeletonSockets(USkeleton? skeleton)
+    {
+        foreach (var index in skeleton?.Sockets ?? [])
+        {
+            if (index.Load<global::CUE4Parse.UE4.Assets.Exports.SkeletalMesh.USkeletalMeshSocket>() is not { } socket || socket.SocketName.Text is not { Length: > 0 } name) continue;
+            MPSockets.TryAdd(name, new MaterialPorter.ExportSocket
+            {
+                Bone = socket.BoneName.Text, Location = socket.RelativeLocation, Rotation = socket.RelativeRotation, Scale = socket.RelativeScale,
+            });
+        }
+    }
+
+    /// <summary>Material Porter fork: a notify that plays a Niagara system, as an effect on its socket from its time.</summary>
+    private void EffectNotify(FAnimNotifyEvent notify, float sectionTime)
+    {
+        if (!_effectNotifies.Add(notify)) return;
+        try
+        {
+            var timed = notify.NotifyStateClass?.Load<UObject>();
+            var played = timed ?? notify.Notify?.Load<UObject>();
+            if (played?.GetOrDefault<UObject?>("Template") is not { ExportType: "NiagaraSystem" } system) return;
+            var socket = played.GetOrDefault<FName>("SocketName");
+            var location = played.GetOrDefault("LocationOffset", FVector.ZeroVector);
+            var rotation = played.GetOrDefault("RotationOffset", FRotator.ZeroRotator);
+            var scale = played.GetOrDefault("Scale", FVector.OneVector);
+            // one effect per system and place, played at each of its notifies' times
+            var key = $"{system.GetPathName()}|{socket.Text}|{location}|{rotation}|{scale}";
+            if (!_effects.TryGetValue(key, out var effect))
+            {
+                effect = _effects[key] = new MaterialPorter.ExportAnimEffect
+                {
+                    Effect = Context.Effect(system),
+                    SocketName = MaterialPorter.Effects.Named(socket) ? socket.Text : null,
+                    LocationOffset = location, RotationOffset = rotation, Scale = scale,
+                };
+                MPEffects.Add(effect);
+            }
+            effect.Times.Add(sectionTime + notify.LinkValue);
+            effect.Durations.Add(timed is not null ? notify.Duration : 0);
+        }
+        catch (Exception e)
+        {
+            Serilog.Log.Warning("[Material Porter] {Name}: an effect notify wasn't read ({Error})", Name, e.Message);
         }
     }
 

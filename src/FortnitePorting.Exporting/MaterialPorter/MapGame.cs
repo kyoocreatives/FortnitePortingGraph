@@ -30,7 +30,7 @@ public record MaterialPorterMesh : ExportMesh
     /// A particle effect's node (ExportContext.Effects): Kind "System" (Exports, Fields: what the
     /// plugin replays its CPU emitters from; User: user parameters to replay it with; Attach: put it
     /// on the armature selected in Blender; Role and Sockets: a pickaxe's own effect, and the two
-    /// sockets its trail runs between), "Emitter" (Sim: CPU, GPU or Stateless), "Mesh" (a mesh
+    /// sockets its trail runs between; the plugin adds Bone, Offset, Start and End to an animation's), "Emitter" (Sim: CPU, GPU or Stateless), "Mesh" (a mesh
     /// renderer's mesh; Index: which of its meshes), or "Sprite" / "Ribbon" (no mesh: the plugin makes
     /// a plane for its Material; SubImages, Facing). A renderer's node names it (Renderer).
     /// </summary>

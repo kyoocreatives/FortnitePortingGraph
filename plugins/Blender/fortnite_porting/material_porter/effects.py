@@ -85,18 +85,67 @@ def tag_mesh(obj, fx):
     obj.visible_shadow = False
 
 
-def on_bone(obj, bone):
-    """Put an object on a bone (a socket) of the armature it is under: at the bone, following it."""
+def on_bone(obj, bone, offset=None):
+    """Put an object on a bone (a socket) of the armature it is under: at the bone, following it, with
+    the offset the game gives it there (a Blender matrix). False where the armature has no such bone."""
     armature = obj.parent
     if armature is None or armature.type != 'ARMATURE':
-        return
+        return False
     rest = next((b for b in armature.data.bones if b.name.lower() == bone.lower()), None)
     if rest is None:
-        return
+        return False
     obj.parent_type = 'BONE'
     obj.parent_bone = rest.name
     obj.matrix_parent_inverse = Matrix.Identity(4)
-    obj.matrix_basis = Matrix.Translation((0.0, -rest.length, 0.0))     # a bone's children hang from its tail
+    # (a bone's children hang from its tail)
+    obj.matrix_basis = Matrix.Translation((0.0, -rest.length, 0.0)) @ (offset if offset is not None else Matrix.Identity(4))
+    return True
+
+
+def socket_matrix(socket, scale):
+    """Where a skeleton's socket sits on its bone, as a Blender matrix (socket: Location, Rotation, Scale as the app exports them)."""
+    from ..processing.utils import make_euler, make_vector
+    return Matrix.Translation(make_vector(socket.get("Location"), unreal_coords_correction=True) * scale) \
+        @ make_euler(socket.get("Rotation")).to_matrix().to_4x4() @ Matrix.Diagonal((*make_vector(socket.get("Scale")), 1.0))
+
+
+def _has(rig, name, sockets):
+    """Whether an armature can place something on a bone or socket: its own bone, or a socket's bone."""
+    bones = {b.name.lower() for b in rig.data.bones}
+    socket = {k.lower(): v for k, v in (sockets or {}).items()}.get(name.lower())
+    return name.lower() in bones or (socket is not None and str(socket.get("Bone")).lower() in bones)
+
+
+def lacks_bones(entries, rig, sockets=None):
+    """Whether any of an animation's effects sits on a bone or socket the armature can't place."""
+    return any(entry.get("SocketName") and not _has(rig, entry["SocketName"], sockets) for entry in entries)
+
+
+def from_animation(context, entries, rig, sockets=None, skeleton=None):
+    """The effects an animation plays (its Niagara notifies): each on the animated armature, on its
+    socket with its offsets, replayed from each of its notifies' frames (a timed one kept going
+    until its end). skeleton: the game's whole skeleton under the armature, where there is one."""
+    from ..processing.utils import time_to_frame
+    if not hasattr(context, "collection"):      # (an animation import makes no collection of its own)
+        context.collection = rig.users_collection[0] if rig.users_collection else bpy.context.scene.collection
+    for entry in entries:
+        # on the animated armature; on the game's whole skeleton (animated alike) where there is one: it has
+        # every bone an effect may sit on or read
+        context.mp_selected_armature = skeleton if skeleton is not None else rig
+        mesh = entry.get("Effect") or {}
+        fx = mesh.get("MPEffect")
+        if fx is None:
+            fx = mesh["MPEffect"] = {"Kind": "System"}
+        fx["Attach"] = True
+        fx["Bone"] = entry.get("SocketName")
+        fx["Table"] = sockets or {}
+        fx["Offset"] = socket_matrix({"Location": entry.get("LocationOffset"), "Rotation": entry.get("RotationOffset"), "Scale": entry.get("Scale")}, context.scale)
+        # its notifies' frames (the animation's: 30 a second), earliest first
+        plays = sorted(zip(entry.get("Times") or [0.0], entry.get("Durations") or [0.0]))
+        fx["Start"] = time_to_frame(plays[0][0])
+        fx["Repeats"] = [time_to_frame(t) - fx["Start"] for t, _ in plays]
+        fx["Lengths"] = [time_to_frame(d) if d else 0 for _, d in plays]
+        context.import_model(mesh)
 
 
 def finish(context, mesh, root):
@@ -104,25 +153,44 @@ def finish(context, mesh, root):
     fx = mesh.get("MPEffect") or {}
     if fx.get("Kind") != "System":
         return
-    # a pickaxe's own effect: on its socket, and named for what it is
-    if bone := mesh.get("MPParentBone"):
-        on_bone(root, bone)
-    if role := fx.get("Role"):
-        root[KEY_ROLE] = role
-    if not fx.get("Exports"):
-        return
     from . import effect_replay
     from .hook import _log
+    # a contrail, an animation's effect: on the armature selected when it was sent
+    rig = getattr(context, "mp_selected_armature", None)
+    if fx.get("Attach") and rig is not None:
+        effect_replay.attach(root, rig)
+    # a pickaxe's own effect, an animation's: on its socket
+    bone, offset = mesh.get("MPParentBone") or fx.get("Bone"), fx.get("Offset")
+    table = {k.lower(): v for k, v in (fx.get("Table") or {}).items()}
+    if bone and not on_bone(root, bone, offset):
+        # a socket the armature doesn't have: on the socket's bone, where the skeleton puts it
+        socket = table.get(bone.lower())
+        placed = socket is not None and on_bone(root, socket["Bone"], socket_matrix(socket, context.scale) @ (offset if offset is not None else Matrix.Identity(4)))
+        if not placed:
+            if offset is not None:
+                root.matrix_basis = offset
+            _log("%s: no bone or socket %s to put it on: at the armature's origin" % (root.name, bone))
+    if role := fx.get("Role"):
+        root[KEY_ROLE] = role
+    if fx.get("Start") is not None:
+        root[effect_replay.KEY_START] = int(fx["Start"])
+    if fx.get("Repeats"):
+        root[effect_replay.KEY_REPEATS] = [int(x) for x in fx["Repeats"]]
+        root[effect_replay.KEY_LENGTHS] = [int(x) for x in fx.get("Lengths") or []]
+    if not fx.get("Exports"):
+        # nothing of it can be played (GPU emitters only): on something, its still pieces are put out of sight
+        if root.parent is not None:
+            for node in root.children:
+                for piece in node.children:
+                    piece.hide_render = piece.hide_viewport = True
+            _log("%s: not played (GPU emitters only), its pieces hidden" % root.name)
+        return
     try:
-        effect_replay.store(root, fx["Exports"], fx.get("Fields"), context.scale)
+        effect_replay.store(root, fx["Exports"], fx.get("Fields"), context.scale, table)
         if fx.get("Sockets"):       # the two sockets a pickaxe's trail runs between
             root[effect_replay.KEY_SOCKETS] = ",".join(fx["Sockets"])
         for name, value in (fx.get("User") or {}).items():
             root[name] = value
-        # a contrail goes on the character: the armature selected when it was sent
-        rig = getattr(context, "mp_selected_armature", None)
-        if fx.get("Attach") and rig is not None:
-            effect_replay.attach(root, rig)
         for line in effect_replay.play(root):
             _log(line)
     except Exception as e:      # the pieces stay as imported

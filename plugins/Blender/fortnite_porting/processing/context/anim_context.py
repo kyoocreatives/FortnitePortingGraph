@@ -310,6 +310,23 @@ class AnimImportContext:
                 path = sound.get("Path")
                 self.import_sound(path, time_to_frame(sound.get("Time")))
 
+        # Material Porter fork: the effects the animation plays, each on its socket from its frame
+        if data.get("MPEffects"):
+            from ...material_porter import effects
+            # an effect on a bone the armature lacks (the game's skeleton has more than a mesh's): the skeleton as
+            # the game has it, animated alike - what FP makes for an emote's props
+            master_skeleton = first(target_skeleton.children, lambda child: child.name == "Master_Skeleton")
+            if master_skeleton is None and effects.lacks_bones(data.get("MPEffects"), target_skeleton, data.get("MPSockets")):
+                master_skeleton = self.import_model(data.get("Skeleton"), can_reorient=False)
+                master_skeleton.name = "Master_Skeleton"
+                master_skeleton.parent = target_skeleton
+                master_skeleton.animation_data_create()
+                master_track = master_skeleton.animation_data.nla_tracks.new(prev=None)
+                master_track.name = "Sections"
+                import_sections(data.get("Sections"), master_skeleton, master_track)
+                master_skeleton.hide_set(True)
+            effects.from_animation(self, data.get("MPEffects"), target_skeleton, data.get("MPSockets"), master_skeleton)
+
     def import_anim(self, path: str, override_skeleton=None) -> tuple[bpy.types.Action, AnimDto]:
         path = path[1:] if path.startswith("/") else path
         file_path, name = path.split(".")

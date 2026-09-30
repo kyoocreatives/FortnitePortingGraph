@@ -132,6 +132,8 @@ class Emitter:
     @property
     def pending(self):
         """Whether it has particles yet to spawn."""
+        if self.system.asked != 0:      # the game stopped the effect
+            return False
         if self.loops == "Infinite":
             return bool(self.spawns)
         loops = 1 if self.loops == "Once" else max(self.count, 1)
@@ -165,7 +167,7 @@ class Emitter:
 
     def tick(self, dt):
         rng = self.system.rng
-        born = self._born(self.age, self.age + dt)
+        born = self._born(self.age, self.age + dt) if self.system.asked == 0 else []
         self.age += dt
         self.born = len(born)
         if born:

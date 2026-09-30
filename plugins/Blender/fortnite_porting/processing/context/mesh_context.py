@@ -152,7 +152,7 @@ class MeshImportContext:
 
             # Material Porter fork: a particle effect's CPU emitters, replayed over the scene's frames
             effects.finish(self, mesh, empty_object)
-            return
+            return empty_object
         
         if self.type in [EExportType.PREFAB, EExportType.WORLD] and (index := self.mesh_index.get(id(mesh))) is not None:
             Log.info(f"Importing Actor: {name} {index} / {len(self.meshes)}")

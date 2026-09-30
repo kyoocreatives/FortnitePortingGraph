@@ -379,7 +379,7 @@ class Skeleton:
         self.bones = [] if self.reader else [str(b) for b in props.get("FilteredBones") or []]
         self.sockets = [str(b) for b in props.get("FilteredSockets") or []]
         self.names = self.bones + self.sockets
-        system.reads.update(n.lower() for n in self.names)
+        system.reads.update(n.lower() for n in self.names if n.lower() != "none")
         system.reads.update(system.sockets)
         self.cached = None
 
@@ -683,7 +683,7 @@ class Emitter:
         if self.state in (INACTIVE_CLEAR, DISABLED):
             self.data.count = 0
         spawns, answers = [], []       # (count, start, interval, group); (handler, events, event index, count)
-        if self.state == ACTIVE:
+        if self.state == ACTIVE and system.asked == ACTIVE:
             for name in self.infos:
                 _, f0, i0, _, _ = system.layout.vars[name]
                 count = int(system.data.ints[i0, 0])
@@ -816,6 +816,7 @@ class System:
         self.cooked = {(k["Key"]["EmitterHandleId"], k["Key"]["ScriptUsage"].split("::")[-1], k["Key"].get("ScriptUsageId") or NO_ID): k["Value"]
                        for k in props.get("ScriptRuntimeCookedDataMap") or []}
         self.age, self.ticks, self.state = 0.0, 0, ACTIVE
+        self.asked = ACTIVE     # what the game asks of it (Engine.Owner.ExecutionState): deactivate() asks it to stop
         self.globals, self.block, self.owner = bytearray(GLOBAL_SIZE), bytearray(SYSTEM_SIZE), bytearray(OWNER_SIZE)
         for at in range(0, 384, 64):
             self.owner[at:at + 64] = IDENTITY
@@ -866,7 +867,8 @@ class System:
         names = set()
         for interface in self.interfaces.values():
             if isinstance(interface, Skeleton):
-                names.update(interface.names[i] for i in range(len(interface.names)) if interface.held(self.pose, i) is None)
+                names.update(interface.names[i] for i in range(len(interface.names))
+                             if interface.held(self.pose, i) is None and interface.names[i].lower() != "none")
         return sorted(names)
 
     def users(self):
@@ -909,6 +911,10 @@ class System:
             self.pose = pose
         if owner is not None:
             self.placed = np.asarray(owner, np.float64).reshape(4, 4)
+
+    def deactivate(self):
+        """The game stops the effect (a timed notify ends): its emitters spawn no more, its particles play out."""
+        self.asked = INACTIVE
 
     def _owner(self, dt):
         """The owner's constant block, from where it was placed (its velocity: from where it was)."""
@@ -1016,7 +1022,7 @@ class System:
         struct.pack_into("<5fi", self.globals, 0, dt, dt, 1.0 / dt, self.age, self.age, QUALITY)
         # time since rendered, LOD distance and its fraction, age, execution state, ticks, emitters, alive emitters, significance, seed
         alive = sum(1 for e in self.emitters if e.state != COMPLETE)
-        struct.pack_into("<4fI5i", self.block, 0, 0.0, 0.0, 0.0, self.age, ACTIVE, self.ticks, len(self.handles), alive, 0, self.seed)
+        struct.pack_into("<4fI5i", self.block, 0, 0.0, 0.0, 0.0, self.age, self.asked, self.ticks, len(self.handles), alive, 0, self.seed)
         for e in self.emitters:
             e.fill()
         if self.previous is None:
@@ -1047,4 +1053,4 @@ class System:
     @property
     def done(self):
         """Nothing left to see: the system is no longer active and no particle lives."""
-        return self.state != ACTIVE and all(e.data.count == 0 and not getattr(e, "pending", False) for e in self.emitters)
+        return (self.state != ACTIVE or self.asked != ACTIVE) and all(e.data.count == 0 and not getattr(e, "pending", False) for e in self.emitters)

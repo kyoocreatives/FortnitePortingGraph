@@ -185,6 +185,17 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     effects on the selection). What isn't played of an effect that is on something (GPU emitters)
     is hidden instead of rowed beside it. Nothing moving above an effect: one frame is sampled
     for all (`effect_replay.Stand`). Test: `fork-export-asset?type=Pickaxe&effects=1`.
+  - **An animation's effects.** An emote's (or any exported animation's) Niagara notifies come with
+    it (`AnimExport.MPEffects`, `EffectNotify`: a notify or timed notify whose `Template` is a
+    Niagara system - the montage's own and its sequences'). One effect per system and socket, with
+    the times of all its notifies and how long each timed one lasts. The plugin
+    (`effects.from_animation`) puts each on the animated armature, on its socket with the notify's
+    offsets, and replays it once per notify from that notify's frame (`mp_effect_repeats`,
+    `mp_effect_lengths`; the plays are merged into one set of particles). A timed notify's end asks
+    the system to stop (`System.deactivate`: Engine.Owner.ExecutionState): it spawns no more and
+    plays out. The skeleton's sockets come along (`MPSockets`): an armature without them still
+    places an effect on a socket (on the socket's bone, where the skeleton puts it) and answers the
+    scripts that read one.
   - **Ribbons.** A ribbon's width runs across the view, the particles' facing, or along their side
     vector (a trail between two sockets), as the renderer says (the modifier's Facing); it has two
     UV sets along it (a trail's fades read the second).
