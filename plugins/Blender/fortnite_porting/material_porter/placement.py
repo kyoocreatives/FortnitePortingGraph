@@ -13,6 +13,9 @@ def after_import(mesh, obj, mesh_obj, scale):
     the object properties the exact materials read (mp_cpd<i>, mp_pic<i>)."""
     if obj is not None and (bone := mesh.get("MPParentBone")):
         follow_bone(obj, bone)
+    if (mesh.get("MPEffect") or {}).get("Kind") == "Mesh":
+        from . import effects
+        effects.tag_mesh(mesh_obj if mesh_obj is not None else obj)
     target = mesh_obj if mesh_obj is not None else obj
     if target is None or target.type != 'MESH':
         return

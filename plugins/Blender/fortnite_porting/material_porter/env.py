@@ -342,6 +342,44 @@ class MaterialEnv:
         data = tr.combine([attr("mp_cpd%d" % (index + i)) for i in range(3)])
         return tr.vmath('ADD', v, tr.vmath('SCALE', tr.vmath('SUBTRACT', data, v, out_w=3), flag, out_w=3), out_w=3)
 
+    def _particle_attr(self, name):
+        """An object's particle value (four floats) as (rgb, alpha) sockets."""
+        tr = self.tr
+
+        def make():
+            with tr.at("Parameters"):
+                n = tr.node("ShaderNodeAttribute", name)
+            n.attribute_type = 'OBJECT'
+            n.attribute_name = name
+            return Val(n.outputs["Color"], 3), Val(n.outputs["Alpha"], 1), Val(n.outputs["Fac"], 1)
+        return self.once("attr4 " + name, make)
+
+    def particle_color(self):
+        """UE's Particle Color: what a particle system gives each particle. An effect's objects
+        carry it as mp_particle_color (four floats), used where mp_particle is 1; anything else
+        is white and opaque, as a mesh outside a particle system is."""
+        tr = self.tr
+        rgb, alpha, _ = self._particle_attr("mp_particle_color")
+        flag = self._particle_attr("mp_particle")[2]
+        white = tr.const((1.0, 1.0, 1.0), 3)
+        one = tr.const(1.0)
+        return (tr.vmath('ADD', white, tr.vmath('SCALE', tr.vmath('SUBTRACT', rgb, white, out_w=3), flag, out_w=3), out_w=3),
+                tr.math('ADD', one, tr.math('MULTIPLY', tr.math('SUBTRACT', alpha, one), flag)))
+
+    def dynamic_parameter(self, index, default=None):
+        """UE's Dynamic Parameter <index>: four floats a particle system sets per particle, from
+        the object's mp_dynamic<index> where mp_dynamic is 1 (a baked effect sets all four); the
+        expression's default elsewhere."""
+        if default is None:
+            return None
+        tr = self.tr
+        rgb, alpha, _ = self._particle_attr("mp_dynamic%d" % index)
+        flag = self._particle_attr("mp_dynamic")[2]
+        d3 = tr.mask(default, [0, 1, 2])
+        da = default.a if default.a is not None else tr.const(1.0)
+        out = tr.vmath('ADD', d3, tr.vmath('SCALE', tr.vmath('SUBTRACT', rgb, d3, out_w=3), flag, out_w=3), out_w=3)
+        return Val(out.s, 4, tr.math('ADD', da, tr.math('MULTIPLY', tr.math('SUBTRACT', alpha, da), flag)))
+
     def instance_data(self, v, index, w):
         """UE's PerInstanceCustomData: an instanced mesh's own floats, from
         the object's mp_pic<index> properties; the material's default `v`

@@ -19,7 +19,7 @@ from .ue_graph import SHADING_MODELS, Translator, Val
 PREFIX = "MP "            # built materials: "MP MI_Foo"
 KEY_PATH = "mp_path"      # the game object a built material translates
 KEY_REV = "mp_rev"        # the build revision that made it (older ones are rebuilt, not reused)
-BUILD_REVISION = 11       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes)
+BUILD_REVISION = 12       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity
                           # 4: instance overrides to the default (Opaque, DefaultLit, one-sided) honoured
                           # 6: vector parameters without a stored default are (0, 0, 0, 0), not alpha 1
                           # 8: single layer water (the medium, refraction, water info stand-ins); graph clip()s
@@ -169,7 +169,11 @@ def assemble(tr, mat, a, s):
             add = tr.node("ShaderNodeAddShader", "additive")
             tp = tr.node("ShaderNodeBsdfTransparent", "see-through")
             em = tr.node("ShaderNodeEmission", "additive light")
-            tr.link(emissive, em.inputs["Color"])
+            # UE adds Emissive * Opacity to the scene (a flash's shape is its opacity)
+            light, opacity = emissive, a["Opacity"]
+            if not (opacity.const and _comps(opacity.s)[0] == 1.0):
+                light = tr.binop('MULTIPLY', emissive, opacity, label="additive opacity")
+            tr.link(light, em.inputs["Color"])
             tr.L.new(tp.outputs[0], add.inputs[0])
             tr.L.new(em.outputs[0], add.inputs[1])
             surface = Val(add.outputs[0], 3)

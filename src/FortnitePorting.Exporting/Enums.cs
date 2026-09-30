@@ -128,6 +128,10 @@ public enum EExportType
     [Description("Cars"), Export(EPrimitiveExportType.Mesh)]
     Car = ExportCategory.Gameplay + 8,
 
+    // Material Porter fork: a particle effect (Niagara system) as what it is made of: each emitter's meshes and sprite materials
+    [Description("Effects"), Export(EPrimitiveExportType.Mesh)]
+    Effect = ExportCategory.Gameplay + 9,
+
     // FESTIVAL
 
     [Description("Guitars"), Export(EPrimitiveExportType.Mesh)]

@@ -58,6 +58,8 @@ class EExportType(IntEnum):
     WILDLIFE = ExportCategory.GAMEPLAY + 5
     WEAPON_MOD = ExportCategory.GAMEPLAY + 6
     SPRITE = ExportCategory.GAMEPLAY + 7
+    # Material Porter fork: a particle effect, as what it is made of
+    EFFECT = ExportCategory.GAMEPLAY + 9
 
     # FESTIVAL
     FESTIVAL_GUITAR = ExportCategory.FESTIVAL + 1

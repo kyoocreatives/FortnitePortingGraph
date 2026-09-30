@@ -128,6 +128,23 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   Test routes: `fork-weapon-mods?path=`, `fork-asset-page?type=&name=[&pick=Channel:Option;...][&export=1]`
   (an asset's page as the Assets view builds it, and its export through `ExportService`'s styles),
   `fork-export-asset` takes `wrap=` and `mods=Slot:path;...`.
+- **Particle effects, as what they are made of.** Assets > Gameplay > Effects lists the Niagara
+  systems the asset registry knows (about 1,400); the Files tab exports any of the game's 26,000
+  (`DetermineExportType` falls back on the tabs' classes). An effect's export
+  (`ExportContext.Effects.cs`, `MaterialPorter/Effects.cs`) is a tree: an empty per enabled emitter
+  (2 m apart, a palette; tagged CPU, GPU or Stateless), and under it what its renderers draw - a
+  mesh renderer's meshes with the materials it puts on them, a sprite or ribbon renderer's material
+  on a plane the plugin makes (`material_porter/effects.py`). A renderer's own material parameters
+  ride on the material as `MPValues`. The item's description says what each emitter is.
+  How the particles move isn't exported: a GPU emitter (3 of 4) keeps only its compiled shader,
+  a CPU emitter its compiled script (readable bytecode: not run yet), a stateless one plain settings.
+  The exact materials read what a particle system gives a particle from the object
+  (`env.particle_color`, `env.dynamic_parameter`): `mp_particle` = 1 with `mp_particle_color`,
+  `mp_dynamic` = 1 with `mp_dynamic0..3`; elsewhere white, and the material's own defaults - so a
+  piece whose look hangs on those (a spark stretched by its speed, a ring that erodes) can come out
+  empty.
+  Build revision 12: an additive material's light is Emissive * Opacity (it was Emissive alone: a
+  flash drew as its whole quad).
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the

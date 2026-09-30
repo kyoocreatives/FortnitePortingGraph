@@ -89,7 +89,7 @@ geometry, camera), so an env only defines what it knows better:
     env.light_color()                 -> Val (3)   the sun's colour (1)
     env.sky_light(direction, roughness) -> Val (3) the sky light's radiance
     env.particle_color()              -> (Val (3), Val (1))
-    env.dynamic_parameter(index)      -> Val (4) or None
+    env.dynamic_parameter(index, default) -> Val (4) or None
     env.texture_slices(name, sampler) -> [bpy.types.Image] a texture array
     env.texture_parameter(pname, default) -> the texture a parameter holds
     env.preskinned_position()         -> Val (3)   UE cm, object space, before skinning
@@ -2439,7 +2439,7 @@ class Translator:
         if t == "DynamicParameter":
             d = p.get("DefaultValue") or {}
             dflt = self.const((d.get("R", 1.0), d.get("G", 1.0), d.get("B", 1.0), d.get("A", 1.0)), 4)
-            v = self._hook("dynamic_parameter", lambda: dflt, int(p.get("ParameterIndex", 0)))
+            v = self._hook("dynamic_parameter", lambda: dflt, int(p.get("ParameterIndex", 0)), dflt)
             if out < 4:
                 return self.mask(v, [out])
             return Val(v.s, 3) if out == 4 else v

@@ -134,7 +134,9 @@ class MeshImportContext:
         part_type = EFortCustomPartType(mesh.get("Type"))
         
         if mesh.get("IsEmpty"):
-            empty_object = bpy.data.objects.new(name, None)
+            # Material Porter fork: a particle effect's sprite or ribbon is a plane with its material
+            from ...material_porter import effects
+            empty_object = effects.make(self, mesh, name)
 
             empty_object.parent = parent
             empty_object.rotation_euler = make_euler(mesh.get("Rotation"))

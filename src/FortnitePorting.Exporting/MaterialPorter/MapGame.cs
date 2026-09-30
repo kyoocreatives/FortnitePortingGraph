@@ -26,6 +26,12 @@ public record MaterialPorterMesh : ExportMesh
     public Dictionary<string, string>? MPLayerNames;
     /// <summary>The parent's bone the mesh follows (a weapon mod on its attach bone), or null: the parent itself.</summary>
     public string? MPParentBone;
+    /// <summary>
+    /// A particle effect's node (ExportContext.Effects): Kind "Emitter" (Sim: CPU, GPU or Stateless),
+    /// "Mesh" (a mesh renderer's mesh), or "Sprite" / "Ribbon" (no mesh: the plugin makes a plane for
+    /// its Material; SubImages, Facing).
+    /// </summary>
+    public Dictionary<string, object>? MPEffect;
 }
 
 /// <summary>A material with values over it: a dynamic instance's, a building's texture data.</summary>

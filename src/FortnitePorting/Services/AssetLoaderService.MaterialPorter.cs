@@ -17,6 +17,15 @@ public partial class AssetLoaderService
 {
     public AssetLoaderService()
     {
+        // particle effects (Niagara systems): what each emitter draws, to place by hand; the description says
+        // what the emitters are
+        Categories.First(category => category.Category == EAssetCategory.Gameplay).Loaders.Add(new AssetLoader(EExportType.Effect)
+        {
+            ClassNames = ["NiagaraSystem"],
+            HideRarity = true,
+            DescriptionHandler = Effects.Describe,
+        });
+
         Categories.Add(new AssetLoaderCategory(EAssetCategory.RocketRacing)
         {
             Loaders =

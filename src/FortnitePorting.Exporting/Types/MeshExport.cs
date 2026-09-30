@@ -591,6 +591,12 @@ public class MeshExport : BaseExport
                 Type = EExportType.Vehicle;     // the plugins import it as a vehicle
                 break;
             }
+            case EExportType.Effect:
+            {
+                // Material Porter fork: a particle effect's emitters, and what each draws
+                Meshes.Add(Context.Effect(asset));
+                break;
+            }
             case EExportType.LegoWildlife:
             {
                 // Material Porter fork: a LEGO creature's meshes, their materials in its colours
