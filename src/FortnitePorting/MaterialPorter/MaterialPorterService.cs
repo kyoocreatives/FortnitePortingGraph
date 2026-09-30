@@ -315,6 +315,31 @@ public class MaterialPorterService : IService
                 Lines = StatusLog.Instance.Lines.Take(int.TryParse(query["count"], out var n) ? n : 60).ToArray(),
             });
         }
+        if (route == "fork-find-assets")
+        {
+            // tests: the asset registry's entries whose package name holds ?path= (and whose class is ?class=, if given)
+            var needle = query["path"] ?? throw new ArgumentException("path missing");
+            var wanted = query["class"];
+            return new JArray(AppServices.UEParse.AssetRegistry
+                .Where(a => a.PackageName.Text.Contains(needle, StringComparison.OrdinalIgnoreCase)
+                            && (wanted is null || a.AssetClass.Text.Equals(wanted, StringComparison.OrdinalIgnoreCase)))
+                .Take(int.TryParse(query["count"], out var max) ? max : 400)
+                .Select(a => $"{a.AssetClass.Text} {a.PackageName.Text}"));
+        }
+        if (route == "fork-dump")
+        {
+            // tests: a package's exports (name, type, outer, properties) as CUE4Parse reads them; full=1: each
+            // export as CUE4Parse writes it (what it reads outside the properties too: a material's cached data...)
+            var dumped = await Game.Provider.LoadPackageAsync(query["path"] ?? throw new ArgumentException("path missing"));
+            var settings = new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore };
+            if (query["full"] == "1")
+                return new JRaw(JsonConvert.SerializeObject(dumped.GetExports(), settings));
+            return new JArray(dumped.GetExports().Select(e => new JObject
+            {
+                ["name"] = e.Name, ["type"] = e.ExportType, ["outer"] = e.Outer?.Name.Text,
+                ["props"] = JToken.Parse(JsonConvert.SerializeObject(e.Properties.ToDictionary(p => p.Name.Text, p => p.Tag?.GenericValue), settings)),
+            }));
+        }
         if (route == "fork-loader")
         {
             // tests: run one asset tab's loader as the Assets page does, and say what it lists (icons=1: with each one's icon)

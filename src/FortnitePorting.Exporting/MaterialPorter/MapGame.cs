@@ -13,6 +13,9 @@ public sealed class MapGame
 /// <summary>A placement's extras for the fork's Blender plugin (FP's record plus these fields).</summary>
 public record MaterialPorterMesh : ExportMesh
 {
+    public MaterialPorterMesh() { }
+    /// <summary>FP's record with the fork's fields added (a weapon's mesh with its component's custom data).</summary>
+    public MaterialPorterMesh(ExportMesh mesh) : base(mesh) { }
     /// <summary>UE's Custom Primitive Data (texture data tints at 30/31/35), or null.</summary>
     public float[]? MPPrimitiveData;
     /// <summary>An instance's own custom data floats (the materials' PerInstanceCustomData), or null.</summary>

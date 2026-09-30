@@ -147,6 +147,9 @@ public partial class ExportContext
             }
         }
 
+        // Material Porter fork: the look its actor class and its own wrap give it
+        WeaponLook(weaponDefinition, exportWeapons);
+
         return exportWeapons;
     }
     

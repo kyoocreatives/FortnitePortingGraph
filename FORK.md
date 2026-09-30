@@ -84,6 +84,21 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   `Fork.Islands` is on only when the git-ignored `src/FortnitePorting/Fork.local.props`
   sets `MPIslands`: releases and anyone else's builds don't export islands
   (upstream keeps it to the accounts it allows).
+- **Weapons as the game draws them** (`ExportContext.Weapons.cs`). FP exports an item's
+  mesh with the mesh's own materials; two more things make a weapon's look:
+  - its actor class's weapon mesh component (`WeaponActorClass` defaults > `WeaponMesh`,
+    through the parent classes): `OverrideMaterials` and `CustomPrimitiveData`. A Morphite
+    weapon is the plain weapon's mesh with `MI_Morphite_*` and data `[0, 1, 0]`; slot 1 is
+    its `WeaponPhase` (1 to 4: how far the crystal has grown; `mp_cpd1` on the object).
+  - a wrap, here the item's own (`IntrinsicOverrideWrap`: an exotic's glow). A wrap is one
+    instance of `M_FN_Customization_MASTER`, which only carries the customization layer
+    (`MF_Base_Customization`) the weapon masters run too, over a dummy base. The game lays
+    its values over the weapon's own material; so does the export: the wrap's scalars,
+    vectors, textures and static switches ride on the material as `MPValues` (`ParamSet`
+    has `Switches` for it; `hook._overlay` applies them), but for the textures the weapon's
+    material sets itself (diffuse, normals, masks, `CustomizationMask (_CM)`).
+  Exact materials only: FP's own presets don't show either.
+  Test routes: `fork-find-assets?path=&class=`, `fork-dump?path=[&full=1]`.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the
@@ -211,7 +226,7 @@ a commit's) ask neither.
   `SettingsService.cs`, `Program.cs`, `BlenderInstallation.cs`,
   `ExportClientService.cs`, `AppWindowModel.cs`, `AssetVideoPreview.axaml.cs` (libvlc in a
   single-file build), `ExportContext.Unreal.cs` and `MeshExport.cs` (Geometry Collections, LEGO
-  props), `FortnitePorting.csproj`, `build-release.yml`, `build-commit.yml`, `README.md`, plugin
+  props), `ExportContext.Fortnite.cs` (weapon looks), `FortnitePorting.csproj`, `build-release.yml`, `build-commit.yml`, `README.md`, plugin
   `server.py` and `material_context.py`.
 
 Generated files come from Material Porter (`Documents/Claude/materialporter`):

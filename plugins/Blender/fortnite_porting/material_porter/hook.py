@@ -44,12 +44,14 @@ def _texture_path(texture):
 def _overlay(texture_data, override_parameters, values=None):
     """What FP puts over the material's own values: a building's texture data
     (by layer, like FP), a style's parameter overrides, and the fork map
-    reader's values (a dynamic instance's, a building's texture data)."""
-    textures, scalars, vectors = {}, {}, {}
+    reader's values (a dynamic instance's, a building's texture data, a
+    weapon wrap's: those set static switches too)."""
+    textures, scalars, vectors, switches = {}, {}, {}, {}
     if values:
         textures.update(values.get("Textures") or {})
         scalars.update(values.get("Scalars") or {})
         vectors.update(values.get("Vectors") or {})
+        switches.update(values.get("Switches") or {})
     for data in texture_data or []:
         index = data.get("Index") or 0
         ts = "_Texture_%d" % (index + 1) if index > 0 else ""
@@ -66,7 +68,8 @@ def _overlay(texture_data, override_parameters, values=None):
         for v in parameters.get("Vectors") or []:
             c = v.get("Value") or {}
             vectors[v.get("Name")] = [c.get("R", 0.0), c.get("G", 0.0), c.get("B", 0.0), c.get("A", 1.0)]
-    return {k: v for k, v in (("textures", textures), ("scalars", scalars), ("vectors", vectors)) if v}
+    return {k: v for k, v in (("textures", textures), ("scalars", scalars), ("vectors", vectors),
+                              ("switches", switches)) if v}
 
 
 def _built(path, variant):
