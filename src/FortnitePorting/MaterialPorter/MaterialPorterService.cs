@@ -306,6 +306,24 @@ public class MaterialPorterService : IService
             StatusLog.Instance.FromBlender(query["state"], lines);
             return "ok";
         }
+        if (route == "fork-assets-page")
+        {
+            // tests: open the Assets page as a click on it does (its view model builds the tabs' sidebar), and
+            // say what it built: the sidebar's entries, and each tab's type with whether it has an icon of its own
+            await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() => AppServices.Navigation.App.Open<Views.AssetsView>());
+            await Task.Delay(TimeSpan.FromSeconds(double.TryParse(query["wait"], System.Globalization.CultureInfo.InvariantCulture, out var pause) ? pause : 6));
+            return await Avalonia.Threading.Dispatcher.UIThread.InvokeAsync(() =>
+            {
+                var model = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions.GetRequiredService<ViewModels.AssetsViewModel>(AppServices.Services);
+                var tabs = AppServices.AssetLoading.Categories.SelectMany(c => c.Loaders).Select(l => new
+                {
+                    Type = l.Type.ToString(),
+                    OwnIcon = Avalonia.Platform.AssetLoader.Exists(new Uri($"avares://FortnitePorting/Assets/FN/{l.Type}.png")),
+                    Icon = TabIcons.Of(l.Type).PixelSize.Width,
+                }).ToList();
+                return new { model.IsInitialized, Sidebar = model.SidebarItems.Count, Tabs = tabs.Count, WithoutOwnIcon = tabs.Where(t => !t.OwnIcon).Select(t => t.Type), tabs };
+            });
+        }
         if (route == "fork-status")
         {
             // tests: the status line and the newest log lines, as the window shows them

@@ -93,7 +93,7 @@ public partial class AssetsViewModel(
                 {
                     group.Items.Add(new SidebarItemButton(
                         text: loader.Type.Description,
-                        iconBitmap: ImageExtensions.AvaresBitmap($"avares://FortnitePorting/Assets/FN/{loader.Type.ToString()}.png"),
+                        iconBitmap: MaterialPorter.TabIcons.Of(loader.Type), // Material Porter fork: a tab without an icon of its own takes the plain one
                         tag: loader.Type
                     ));
                 }
