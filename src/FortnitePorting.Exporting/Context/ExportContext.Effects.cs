@@ -324,6 +324,19 @@ public partial class ExportContext
                 };
                 break;
             }
+            case "NiagaraDecalRendererProperties":
+            {
+                // a decal a particle: the plugin draws it as a quad across its projection (a decal lies on
+                // the scene it projects onto, which isn't here: a ground decal lies flat)
+                if (EffectMaterial(renderer.GetOrDefault<UMaterialInterface?>("Material"), 0, values) is not { } material) break;
+                yield return new MaterialPorterMesh
+                {
+                    Name = $"{emitter.Name} decal",
+                    IsEmpty = true,
+                    MPEffect = new Dictionary<string, object> { ["Kind"] = "Decal", ["Renderer"] = renderer.Name, ["Material"] = material },
+                };
+                break;
+            }
         }
     }
 }

@@ -263,7 +263,10 @@ public partial class AssetLoader : ObservableObject
         }
 
         var manuallyDefinedAssets = ManuallyDefinedAssetsFactory?.Invoke() ?? [];
-        TotalAssets = AssetDatas.Count + manuallyDefinedAssets.Length + CustomAssets.Length;
+        // Material Porter fork: a loader that lists assets unread lists the registry's so too (its list has them)
+        var unregistered = MPUnregistered?.Invoke(AssetDatas.Select(data => (data.PackageName.Text, data.AssetName.Text)).ToList()) ?? [];
+        if (MPUnregistered is not null) AssetDatas.Clear();
+        TotalAssets = AssetDatas.Count + unregistered.Count + manuallyDefinedAssets.Length + CustomAssets.Length;
 
         await Parallel.ForEachAsync(AssetDatas, new ParallelOptions { MaxDegreeOfParallelism = Math.Min(2, Environment.ProcessorCount / 2) },
             async (asset, ct) =>
@@ -281,6 +284,8 @@ public partial class AssetLoader : ObservableObject
 
                 LoadedAssets++;
             });
+
+        await LoadUnregistered(unregistered, token);
 
         foreach (var manualAsset in manuallyDefinedAssets)
         {

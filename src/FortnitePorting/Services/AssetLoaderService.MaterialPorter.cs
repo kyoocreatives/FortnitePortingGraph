@@ -19,12 +19,21 @@ public partial class AssetLoaderService
     public AssetLoaderService()
     {
         // particle effects (Niagara systems): what each emitter draws, to place by hand; the description says
-        // what the emitters are
+        // what the emitters are. The registry's (islands') and the game's own, found by file name.
         Categories.First(category => category.Category == EAssetCategory.Gameplay).Loaders.Add(new AssetLoader(EExportType.Effect)
         {
             ClassNames = ["NiagaraSystem"],
             HideRarity = true,
             DescriptionHandler = Effects.Describe,
+            MPUnregistered = registry => UEParse.Provider is { } provider ? Effects.ListedSystems(provider, registry) : registry,
+            // GPU emitters aren't replayed (an island's effects are mostly GPU): the ones that play apart
+            FilterCategories =
+            {
+                new FilterCategory("EFFECT", [EExportType.Effect])
+                {
+                    Filters = [new FilterItem("Plays in Blender", asset => Effects.Plays(asset.CreationData.Object))]
+                }
+            },
         });
 
         // skydiving contrails: each item's effect (played on a character in Blender)

@@ -598,8 +598,9 @@ public class MeshExport : BaseExport
             }
             case EExportType.Effect:
             {
-                // Material Porter fork: a particle effect's emitters, and what each draws
-                Meshes.Add(Context.Effect(asset));
+                // Material Porter fork: a particle effect's emitters, and what each draws (one the tab
+                // lists unread is read now)
+                Meshes.Add(Context.Effect(MaterialPorter.Unloaded.Read(asset, Context.Meta.Provider.Provider)));
                 break;
             }
             case EExportType.Contrail:

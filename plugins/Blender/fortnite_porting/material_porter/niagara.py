@@ -584,7 +584,8 @@ class Distribution:
 
 
 class Nothing:
-    """A data interface with nothing to answer here (sound, a world to collide with): its functions give zeros."""
+    """A data interface with nothing to answer here (sound, a world to collide with, a data channel
+    written for the game to read): its functions give zeros."""
 
     def __init__(self, system, kind, props):
         pass
@@ -593,7 +594,32 @@ class Nothing:
         return _zeros(outputs)
 
 
+class NoMesh:
+    """A static mesh to sample (its surface, its vertices, its sockets). None comes with the effect:
+    the engine samples the mesh of the component the effect is on. Its functions answer as the
+    engine's do with no mesh: counts 0, positions 0 - the particles start at the effect's origin -
+    a socket's rotation none and its scale 1, a colour white."""
+
+    def __init__(self, system, kind, props):
+        self.system = system
+
+    def function(self, name, specifiers, inputs, outputs):
+        self.system.meshless = True
+
+        def answer(count, args):
+            out = [np.zeros(count, F) for _ in range(outputs)]
+            if "Transform" in name and outputs >= 10:     # position, rotation (x y z w), scale[, velocity]
+                out[6][:] = 1.0
+                out[7][:] = out[8][:] = out[9][:] = 1.0
+            elif "Color" in name and outputs == 4:
+                for o in out:
+                    o[:] = 1.0
+            return out
+        return answer
+
+
 INTERFACES = {kind: Curve for kind in Curve.OUTPUTS}
+INTERFACES["NiagaraDataInterfaceStaticMesh"] = NoMesh
 INTERFACES["NiagaraDataInterfaceParticleRead"] = ParticleRead
 INTERFACES["NiagaraDataInterfaceSpriteRendererInfo"] = RendererInfo
 INTERFACES["NiagaraDataInterfaceMeshRendererInfo"] = RendererInfo
@@ -604,7 +630,7 @@ for _kind in ("SkeletalMesh", "SocketReader"):
     INTERFACES["NiagaraDataInterface" + _kind] = Skeleton
 for _kind in ("Float", "Float2", "Float3", "Float4", "Position", "Color", "Quat", "Int32", "Bool"):
     INTERFACES["NiagaraDataInterfaceArray" + _kind] = Array
-for _kind in ("AudioPlayer", "AudioOscilloscope", "AudioSpectrum", "Export", "DebugDraw", "CollisionQuery", "SimpleCounter"):
+for _kind in ("AudioPlayer", "AudioOscilloscope", "AudioSpectrum", "Export", "DebugDraw", "CollisionQuery", "SimpleCounter", "DataChannelWrite"):
     INTERFACES["NiagaraDataInterface" + _kind] = Nothing
 INTERFACES["NiagaraDataInterfaceArrayDistributionInt"] = Distribution
 
@@ -919,6 +945,7 @@ class System:
         struct.pack_into("<4f4f4f4f", self.owner, 432, 1, 0, 0, 0, 0, 1, 0, 0, 0, 0, 1, 0, 1, 1, 1, 0)    # axes, scale
         self.previous = None
         self.unanswered = set()     # what its own scripts ask that answers zeros here ("Grid2DCollection.SetNumCells")
+        self.meshless = False       # whether a script samples a static mesh (none here: NoMesh)
         self.spawn = self.script(props["SystemSpawnScript"], None)
         self.update = self.script(props["SystemUpdateScript"], None)
         self.spawn_inputs = Layout(compiled["SpawnInstanceParamsDataSetCompiledData"]["Variables"])

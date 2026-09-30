@@ -128,14 +128,25 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   Test routes: `fork-weapon-mods?path=`, `fork-asset-page?type=&name=[&pick=Channel:Option;...][&export=1]`
   (an asset's page as the Assets view builds it, and its export through `ExportService`'s styles),
   `fork-export-asset` takes `wrap=` and `mods=Slot:path;...`.
-- **Particle effects, played.** Assets > Gameplay > Effects lists the Niagara systems the asset
-  registry knows (about 1,400, most of them islands'); the Files tab exports any of the game's
-  19,000 (`DetermineExportType` falls back on the tabs' classes). An effect's export
+- **Particle effects, played.** Assets > Gameplay > Effects lists 18,500 Niagara systems: the asset
+  registry's (552 once each - the registry holds most of them twice - nearly all islands') and the
+  game's own, found by file name (`NS_...`: the cooked registry leaves nearly all of them out;
+  `Effects.ListedSystems`, the loader's `MPUnregistered`). Each is listed unread
+  (`MaterialPorter/Unloaded.cs`: a stand-in object with the asset's name, path and class; the
+  export reads the asset - holding them all read took over 40 GB): its package's export map says
+  its class, its emitters, how many run on the GPU and what its renderers draw
+  (`Effects.ReadOutline`), which is the item's description; the listing takes a few seconds. The
+  engine's own templates (`/Niagara/`: not cooked to play) are left out. The tab's filter "Plays in
+  Blender" leaves out the systems with nothing to replay (655: all on the GPU, or no emitter; most
+  islands' effects are GPU). The Files tab
+  exports any of them too (`DetermineExportType` falls back on the tabs' classes). An effect's export
   (`ExportContext.Effects.cs`, `MaterialPorter/Effects.cs`) is a tree: an empty per enabled emitter
   (tagged CPU, GPU or Stateless), and under it what its renderers draw - a mesh renderer's meshes
   with the materials it puts on them, a sprite or ribbon renderer's material on a plane the plugin
-  makes (`material_porter/effects.py`). A renderer's own material parameters ride on the material
-  as `MPValues`. The item's description says what each emitter is.
+  makes (`material_porter/effects.py`), a decal renderer's on a quad across its projection. A
+  renderer's own material parameters ride on the material as `MPValues`.
+  Test routes: `fork-loader?type=Effect&described=1` (the listing, its descriptions, how many play),
+  `fork-export-asset?type=Effect&listed=1&path=<object path>` (the export of the item as listed).
   - **CPU emitters are replayed.** A CPU emitter keeps its compiled scripts in the cooked asset
     (VectorVM bytecode). The system's node carries the package's exports (`Effects.Program`) and
     the vector fields its scripts sample (`Effects.Fields`); the plugin runs them:
@@ -270,6 +281,11 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     (`SpriteAlignment`: `mp_align`, which is the velocity otherwise). A sprite's or a mesh's
     `CameraOffset` draws it that far toward the camera (`mp_camera_offset`: a glow out in front of
     the smoke it sits in).
+  - **Decals.** A decal renderer's particle is a quad across its box (its local YZ plane, the box's
+    half size `DecalSize` over it, turned by `DecalOrientation`: the engine's own turn, straight
+    down, where the emitter sets none), both sides drawn; its material's Decal Color is the
+    particle's `DecalColor`, its Decal Lifetime Opacity the particle's `DecalFade`
+    (`mp_decal_fade`). The scene it projects onto isn't here: a ground decal lies flat.
   - **Which renderers draw.** A renderer bound to a visibility tag draws only the particles whose
     tag is its `RendererVisibility` (one emitter, several looks); one whose `RendererEnabledBinding`
     reads false draws nothing; a piece with no particles of its own is hidden.
@@ -298,19 +314,27 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     - a mesh renderer's override material also goes to a slot the mesh itself leaves empty;
     - UE's names don't mind case: an effect's `User.bisFullyDeployed` is the `User.bIsFullyDeployed`
       the export sets.
+  - **A static mesh to sample** (its surface, vertices or sockets): the engine samples the mesh of
+    the component the effect is on, which doesn't come with the effect. Its functions answer as the
+    engine's do with no mesh (`niagara.NoMesh`): counts 0, positions 0 - the particles start at the
+    effect's origin - a socket's rotation none, its scale 1. An emitter that spawns from the mesh's
+    triangles spawns nothing, as in the game without one.
+  - When an emitter spawns nothing, the log names the system's user parameters still at 0 (a
+    burst's count the game sets: `User.Burst`): set one on the effect's empty and Replay Effect.
   - **Not replayed:** GPU emitters (7% of the game's own emitters, 4 of 5 of the islands') keep
     only a compiled shader; their pieces stay as imported, in a row beside the effect. Without an
     armature, a script that reads a character's bones or sockets finds them all at the effect's
-    origin. Collisions find nothing to hit. An emitter that samples a static mesh's or a skinned
-    mesh's surface, water, or a data channel is left out. A material that reads the scene behind
-    it (a particle decal, a refraction) draws nothing.
+    origin. Collisions find nothing to hit. An emitter that samples a skinned mesh's surface,
+    water, or reads a data channel is left out. A material that reads the scene behind it (a
+    particle decal, a refraction) draws nothing. Light renderers and component renderers (lights,
+    post process) draw nothing.
   - Of 2,000 of the game's own systems sampled, all but 3 (uncooked templates) play; of their
     7,330 emitters 498 are GPU and 66 are left out for what they read.
     Test route: `fork-effect-program?path=` (what the export carries for the replay).
   Build revision 12: an additive material's light is Emissive * Opacity (it was Emissive alone: a
   flash drew as its whole quad). 13: particle values from the instance, a sprite's sub-image.
   17: a particle material's World Position Offset, UE's division by zero. 18: a SmoothStep over an
-  empty range, Particle Random from the particle.
+  empty range, Particle Random from the particle. 19: a Niagara decal's colour and fade.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the

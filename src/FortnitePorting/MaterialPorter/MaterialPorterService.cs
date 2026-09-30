@@ -432,6 +432,7 @@ public class MaterialPorterService : IService
             await loader.Load();
             var names = loader.Source.Items.Select(a => a.CreationData is Models.Assets.Asset.AssetItemCreationArgs args
                     ? $"{args.DisplayName} = {args.Object.GetPathName()}" + (query["icons"] == "1" ? $" [{args.IconPath?.Split('/').Last()}]" : "")
+                      + (query["described"] == "1" ? $" | {args.Description}" : "")
                     : a.CreationData.DisplayName)
                 .OrderBy(n => n).ToList();
             var filter = query["filter"] ?? "";
@@ -449,6 +450,9 @@ public class MaterialPorterService : IService
             return JToken.FromObject(new
             {
                 total = loader.TotalAssets, listed = names.Count, seconds = clock.Elapsed.TotalSeconds,
+                managedMB = GC.GetTotalMemory(false) / 1_000_000, workingSetMB = Environment.WorkingSet / 1_000_000,
+                // effects: how many play in Blender (the tab's filter)
+                plays = loader.Type == EExportType.Effect ? loader.Source.Items.OfType<Models.Assets.Asset.AssetItem>().Count(a => Effects.Plays(a.CreationData.Object)) : -1,
                 sample = names.Where(n => n.Contains(filter, StringComparison.OrdinalIgnoreCase)).Take(12),
                 cooked, failed = failed.Count, failedSample = failed.Take(12)
             });
@@ -457,8 +461,19 @@ public class MaterialPorterService : IService
         {
             // tests: FP's export of one asset (type=Car|Outfit|...; picks for a car, face=Mouth:12,Eyes:2 for a
             // LEGO figure) as the plugin receives it
-            var asset = await Game.Provider.LoadPackageObjectAsync(query["path"] ?? throw new ArgumentException("path missing"));
             var type = Enum.Parse<EExportType>(query["type"] ?? "Car");
+            // listed=1: the asset as its tab lists it (an effect found by file name is listed unread)
+            UObject asset;
+            if (query["listed"] == "1")
+            {
+                var listing = AppServices.AssetLoading.Get(type);
+                await listing.Load();
+                var wantedPath = query["path"] ?? throw new ArgumentException("path missing");
+                asset = listing.Source.Items.OfType<Models.Assets.Asset.AssetItem>().Select(a => a.CreationData.Object)
+                            .FirstOrDefault(o => o.GetPathName().Equals(wantedPath, StringComparison.OrdinalIgnoreCase))
+                        ?? throw new FileNotFoundException("not listed: " + wantedPath);
+            }
+            else asset = await Game.Provider.LoadPackageObjectAsync(query["path"] ?? throw new ArgumentException("path missing"));
             var carStyles = (query["picks"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))
                 .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportCarStyle { Channel = int.Parse(x[0]), Option = int.Parse(x[1]) })
                 .Concat((query["face"] ?? "").Split(',', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':'))

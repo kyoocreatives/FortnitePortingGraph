@@ -38,6 +38,8 @@ def make(context, mesh, name):
     its material, its system and emitters as tagged empties; else a plain empty."""
     fx = mesh.get("MPEffect") or {}
     kind = fx.get("Kind")
+    if kind == "Decal":
+        return _decal(context, fx, name)
     if kind not in ("Sprite", "Ribbon"):
         obj = bpy.data.objects.new(name, None)
         if kind == "Emitter":
@@ -74,6 +76,29 @@ def make(context, mesh, name):
         track.target = camera
         track.track_axis = 'TRACK_Z'
         track.up_axis = 'UP_Y'
+    return obj
+
+
+def _decal(context, fx, name):
+    """A decal renderer's piece: a 1 m quad across the decal's projection (its local YZ plane: a decal
+    projects along its X), with the decal's material. The scene it projects onto isn't here: the
+    quad stands for the patch it covers (flat ground under a ground decal)."""
+    data = bpy.data.meshes.new(name)
+    # facing back along the projection (a ground decal's quad faces up)
+    data.from_pydata([(0.0, -0.5, -0.5), (0.0, -0.5, 0.5), (0.0, 0.5, 0.5), (0.0, 0.5, -0.5)], [], [(0, 1, 2, 3)])
+    uv = data.uv_layers.new(name="UV0")
+    for loop, (x, y) in zip(uv.data, ((0.0, 0.0), (0.0, 1.0), (1.0, 1.0), (1.0, 0.0))):
+        loop.uv = (x, y)
+    obj = bpy.data.objects.new(name, data)
+    obj[KEY] = "Decal"
+    obj[KEY_RENDERER] = fx.get("Renderer") or ""
+    obj["mp_decal_fade"] = 1.0      # its material's Decal Lifetime Opacity (a played decal's: its particle's)
+    data.materials.append(bpy.data.materials.new(name))
+    context.import_material(obj.material_slots[0], fx["Material"], {})
+    if obj.material_slots[0].material is not None:
+        obj.material_slots[0].material.use_backface_culling = False     # a decal has no side: seen from anywhere
+    particle_values(obj)
+    obj.visible_shadow = False
     return obj
 
 

@@ -405,6 +405,13 @@ class MaterialEnv:
         """UE's Particle Speed: how fast a particle moves (mp_velocity's length; 0 where there is none)."""
         return self.tr.vmath('LENGTH', self._particle_attr("mp_velocity")[0], out_w=1)
 
+    def decal_fade(self):
+        """UE's Decal Lifetime Opacity on an effect's decal: its particle's DecalFade (mp_decal_fade; the
+        still piece's own property, 1). None for anything else."""
+        if not self.entry.get("particle"):
+            return None
+        return self._particle_attr("mp_decal_fade")[2]
+
     def particle_random(self):
         """UE's Particle Random: a particle's own random number, the same for its whole life
         (mp_random; an instance's index changes as particles die). None for anything else."""

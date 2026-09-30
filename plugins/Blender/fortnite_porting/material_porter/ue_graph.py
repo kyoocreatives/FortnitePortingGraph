@@ -2472,6 +2472,13 @@ class Translator:
         if t == "ParticleColor":
             rgb, a = self._hook("particle_color", lambda: (self.const((1.0, 1.0, 1.0), 3), self.const(1.0)))
             return self.rgba_out(rgb, a, out)
+        if t == "DecalColor":
+            # a decal's colour (a Niagara decal's: its particle's DecalColor), RGBA
+            rgb, a = self._hook("particle_color", lambda: (self.const((1.0, 1.0, 1.0), 3), self.const(1.0)))
+            return self.with_alpha(rgb, a)
+        if t == "DecalLifetimeOpacity":
+            # a decal's fade over its life (a Niagara decal's: its particle's DecalFade); 1 on anything else
+            return self._hook("decal_fade", lambda: self.const(1.0))
         if t == "DynamicParameter":
             d = p.get("DefaultValue") or {}
             dflt = self.const((d.get("R", 1.0), d.get("G", 1.0), d.get("B", 1.0), d.get("A", 1.0)), 4)

@@ -28,6 +28,8 @@ from . import effects, niagara
 GROUP = "MP Effect Particles"
 RIBBONS = "MP Effect Ribbons"
 GROUP_VERSION = 8
+# a decal's turn where the emitter sets none: the engine's FRotator(-90, 0, 90), projecting straight down (x, y, z, w)
+DECAL_DOWN = (-0.5, 0.5, 0.5, 0.5)
 # how a particle's piece is turned (the modifier's Turn): as the renderer says
 TURN_OWN, TURN_CAMERA, TURN_CAMERA_VELOCITY, TURN_FACING, TURN_MESH_VELOCITY, TURN_MESH_CAMERA, TURN_FACING_ALIGNED = range(7)
 FACINGS = "What a ribbon's width runs across: 0: the view (it faces the camera); 1: each particle's facing; "           "2: along each particle's side vector (a trail between two sockets)"
@@ -362,16 +364,24 @@ def points(name, track, renderer, kind, scale, keep=None):
             _attribute(mesh, "mp_align", 'FLOAT_VECTOR', pick(track.get(custom, (0, 0, 1))) * flip)
         else:
             _attribute(mesh, "mp_align", 'FLOAT_VECTOR', pick(track.get(bound(renderer, "VelocityBinding", "Velocity"), (0, 0, 0))) * flip)
+    elif kind == "Decal":
+        # its box's half size (UE's units) over the 1 m quad; turned as it projects (the engine's own
+        # turn where the emitter sets none: straight down)
+        _attribute(mesh, "mp_scale", 'FLOAT_VECTOR', pick(track.get(bound(renderer, "DecalSizeBinding", "DecalSize"), (50, 50, 50))) * 2.0 * scale)
+        q = pick(track.get(bound(renderer, "DecalOrientationBinding", "DecalOrientation"), DECAL_DOWN)).astype(np.float32)
+        _attribute(mesh, "mp_decal_fade", 'FLOAT', pick(track.get(bound(renderer, "DecalFadeBinding", "DecalFade"), (1,))))
     else:
         _attribute(mesh, "mp_scale", 'FLOAT_VECTOR', pick(track.get(bound(renderer, "ScaleBinding", "Scale"), (1, 1, 1))))
         q = pick(track.get(bound(renderer, "MeshOrientationBinding", "MeshOrientation"), (0, 0, 0, 1))).astype(np.float32)
+    if kind in ("Decal", "Mesh"):
         length = np.linalg.norm(q, axis=1, keepdims=True)
         q = np.where(length > 1e-8, q / np.maximum(length, 1e-8), np.array([0, 0, 0, 1], np.float32))
         # UE's (x, y, z, w) to Blender's (w, x, y, z), Y flipped
         _attribute(mesh, "mp_rotation", 'QUATERNION', np.stack([q[:, 3], -q[:, 0], q[:, 1], -q[:, 2]], axis=1))
     # what the materials read
     _attribute(mesh, "mp_particle", 'FLOAT', np.ones(len(position), np.float32))
-    _attribute(mesh, "mp_particle_color", 'FLOAT_COLOR', pick(track.get(bound(renderer, "ColorBinding", "Color"), (1, 1, 1, 1))))
+    color = ("DecalColorBinding", "Color") if kind == "Decal" else ("ColorBinding", "Color")
+    _attribute(mesh, "mp_particle_color", 'FLOAT_COLOR', pick(track.get(bound(renderer, *color), (1, 1, 1, 1))))
     flags, valid = [], int(renderer.get("MaterialParamValidMask") or 0)     # four bits per parameter: the channels the emitter writes
     for i, (binding, usual) in enumerate((("DynamicMaterialBinding", "DynamicMaterialParameter"), ("DynamicMaterial1Binding", "DynamicMaterialParameter1"),
                                          ("DynamicMaterial2Binding", "DynamicMaterialParameter2"), ("DynamicMaterial3Binding", "DynamicMaterialParameter3"))):
@@ -746,7 +756,7 @@ def clear(root):
             bpy.data.meshes.remove(data)
     for node in root.children:
         for piece in node.children:
-            if piece.get(effects.KEY) in ("Sprite", "Mesh", "Ribbon"):
+            if piece.get(effects.KEY) in ("Sprite", "Mesh", "Ribbon", "Decal"):
                 piece.hide_render = piece.hide_viewport = bool(piece.get(effects.KEY_SKIP))
 
 
@@ -874,7 +884,7 @@ def play(root):
         for piece in list(node.children):
             kind = piece.get(effects.KEY)
             renderer = next((e["props"] for e in exports if e["name"] == piece.get(effects.KEY_RENDERER) and e["outer"] == emitter.export["name"]), None)
-            if kind not in ("Sprite", "Mesh", "Ribbon") or renderer is None or piece.type != 'MESH' or piece.get(effects.KEY_SKIP):
+            if kind not in ("Sprite", "Mesh", "Ribbon", "Decal") or renderer is None or piece.type != 'MESH' or piece.get(effects.KEY_SKIP):
                 continue
             if not _enabled(system, emitter, renderer):
                 # a renderer the system switches off (a variant's: System.IsGold): its piece out of sight
@@ -971,13 +981,18 @@ def play(root):
         yield "%s: %s: stateless emitters, played from their settings (the engine's random draws apart)" % (root.name, ", ".join(approximate))
     idle = [e.name for e in system.emitters if e.name not in played and not sum(f[0].shape[1] for f in tracks.get(e.name) or [])]
     if idle:
-        yield "%s: %s spawned nothing in the replay (waiting on something the game sets, or on an emitter left out): %s" % (
-            root.name, ", ".join(idle), "hidden" if worn else "left as pieces")
+        # the user parameters the game sets that are still off here (a burst's count, a switch): the likely wait
+        off = [name for name, kind, value in system.users() if name.startswith("User.") and not (value if not hasattr(value, "__len__") else any(value))]
+        yield "%s: %s spawned nothing in the replay (waiting on something the game sets%s, or on an emitter left out): %s" % (
+            root.name, ", ".join(idle), ": its %s at 0 - set on the effect's empty, then Replay Effect" % ", ".join(off[:4]) if off else "",
+            "hidden" if worn else "left as pieces")
     if system.reads and rig is None:
         yield "%s: reads a character's bones or sockets (%s): with none, each sits at the effect's origin. Select the effect and an armature, then Replay Effect" % (
             root.name, ", ".join(sorted(system.reads)[:6]))
     elif rig is not None and system.unresolved():
         yield "%s: %s has no bone or socket named %s: each sits at its origin" % (root.name, rig.name, ", ".join(system.unresolved()[:8]))
+    if getattr(system, "meshless", False):
+        yield "%s: samples a static mesh's surface or sockets (in the game, the mesh it is on): with none here, as the engine without one, from the effect's origin" % root.name
     left = ["%s (%s)" % s for s in system.skipped]
     if left:
         yield "%s: %s: %s" % (root.name, "not played, their pieces hidden" if worn else "left as pieces", ", ".join(left))

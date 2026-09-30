@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using CUE4Parse.UE4.Assets.Exports;
 using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.Math;
@@ -42,6 +43,97 @@ public static class Effects
         PickaxeEffects.Where(e => Named(weaponDefinition.GetDataListItem<FSoftObjectPath>(e.Property).AssetPathName)).Select(e => e.Name).ToList();
 
     public const string PartEffect = "IdleEffectNiagara", PartSocket = "IdleFXSocketName";
+
+    /// <summary>
+    /// The Niagara systems the Effects tab lists: the asset registry's (nearly all islands') and the
+    /// game's own by file name (NS_...), which the cooked registry mostly leaves out. (package path as
+    /// the game mounts it, object name), each package once; a package's editor data (.o.uasset) and
+    /// the engine's own templates and examples (/Niagara/: not cooked to play) are left out.
+    /// </summary>
+    public static List<(string Package, string Name)> ListedSystems(global::CUE4Parse.FileProvider.IFileProvider provider,
+        IEnumerable<(string Package, string Name)> registry)
+    {
+        var found = new Dictionary<string, (string, string)>(StringComparer.OrdinalIgnoreCase);
+        foreach (var (package, name) in registry)
+            if (!package.StartsWith("/Niagara/", StringComparison.OrdinalIgnoreCase)) found.TryAdd(package, (package, name));
+        foreach (var path in provider.Files.Keys)
+        {
+            if (!path.EndsWith(".uasset", StringComparison.OrdinalIgnoreCase) || path.EndsWith(".o.uasset", StringComparison.OrdinalIgnoreCase)) continue;
+            var name = path[(path.LastIndexOf('/') + 1)..^".uasset".Length];
+            if (!name.StartsWith("NS_", StringComparison.OrdinalIgnoreCase)) continue;
+            var package = MountPath(path[..^".uasset".Length]);
+            if (!package.StartsWith("/Niagara/", StringComparison.OrdinalIgnoreCase)) found.TryAdd(package, (package, name));
+        }
+        return found.Values.ToList();
+    }
+
+    /// <summary>
+    /// A package's path as the game mounts it from its file's: FortniteGame/Content/X is /Game/X, a
+    /// plugin's .../Name/Content/X is /Name/X.
+    /// </summary>
+    public static string MountPath(string file)
+    {
+        var at = file.IndexOf("/Content/", StringComparison.OrdinalIgnoreCase);
+        if (at < 0) return "/" + file;
+        var root = file[..at];
+        var mount = root.Equals("FortniteGame", StringComparison.OrdinalIgnoreCase) ? "Game"
+            : root.Equals("Engine", StringComparison.OrdinalIgnoreCase) ? "Engine" : root[(root.LastIndexOf('/') + 1)..];
+        return "/" + mount + file[(at + "/Content".Length)..];
+    }
+
+    /// <summary>
+    /// A system as its package's export map tells it, without reading it: the class of the object of
+    /// its name, its emitters, how many run on the GPU (a GPU emitter has a GPUComputeScript: it isn't
+    /// replayed) and what its renderers draw.
+    /// </summary>
+    public sealed record Outline(string? Class, int Emitters, int Gpu, string[] Draws)
+    {
+        public bool Plays => Emitters > Gpu;
+
+        public string Describe(string folder)
+        {
+            var what = Emitters == 0 ? "No emitters" : $"{Emitters} emitter{(Emitters == 1 ? "" : "s")}"
+                + (Draws.Length > 0 ? ": " + string.Join(", ", Draws) : "");
+            var gpu = Gpu == 0 || Emitters == 0 ? "" : Gpu >= Emitters ? " · GPU only: its pieces come still, not played"
+                : $" · {Gpu} on the GPU: still, not played";
+            return $"{what}{gpu} · {folder}";
+        }
+    }
+
+    public static async System.Threading.Tasks.Task<Outline?> ReadOutline(global::CUE4Parse.FileProvider.IFileProvider provider, string package, string name)
+    {
+        try
+        {
+            var loaded = await provider.LoadPackageAsync(package);
+            string? found = null;
+            int emitters = 0, gpu = 0;
+            var draws = new SortedSet<string>();
+            for (var i = 0; i < loaded.ExportMapLength; i++)
+            {
+                if (loaded.ResolvePackageIndex(new FPackageIndex(loaded, i + 1)) is not { } export) continue;
+                var type = export.Class?.Name.Text ?? "";
+                var exportName = export.Name.Text;
+                if (found is null && exportName.Equals(name, StringComparison.OrdinalIgnoreCase)) found = type;
+                if (type is "NiagaraEmitter" or "NiagaraStatelessEmitter") emitters++;
+                else if (type == "NiagaraScript" && exportName.StartsWith("GPUComputeScript", StringComparison.OrdinalIgnoreCase)) gpu++;
+                else if (type.StartsWith("Niagara") && type.EndsWith("RendererProperties")) draws.Add(DrawsOf(type));
+            }
+            return new Outline(found, emitters, gpu, draws.ToArray());
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>Whether any of a system's emitters is replayed (not all on the GPU), for the tab's filter.</summary>
+    public static bool Plays(UObject system)
+    {
+        if (Unloaded.Detail(system) is Outline outline) return outline.Plays;
+        return _plays.GetValue(system, s => new StrongBox<bool>(Emitters(s).Any(e => e.Sim != "GPU"))).Value;
+    }
+
+    private static readonly System.Runtime.CompilerServices.ConditionalWeakTable<UObject, StrongBox<bool>> _plays = new();
 
     /// <summary>
     /// The system a soft path names, where it shows something: many parts name a blank system
@@ -374,7 +466,9 @@ public static class Effects
     private static List<UObject> Enabled(IEnumerable<UObject?> renderers) =>
         renderers.Where(r => r is not null && r.GetOrDefault("bIsEnabled", true)).Select(r => r!).ToList();
 
-    private static string Draws(UObject renderer) => renderer.ExportType switch
+    private static string Draws(UObject renderer) => DrawsOf(renderer.ExportType);
+
+    private static string DrawsOf(string rendererClass) => rendererClass switch
     {
         "NiagaraMeshRendererProperties" => "mesh",
         "NiagaraSpriteRendererProperties" => "sprite",
@@ -386,6 +480,13 @@ public static class Effects
     /// <summary>A system in a line: "3 emitters: Rays (mesh, CPU), Flare (sprite, stateless), Sparks (sprite, GPU)".</summary>
     public static string Describe(UObject system)
     {
+        // one listed unread: what its package's export map tells, and where it is
+        if (Unloaded.Is(system))
+        {
+            var path = system.GetPathName();
+            var folder = path[..Math.Max(0, path.LastIndexOf('/'))];
+            return Unloaded.Detail(system) is Outline outline ? outline.Describe(folder) : folder;
+        }
         try
         {
             var emitters = Emitters(system);
