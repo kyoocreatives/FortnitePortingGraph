@@ -29,6 +29,8 @@ class MeshImportContext:
         pre_import_selected_armature = get_selected_armature()
         # Material Porter fork: a contrail goes on the character selected when it was sent (effects.finish)
         self.mp_selected_armature = pre_import_selected_armature
+        # and a character's own effects are played once its skeleton is final (effects.settle)
+        self.mp_deferred_effects = [] if self.type in [EExportType.OUTFIT, EExportType.FALL_GUYS_OUTFIT] else None
         pre_import_selected_armature_active = pre_import_selected_armature is not None and pre_import_selected_armature.select_get()
         
         self.collection = create_or_get_collection(self.name) if self.options.get("ImportIntoCollection") else bpy.context.scene.collection
@@ -95,6 +97,10 @@ class MeshImportContext:
             if rig_type == ERigType.TASTY and self.type not in [EExportType.LEGO_OUTFIT, EExportType.LEGO_WILDLIFE]:
                 self.create_tasty_rig(master_skeleton, self.get_metadata("MasterSkeletalMesh"))
 
+            if self.mp_deferred_effects is not None:
+                from ...material_porter import effects as mp_effects
+                mp_effects.settle(self)
+
             if anim_data := data.get("Animation"):
                 self.import_anim_data(anim_data, master_skeleton)
 
@@ -118,6 +124,11 @@ class MeshImportContext:
                     if key := best(shape_keys.key_blocks, lambda block: block.name.lower(), morph_target.get("Name").lower()):
                         key.value = morph_target.get("Value")
                         
+        # Material Porter fork: a character's effects not played yet (no merge of its parts): now
+        if getattr(self, "mp_deferred_effects", None) is not None:
+            from ...material_porter import effects as mp_effects
+            mp_effects.settle(self)
+
         # Material Porter fork: a creature's, a sidekick's, a vehicle's or a LEGO figure's armature gets a rig of its own, as an
         # outfit's gets Tasty's
         if rig_type == ERigType.TASTY and self.type in [EExportType.WILDLIFE, EExportType.LEGO_WILDLIFE, EExportType.SIDEKICK,

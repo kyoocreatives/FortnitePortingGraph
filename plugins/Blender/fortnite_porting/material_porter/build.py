@@ -19,7 +19,7 @@ from .ue_graph import BOUNDS_CENTRE, CARRIED, SHADING_MODELS, Translator, Val
 PREFIX = "MP "            # built materials: "MP MI_Foo"
 KEY_PATH = "mp_path"      # the game object a built material translates
 KEY_REV = "mp_rev"        # the build revision that made it (older ones are rebuilt, not reused)
-BUILD_REVISION = 23       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity; 13: a particle's values from its instance (a replayed effect), a sprite's sub-image; 14: SphereMask and Distance between a float2 and a scalar (Z stays 0); 15: a particle's sprite rotation and direction, the 2D light march of raymarched smoke; 16: the ambient cubemap tint is white; 17: a particle material's World Position Offset (displacement), UE's division by zero; 18: a smoothstep over an empty range is a hard edge, Particle Random from the particle; 19: a Niagara decal's colour and fade (DecalColor, DecalLifetimeOpacity); 20: division by zero per component (a vector divisor); 21: view space is the shader camera space as is (Z forward), Object Position the bounds' centre; 22: Power clamps a negative base to 0 (PositiveClampedPow); 23: vector parameters that aren't colours on vector sockets (a colour socket clamps negatives)
+BUILD_REVISION = 24       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity; 13: a particle's values from its instance (a replayed effect), a sprite's sub-image; 14: SphereMask and Distance between a float2 and a scalar (Z stays 0); 15: a particle's sprite rotation and direction, the 2D light march of raymarched smoke; 16: the ambient cubemap tint is white; 17: a particle material's World Position Offset (displacement), UE's division by zero; 18: a smoothstep over an empty range is a hard edge, Particle Random from the particle; 19: a Niagara decal's colour and fade (DecalColor, DecalLifetimeOpacity); 20: division by zero per component (a vector divisor); 21: view space is the shader camera space as is (Z forward), Object Position the bounds' centre; 22: Power clamps a negative base to 0 (PositiveClampedPow); 23: vector parameters that aren't colours on vector sockets (a colour socket clamps negatives); 24: BLEND_ColoredTransmittanceOnly is Modulate
                           # 4: instance overrides to the default (Opaque, DefaultLit, one-sided) honoured
                           # 6: vector parameters without a stored default are (0, 0, 0, 0), not alpha 1
                           # 8: single layer water (the medium, refraction, water info stand-ins); graph clip()s
@@ -157,7 +157,7 @@ def assemble(tr, mat, a, s):
                 surface = _with_alpha(tr, surface, a["Opacity"])
             else:
                 link(a["Opacity"], "Alpha")
-        elif blend == "BLEND_Modulate":
+        elif blend in MODULATE:
             # the scene behind, multiplied by the emissive colour
             mat.surface_render_method = 'BLENDED'
             _see_through_shadows(mat)
@@ -203,7 +203,9 @@ def assemble(tr, mat, a, s):
 # UE 5 names plain translucency BLEND_TranslucentGreyTransmittance (Substrate
 # adds the coloured one); all of them blend by Opacity
 TRANSLUCENT = ("BLEND_Translucent", "BLEND_TranslucentGreyTransmittance", "BLEND_TranslucentColoredTransmittance",
-               "BLEND_ColoredTransmittanceOnly", "BLEND_AlphaComposite", "BLEND_AlphaHoldout")
+               "BLEND_AlphaComposite", "BLEND_AlphaHoldout")
+# and Modulate BLEND_ColoredTransmittanceOnly (the same value: Tempest's eye glow multiplies its helmet)
+MODULATE = ("BLEND_Modulate", "BLEND_ColoredTransmittanceOnly")
 
 
 def _see_through_shadows(mat):

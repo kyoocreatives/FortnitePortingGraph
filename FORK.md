@@ -349,7 +349,12 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     (`effect_replay.Stand`) and a held pickaxe (`_hold`) are placed in it (`effects.ue_offset`).
     A head's own effect (on its skeleton's `root`) survives FP's merge of the parts' skeletons: the
     join renames the head's bones (`root.001`) and deletes them, so what hangs from one moves to the
-    bone it duplicates first, where it is (`processing/utils.merge_armatures`; it was at the feet).
+    bone it duplicates first, where it is in the rest pose (`processing/utils.merge_armatures`; it
+    was at the feet). An outfit's effects are placed as their meshes come in but played once FP is
+    done with the skeleton (`effects.settle`, after the merge and Tasty's rig): each is put back on
+    its bone (`mp_effect_bone`, `mp_effect_offset`) - a child hangs from its bone's tail and FP
+    shortens some bones later (Exalted Ice King's eyes sank to the neck) - and replayed reading the
+    bones as they then stand (Tasty's lowered arms: the mist stayed where the T-posed arms were).
   - **Other items' own effects.** The same Effects pick is on a back bling's, an outfit's, a
     glider's and a weapon's page, only where the item has effects (`Effects.OwnEffectNames`; a part
     naming a blank system - `NS_Blank_Body`, `NS_Empty`: no emitter, there to switch a base part's

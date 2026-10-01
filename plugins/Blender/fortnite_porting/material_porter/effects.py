@@ -23,6 +23,8 @@ KEY_EMITTER = "mp_emitter"  # on an emitter's empty: the emitter's name
 KEY_RENDERER = "mp_renderer"    # on a drawn piece: its renderer's name in the asset
 KEY_ROLE = "mp_effect_role"     # on an item's own effect's empty: "trail", "swing", "idle" or "event"
 KEY_SKIP = "mp_effect_skip"     # on a piece that isn't drawn: FP's importer hides its material (an anime outline's shell)
+KEY_BONE = "mp_effect_bone"     # on an effect put on a bone: the bone
+KEY_OFFSET = "mp_effect_offset"     # and its offset there in the game's frame (16 floats)
 
 
 def particle_values(obj):
@@ -161,6 +163,9 @@ def on_bone(obj, bone, offset=None):
     obj.matrix_parent_inverse = Matrix.Identity(4)
     # (a bone's children hang from its tail; the offset is in the game's frame of the bone)
     obj.matrix_basis = Matrix.Translation((0.0, -rest.length, 0.0)) @ ue_offset(rest) @ (offset if offset is not None else Matrix.Identity(4))
+    # where it is put, for settle(): FP's later steps reshape the bones (a head shortened, Tasty's arms)
+    obj[KEY_BONE] = rest.name
+    obj[KEY_OFFSET] = [v for row in (offset if offset is not None else Matrix.Identity(4)) for v in row]
     return True
 
 
@@ -289,6 +294,31 @@ def swing(windows, rig, hits=()):
         replay(root)
 
 
+def settle(context):
+    """A character's effects, once FP is done with its skeleton (its parts merged, its bones
+    reoriented and reshaped, Tasty's rig made): each put back on its bone - a child hangs from its
+    bone's tail, and FP shortens some bones after the effects are placed (Exalted Ice King's eyes
+    sank to the neck) - then played, reading the bones as they now stand (Tasty's lowered arms)."""
+    from . import effect_replay
+    from .hook import _log
+    roots, context.mp_deferred_effects = getattr(context, "mp_deferred_effects", None) or [], None
+    for root in roots:
+        try:
+            if root.name not in bpy.data.objects:
+                continue
+            if root.get(KEY_BONE) and root.parent is not None:
+                values = list(root.get(KEY_OFFSET) or [])
+                offset = Matrix([values[i:i + 4] for i in range(0, 16, 4)]) if len(values) == 16 else None
+                on_bone(root, root[KEY_BONE], offset)
+            for line in effect_replay.play(root):
+                _log(line)
+        except Exception as e:      # the pieces stay as imported
+            import os
+            import traceback
+            at = traceback.extract_tb(e.__traceback__)[-1]
+            _log("%s: not replayed (%s: %s, at %s:%d)" % (root.name, type(e).__name__, e, os.path.basename(at.filename), at.lineno))
+
+
 def finish(context, mesh, root):
     """Once a system's tree is imported: its CPU emitters replayed, their pieces played on the particles."""
     fx = mesh.get("MPEffect") or {}
@@ -360,6 +390,11 @@ def finish(context, mesh, root):
             _log("%s: %s: select it and press Replay Effect to play it (from its Start Frame)" % (
                 root.name, "a hit's effect (%s): a swing animation on the character holding the pickaxe plays it at each hit" % ", ".join(fx.get("Surfaces") or ["Default"])
                 if fx.get("Role") == "impact" else "the game plays it on an event"))
+            return
+        waiting = getattr(context, "mp_deferred_effects", None)
+        if waiting is not None:
+            # a character's: played once its skeleton is final (settle)
+            waiting.append(root)
             return
         for line in effect_replay.play(root):
             _log(line)
