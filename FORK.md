@@ -321,6 +321,14 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     effects on the selection). What isn't played of an effect that is on something (GPU emitters)
     is hidden instead of rowed beside it. Nothing moving above an effect: one frame is sampled
     for all (`effect_replay.Stand`). Test: `fork-export-asset?type=Pickaxe&effects=1`.
+  - **In the game's bone frames.** FP's bone reorientation (an import setting, and always with the
+    Tasty rig) turns each bone's rest to point down its children, and the Tasty rig moves some heads,
+    tails and rolls; an effect placed with the game's socket offset in that rest frame came out
+    rotated (90-180 degrees on every bone: the wrong direction) and centimetres off. Both leave the
+    original on the bone (`orig_quat` with `post_quat`; `orig_head`/`orig_tail`/`orig_roll`):
+    `effects.ue_rest` rebuilds the game's frame (all 358 bones of an outfit match a plain import's
+    to 0.0000 degrees), and an effect on a bone or socket, the bones and sockets its scripts read
+    (`effect_replay.Stand`) and a held pickaxe (`_hold`) are placed in it (`effects.ue_offset`).
   - **Other items' own effects.** The same Effects pick is on a back bling's, an outfit's, a
     glider's and a weapon's page, only where the item has effects (`Effects.OwnEffectNames`; a part
     naming a blank system - `NS_Blank_Body`, `NS_Empty`: no emitter, there to switch a base part's

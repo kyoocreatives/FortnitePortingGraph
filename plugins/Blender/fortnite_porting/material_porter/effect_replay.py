@@ -150,12 +150,15 @@ class Stand:
         self.bones = {}     # name read: (pose bone, where on it: a socket the armature doesn't have, else None)
         if rig is not None:
             by_name = {b.name.lower(): b for b in rig.pose.bones} if rig.type == 'ARMATURE' else {}
+            # (each read in the game's frame of its bone: a reoriented bone's isn't)
             for name in reads:
                 socket = (sockets or {}).get(name)
                 if name in by_name:
-                    self.bones[name] = (by_name[name], None)
+                    bone = by_name[name]
+                    self.bones[name] = (bone, effects.ue_offset(bone.bone))
                 elif socket is not None and str(socket.get("Bone")).lower() in by_name:
-                    self.bones[name] = (by_name[str(socket["Bone"]).lower()], effects.socket_matrix(socket, scale))
+                    bone = by_name[str(socket["Bone"]).lower()]
+                    self.bones[name] = (bone, effects.ue_offset(bone.bone) @ effects.socket_matrix(socket, scale))
                 elif socket is not None and not socket.get("Bone"):     # a static mesh's socket: on the mesh itself
                     self.bones[name] = (None, effects.socket_matrix(socket, scale))
 

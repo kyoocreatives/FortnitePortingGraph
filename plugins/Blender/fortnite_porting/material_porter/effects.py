@@ -119,6 +119,34 @@ def tag_mesh(obj, fx):
     obj.visible_shadow = False
 
 
+def ue_rest(bone):
+    """A bone's rest frame as the game has it (armature space). FP's bone reorientation (always on with
+    the Tasty rig) turns a bone's rest to point down its children, and the Tasty rig moves some heads,
+    tails and rolls: both leave the original on the bone (orig_quat with post_quat; orig_head,
+    orig_tail, orig_roll), from which the game's frame - the one its sockets and effects are placed
+    in - is rebuilt."""
+    from mathutils import Quaternion, Vector
+    keys = bone.keys()
+    if any(k in keys for k in ("orig_head", "orig_tail", "orig_roll")):
+        head = Vector(bone["orig_head"]) if "orig_head" in keys else bone.head_local.copy()
+        tail = Vector(bone["orig_tail"]) if "orig_tail" in keys else bone.tail_local.copy()
+        roll = float(bone["orig_roll"]) if "orig_roll" in keys else             bpy.types.Bone.AxisRollFromMatrix(bone.matrix_local.to_3x3())[1]
+        frame = Matrix.Translation(head) @ bpy.types.Bone.MatrixFromAxisRoll((tail - head).normalized(), roll).to_4x4()
+    else:
+        frame = bone.matrix_local.copy()
+    if "orig_quat" in keys and "post_quat" in keys:
+        # (reoriented: rest = original @ post, with post = orig_quat @ post_quat; not: post is identity)
+        post = Quaternion(bone["orig_quat"]) @ Quaternion(bone["post_quat"])
+        frame = frame @ post.to_matrix().to_4x4().inverted()
+    return frame
+
+
+def ue_offset(bone):
+    """From a bone's frame as it is in Blender to the game's (its local space): identity for a bone
+    the import left as the game has it."""
+    return bone.matrix_local.inverted() @ ue_rest(bone)
+
+
 def on_bone(obj, bone, offset=None):
     """Put an object on a bone (a socket) of the armature it is under: at the bone, following it, with
     the offset the game gives it there (a Blender matrix). False where the armature has no such bone."""
@@ -131,8 +159,8 @@ def on_bone(obj, bone, offset=None):
     obj.parent_type = 'BONE'
     obj.parent_bone = rest.name
     obj.matrix_parent_inverse = Matrix.Identity(4)
-    # (a bone's children hang from its tail)
-    obj.matrix_basis = Matrix.Translation((0.0, -rest.length, 0.0)) @ (offset if offset is not None else Matrix.Identity(4))
+    # (a bone's children hang from its tail; the offset is in the game's frame of the bone)
+    obj.matrix_basis = Matrix.Translation((0.0, -rest.length, 0.0)) @ ue_offset(rest) @ (offset if offset is not None else Matrix.Identity(4))
     return True
 
 
@@ -205,8 +233,8 @@ def _hold(rig):
     axe = loose[0]
     axe.parent, axe.parent_type, axe.parent_bone = rig, 'BONE', hand.name
     axe.matrix_parent_inverse = Matrix.Identity(4)
-    # (a bone child sits at the bone's tail: back to its head, where the hand grips)
-    axe.matrix_basis = Matrix.Translation((0.0, -hand.length, 0.0))
+    # (a bone child sits at the bone's tail: back to its head, where the hand grips, in the game's frame)
+    axe.matrix_basis = Matrix.Translation((0.0, -hand.length, 0.0)) @ ue_offset(hand)
     return axe
 
 
