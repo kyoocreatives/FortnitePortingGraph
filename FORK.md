@@ -149,6 +149,18 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   slider (`ik_<leg>`, 0 to play an animation). The original bones keep their names, rest pose and
   hierarchy. The shapes Tasty's data blend lacks (`CR_Foot`, `CR_Arrow`, `CR_Turn`) are built by
   `processing/context/rig_shapes.py`.
+- **Sidekick rig.** Sidekicks (Cosmetic Companions: quadrupeds, bipeds, flyers - UE-style skeletons,
+  pelvis > spine > neck > head, shoulder_fr/thigh_bk legs, clavicle > upperarm > lowerarm > hand)
+  get the creature rig at import with the Tasty rig setting on, which now also: takes head_01 for a
+  head; gives an arm with a hand IK (the hand's control under the chest, an elbow pole behind it;
+  raptors and crows get it too); shows the rest of a limb (fingers, toes) as FK; shows the centre
+  bones off the spine nothing else does (a flyer's body behind its head); and aims the eyes at a
+  control in front of the face (CR_Eyes, a pair of rings; each eye a Damped Track along its own axis
+  nearest forward, so nothing turns at rest; Eyes Aim slider). A chain whose bones don't meet (a
+  sidekick's arm: gaps from each bone's tail to the next one's head) made Blender's IK straighten
+  it - it takes each bone's own length - so IK solves a helper chain joint to joint (CR_MCH_<bone>)
+  that the bones follow (Copy Transforms from CR_Follow_<bone>, under it). The IK-driven bones go to
+  the hidden Creature Limb FK collection; IK sliders are per limb.
 - **Vehicle rig.** With the Tasty rig setting on, a vehicle (Vehicles, Rocket Racing cars) gets a rig
   at import (`processing/context/vehicle_rig.py`), after the big car rigs (Rigacar, Car-Rig Pro); the
   Rig panel's Rig Vehicle gives one to any selected armature. Fortnite's vehicles share a layout

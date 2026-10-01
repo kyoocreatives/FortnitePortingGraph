@@ -251,10 +251,12 @@ class FPMP_PT_CreatureRig(bpy.types.Panel):
             col.operator(FPMP_OT_CreatureRig.bl_idname)
             col.operator(FPMP_OT_VehicleRig.bl_idname)
             return
-        # each leg's IK (0: FK, as an animation plays it)
-        col.label(text="Leg IK (0 to play an animation):")
+        # each limb's IK (0: FK, as an animation plays it); the eyes' aim
+        col.label(text="IK (0 to play an animation):")
         for key in sorted(k for k in obj.keys() if k.startswith("ik_")):
             col.prop(obj, '["%s"]' % key, text=key[3:], slider=True)
+        if "eyes_aim" in obj:
+            col.prop(obj, '["eyes_aim"]', text="Eyes Aim", slider=True)
 
 
 class FPMP_PT_Exact(bpy.types.Panel):

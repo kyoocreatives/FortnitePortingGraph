@@ -118,8 +118,8 @@ class MeshImportContext:
                     if key := best(shape_keys.key_blocks, lambda block: block.name.lower(), morph_target.get("Name").lower()):
                         key.value = morph_target.get("Value")
                         
-        # Material Porter fork: a creature's or a vehicle's armature gets a rig of its own, as an outfit's gets Tasty's
-        if rig_type == ERigType.TASTY and self.type in [EExportType.WILDLIFE, EExportType.LEGO_WILDLIFE, EExportType.VEHICLE]:
+        # Material Porter fork: a creature's, a sidekick's or a vehicle's armature gets a rig of its own, as an outfit's gets Tasty's
+        if rig_type == ERigType.TASTY and self.type in [EExportType.WILDLIFE, EExportType.LEGO_WILDLIFE, EExportType.SIDEKICK, EExportType.VEHICLE]:
             skeleton = next((m.get("Skeleton") for m in self.imported_meshes if m.get("Skeleton") is not None and m["Skeleton"].type == 'ARMATURE'), None)
             if skeleton is not None and not skeleton.data.get("is_creature_rig") and not skeleton.data.get("is_vehicle_rig"):
                 if self.type == EExportType.VEHICLE:

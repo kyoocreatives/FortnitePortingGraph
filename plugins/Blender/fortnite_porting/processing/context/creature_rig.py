@@ -3,8 +3,9 @@ cow...), as Tasty's is for the player's. Creatures' skeletons have no names in c
 Royale's modular ones - QuadSpine_A_Pelvis_C, PawedLeg_A_Thigh_L - LEGO Fortnite's simple ones -
 pelvis, legB_01_l), so the rig reads each skeleton's tree: the spine from the pelvis to the head,
 the limbs hanging off it (a side's bones under a centre bone), which of them reach the ground
-(legs), the tail and the face's bones. Legs get IK (a foot control on the ground, a knee pole);
-everything else is FK on its own bones, with shapes. The original bones keep their names, rest
+(legs), the tail and the face's bones. Legs get IK (a foot control on the ground, a knee pole), and
+so do arms with a hand (a sidekick's: the hand's control follows the chest); eyes look at a control
+in front of the face; everything else is FK on its own bones, with shapes. The original bones keep their names, rest
 pose and hierarchy (an animation still plays on them: turn the legs' IK off first)."""
 
 import re
@@ -17,11 +18,13 @@ PREFIX = "CR_"          # the rig's own bones: CR_IK_<foot>, CR_Pole_<limb>
 
 SIDE = re.compile(r"(^|[_.\-\s])(l|left)([_.\-\s]|$)|(^|[_.\-\s])(r|right)([_.\-\s]|$)", re.IGNORECASE)
 FOOT = re.compile(r"^(foot|ankle|wrist|paw|hoof)[a-z]?$")      # a name's word (footA, Ankle - not PawedArm)
-HEAD = re.compile(r"(^|_)head(_c|_jnt)?$", re.IGNORECASE)
+HEAD = re.compile(r"(^|_)head(_c|_jnt|_\d+)?$", re.IGNORECASE)          # (a sidekick's head_01)
+HAND = re.compile(r"^(hand|wrist|paw)[a-z]?$")                            # an arm's IK end (a name's word)
+EYE = re.compile(r"(^|_)eye(ball)?(_|$)", re.IGNORECASE)                  # eye_l, Eyeball_R - not eyelid, eyebrow
 PELVIS = re.compile(r"pelvis|hips", re.IGNORECASE)
 TAIL = re.compile(r"tail", re.IGNORECASE)
 SHOULDER_BLADE = re.compile(r"clavicle|scapula", re.IGNORECASE)
-HELPER = re.compile(r"^(ik_|fx_|vb |.*socket)|attach|null$|_effect$", re.IGNORECASE)
+HELPER = re.compile(r"^(ik_|fx_|vb |.*socket)|attach|null$|_effect$|twist|_end$|^interact$", re.IGNORECASE)
 
 
 def side_of(name):
@@ -38,6 +41,7 @@ class Limb:
         self.kind = kind            # "leg", "arm", "wing", "face"
         self.chain = []             # a leg's IK chain (names, top down)
         self.foot = None            # a leg's foot (the IK target's bone)
+        self.helpers = []           # the chain IK solves, if its bones don't meet (CR_MCH_<bone>)
 
     @property
     def name(self):
@@ -118,6 +122,8 @@ class Survey:
             limb = Limb(chain, kind)
             if kind == "leg":
                 self._leg(limb)
+            if limb.kind == "arm":
+                self._arm(limb)
             limbs.append(limb)
         return limbs
 
@@ -134,6 +140,14 @@ class Survey:
             limb.kind = "arm"       # too short to bend: FK
             return
         limb.chain, limb.foot = names[start:foot], names[foot]
+
+    def _arm(self, limb):
+        """An arm's IK, if it has a hand: from its first bone past a clavicle to the one above the hand."""
+        names = limb.bones
+        start = 1 if SHOULDER_BLADE.search(names[0]) else 0
+        hand = next((i for i in range(start + 2, len(names)) if any(HAND.match(w.lower()) for w in re.split(r"[_\d]+", names[i]))), None)
+        if hand is not None:
+            limb.chain, limb.foot = names[start:hand], names[hand]
 
 
 def _pole_angle(base, tip, pole):
@@ -220,15 +234,24 @@ def create(obj):
     bpy.ops.object.mode_set(mode='EDIT')
     edit = armature.edit_bones
     survey = Survey(edit)
-    legs = [l for l in survey.limbs if l.kind == "leg"]
+    legs = [l for l in survey.limbs if l.chain]         # (and arms with a hand)
+    # where it faces: from its pelvis to its head, on the ground (else the armature's -Y, UE's forward)
+    ahead = Vector((0.0, -1.0, 0.0))
+    if survey.head and survey.pelvis:
+        towards = survey.bones[survey.head].head - survey.bones[survey.pelvis].head
+        towards.z = 0.0
+        if towards.length > 1e-3 * survey.height:
+            ahead = towards.normalized()
 
-    # the legs' IK targets (a copy of the foot, under the root) and knee poles
+    # the legs' IK targets (a copy of the foot, under the root; an arm's hand's, under the chest) and
+    # knee (elbow) poles
     poles = {}
     for leg in legs:
         foot, base, tip = edit[leg.foot], edit[leg.chain[0]], edit[leg.chain[-1]]
+        holder = edit.get(survey.root) if leg.kind == "leg" else edit[leg.bones[0]].parent
         target = edit.new(PREFIX + "IK_" + leg.foot)
         target.head, target.tail, target.roll = foot.head.copy(), foot.tail.copy(), foot.roll
-        target.parent = edit.get(survey.root)
+        target.parent = holder
         target.use_deform = False
         # the pole: out from the chain's bend (in front of a knee, behind a hock)
         length = sum(edit[n].length for n in leg.chain)
@@ -241,11 +264,8 @@ def create(obj):
             # a straight leg (a LEGO wolf's): IK can't tell which way to bend it, and doesn't - its knee
             # goes a hair (1% of the leg) off the line, the mesh unmoved at rest: a hind leg's knee
             # forward, a front leg's elbow back
-            ahead = Vector((0.0, -1.0, 0.0))        # (UE's forward, without a head)
-            if survey.head and survey.pelvis:
-                ahead = survey.bones[survey.head].head - survey.bones[survey.pelvis].head
-                ahead.z = 0.0
-            front = survey.pelvis and (base.head - survey.bones[survey.pelvis].head).dot(ahead) > 0.5 * ahead.length_squared
+            front = leg.kind == "arm" or (survey.pelvis and survey.head and (base.head - survey.bones[survey.pelvis].head).dot(ahead)
+                                          > 0.5 * (survey.bones[survey.head].head - survey.bones[survey.pelvis].head).dot(ahead))
             bend = off(middle + (-ahead if front else ahead))
             if bend.length < 1e-6:
                 bend = base.x_axis.copy()
@@ -261,31 +281,69 @@ def create(obj):
         location = middle + bend.normalized() * length * 0.4      # (near: the knee points at it)
         pole = edit.new(PREFIX + "Pole_" + leg.name)
         pole.head, pole.tail = location, location + Vector((0, 0, 0.1 * length))
-        pole.parent = edit.get(survey.root)
+        pole.parent = holder
         pole.use_deform = False
         poles[leg.name] = _pole_angle(base, foot.head, location)
+        # a chain whose bones don't meet (a sidekick's arm: a gap from a bone's tail to the next one's
+        # head): Blender's IK takes each bone's own length and can't reach, so it straightens - it
+        # solves a chain joint to joint instead (CR_MCH_<bone>), that the bones follow
+        joints = [edit[n].head.copy() for n in leg.chain] + [foot.head.copy()]
+        if any((edit[a].tail - b).length > 1e-3 * length for a, b in zip(leg.chain, joints[1:])):
+            parent = edit[leg.chain[0]].parent
+            for i, name in enumerate(leg.chain):
+                mch = edit.new(PREFIX + "MCH_" + name)
+                mch.head, mch.tail = joints[i], joints[i + 1]
+                mch.align_roll(edit[name].z_axis)
+                mch.parent = parent if i == 0 else edit[leg.helpers[-1]]
+                mch.use_connect, mch.use_deform = i > 0, False
+                follow = edit.new(PREFIX + "Follow_" + name)      # the bone where it rests, on the helper
+                follow.head, follow.tail, follow.roll = edit[name].head.copy(), edit[name].tail.copy(), edit[name].roll
+                follow.parent, follow.use_deform = mch, False
+                leg.helpers.append(mch.name)
+            poles[leg.name] = _pole_angle(edit[leg.helpers[0]], foot.head, location)
+
+    # the eyes look at a control in front of the face (each at a target straight down its own axis
+    # nearest forward: no turn at rest)
+    eyes = {}
+    head_subtree = {c.name for c in survey.bones[survey.head].children_recursive} if survey.head else set()
+    for name in sorted(n for n in head_subtree if EYE.search(n) and side_of(n) != "C" and not HELPER.search(n)):
+        eye = edit[name]
+        best = max(range(3), key=lambda i: abs(eye.matrix.col[i].to_3d().normalized().dot(ahead)))
+        axis = eye.matrix.col[best].to_3d().normalized()
+        sign = 1.0 if axis.dot(ahead) >= 0 else -1.0
+        eyes[name] = ("TRACK_" + ("" if sign > 0 else "NEGATIVE_") + "XYZ"[best], axis * sign)
+    if eyes:
+        spread = [edit[n].head for n in eyes]
+        across = max(((a - b).length for a in spread for b in spread), default=0.0)
+        reach = max(survey.height * 0.6, across * 3.0)
+        middle = sum(spread, Vector()) / len(spread)
+        aim = edit.new(PREFIX + "Eyes")
+        aim.head = middle + ahead * reach
+        aim.tail = aim.head + Vector((0.0, 0.0, survey.height * 0.05))
+        aim.parent, aim.use_deform = edit[survey.head], False
+        for name, (track, axis) in list(eyes.items()):
+            # (the eye's target: down its axis, as far ahead as the control)
+            at = edit[name].head + axis * (reach / max(axis.dot(ahead), 0.2))
+            target = edit.new(PREFIX + "Eye_" + name)
+            target.head, target.tail = at, at + Vector((0.0, 0.0, survey.height * 0.03))
+            target.parent, target.use_deform = aim, False
+            eyes[name] = track
     bpy.ops.object.mode_set(mode='POSE')
 
-    ours = ("Creature Controls", "Creature Face", "Creature Leg FK", "Creature Other")
+    ours = ("Creature Controls", "Creature Face", "Creature Limb FK", "Creature Other")
     for collection in armature.collections:
         if collection.name not in ours:
             collection.is_visible = False       # (the import's own: the rig's say what shows)
     controls = _collection(armature, "Creature Controls")
     face = _collection(armature, "Creature Face")
-    leg_fk = _collection(armature, "Creature Leg FK", visible=False)    # (IK drives them: shown to key FK)
+    leg_fk = _collection(armature, "Creature Limb FK", visible=False)   # (IK drives them: shown to key FK)
     others = _collection(armature, "Creature Other", visible=False)
     pose = obj.pose.bones
 
     from . import rig_shapes
     h = survey.height
     up = Vector((0.0, 0.0, 1.0))
-    # where it faces: from its pelvis to its head, on the ground (else the armature's -Y, UE's forward)
-    forward = Vector((0.0, -1.0, 0.0))
-    if survey.head and survey.pelvis:
-        towards = armature.bones[survey.head].head_local - armature.bones[survey.pelvis].head_local
-        towards.z = 0.0
-        if towards.length > 1e-6:
-            forward = towards.normalized()
+    forward = ahead
 
     def show(name, collection, shape, palette, size):
         """A control's shape, `size` metres across (a creature's own scale: a LEGO pelvis is a centimetre long)."""
@@ -324,6 +382,19 @@ def create(obj):
                 show(name, target, "CTRL_Box", _palette(name, "THEME02"), h * 0.035)
             else:
                 show(name, target, "CTRL_Spine", _palette(name), h * (0.07 if name == limb.foot or name in limb.bones[-2:] else 0.11))
+        if limb.kind != "face":
+            # the rest of the limb: fingers, toes, a scapula
+            for child in armature.bones[limb.bones[0]].children_recursive:
+                if child.name not in limb.bones and not HELPER.search(child.name):
+                    show(child.name, target, "CTRL_Spine", _palette(child.name), h * 0.04)
+    # the centre bones off the spine nothing else shows (a fish's body behind its head)
+    shown = {b.name for b in controls.bones} | {b.name for b in face.bones} | {b.name for b in leg_fk.bones}
+    if survey.pelvis:
+        head_bones = ({c.name for c in armature.bones[survey.head].children_recursive} | {survey.head}) if survey.head else set()
+        for bone in armature.bones[survey.pelvis].children_recursive:
+            if bone.name not in shown and bone.name not in head_bones and side_of(bone.name) == "C" \
+                    and bone.use_deform and not HELPER.search(bone.name):
+                show(bone.name, controls, "CTRL_Spine", "THEME09", h * 0.2)
     if survey.head:
         for child in armature.bones[survey.head].children_recursive:
             if child.name not in pose or HELPER.search(child.name) or any(child.name in l.bones for l in survey.limbs):
@@ -333,33 +404,72 @@ def create(obj):
     for leg in legs:
         prop = "ik_" + leg.name
         obj[prop] = 1.0
-        obj.id_properties_ui(prop).update(min=0.0, max=1.0, description="IK on this leg (0: FK, as an animation plays it)")
+        obj.id_properties_ui(prop).update(min=0.0, max=1.0, description="IK on this limb (0: FK, as an animation plays it)")
         target_name, pole_name = PREFIX + "IK_" + leg.foot, PREFIX + "Pole_" + leg.name
-        # a footprint on the ground under the foot, facing where the creature does
-        show(target_name, controls, "CTRL_Box", _palette(leg.foot), 0.1)
-        pose[target_name].custom_shape = rig_shapes.ensure("CR_Foot")
-        pose[target_name].custom_shape_scale_xyz = (h * 0.3, h * 0.3, h * 0.3)
-        align_shape(obj, pose[target_name], y=forward, z=up)
-        foot = armature.bones[leg.foot].head_local
-        rig_shapes.place(obj, pose[target_name], Vector((foot.x, foot.y, survey.ground)))
+        if leg.kind == "arm":
+            # a box around the hand
+            show(target_name, controls, "CTRL_Box", _palette(leg.foot), h * 0.06)
+        else:
+            # a footprint on the ground under the foot, facing where the creature does
+            show(target_name, controls, "CTRL_Box", _palette(leg.foot), 0.1)
+            pose[target_name].custom_shape = rig_shapes.ensure("CR_Foot")
+            pose[target_name].custom_shape_scale_xyz = (h * 0.3, h * 0.3, h * 0.3)
+            align_shape(obj, pose[target_name], y=forward, z=up)
+            foot = armature.bones[leg.foot].head_local
+            rig_shapes.place(obj, pose[target_name], Vector((foot.x, foot.y, survey.ground)))
         pose[target_name].custom_shape_wire_width = 3.5
         show(pole_name, controls, "CTRL_Pole_Leg", _palette(leg.foot), h * 0.08)
-        # on the foot, its head the chain's tip: a reoriented bone's tail needn't meet its child's head
-        ik = pose[leg.foot].constraints.new('IK')
-        ik.name = "CR IK"
-        ik.use_tail = False
-        ik.target, ik.subtarget = obj, target_name
-        ik.pole_target, ik.pole_subtarget = obj, pole_name
-        ik.pole_angle = poles[leg.name]
-        ik.chain_count = len(leg.chain)     # (the foot itself isn't a segment: its head is the tip)
-        _driven(obj, ik, prop)
+        if leg.helpers:
+            # on the helper chain, its tail the foot's head; the bones follow it
+            ik = pose[leg.helpers[-1]].constraints.new('IK')
+            ik.name = "CR IK"
+            ik.target, ik.subtarget = obj, target_name
+            ik.pole_target, ik.pole_subtarget = obj, pole_name
+            ik.pole_angle = poles[leg.name]
+            ik.chain_count = len(leg.helpers)
+            for name in leg.chain:
+                copy = pose[name].constraints.new('COPY_TRANSFORMS')
+                copy.name = "CR IK"
+                copy.target, copy.subtarget = obj, PREFIX + "Follow_" + name
+                _driven(obj, copy, prop)
+        else:
+            # on the foot, its head the chain's tip: a reoriented bone's tail needn't meet its child's head
+            ik = pose[leg.foot].constraints.new('IK')
+            ik.name = "CR IK"
+            ik.use_tail = False
+            ik.target, ik.subtarget = obj, target_name
+            ik.pole_target, ik.pole_subtarget = obj, pole_name
+            ik.pole_angle = poles[leg.name]
+            ik.chain_count = len(leg.chain)     # (the foot itself isn't a segment: its head is the tip)
+            _driven(obj, ik, prop)
         turn = pose[leg.foot].constraints.new('COPY_ROTATION')
         turn.name = "CR IK Foot"
         turn.target, turn.subtarget = obj, target_name
         _driven(obj, turn, prop)
+    if eyes:
+        obj["eyes_aim"] = 1.0
+        obj.id_properties_ui("eyes_aim").update(min=0.0, max=1.0, description="The eyes look at CR_Eyes")
+        aim = pose[PREFIX + "Eyes"]
+        lefts = [n for n in eyes if side_of(n) == "L"]
+        rights = [n for n in eyes if side_of(n) == "R"]
+        across = (armature.bones[lefts[0]].head_local - armature.bones[rights[0]].head_local) if lefts and rights else forward.cross(up)
+        sized(aim, "CTRL_Box", "THEME09", 0.1, wire=3.0)
+        aim.custom_shape = rig_shapes.ensure("CR_Glasses")
+        half = max(across.length / 2.0, h * 0.04)
+        aim.custom_shape_scale_xyz = (half, half, half)
+        align_shape(obj, aim, x=across.normalized(), y=forward)          # two rings facing forward
+        rig_shapes.color(aim, (1.0, 0.45, 0.75))
+        controls.assign(armature.bones[aim.name])
+        for name, track in eyes.items():
+            look = pose[name].constraints.new('DAMPED_TRACK')
+            look.name = "CR Look"
+            look.target, look.subtarget = obj, PREFIX + "Eye_" + name
+            look.track_axis = track
+            _driven(obj, look, "eyes_aim")
     armature[KEY] = True
     bpy.ops.object.mode_set(mode='OBJECT')
-    parts = ["spine %d" % len(survey.spine), "legs %d" % len(legs),
-             "arms %d" % sum(1 for l in survey.limbs if l.kind == "arm"),
+    parts = ["spine %d" % len(survey.spine), "legs %d" % sum(1 for l in legs if l.kind == "leg"),
+             "arms %d (%d IK)" % (sum(1 for l in survey.limbs if l.kind == "arm"), sum(1 for l in legs if l.kind == "arm")),
+             "eyes %d" % len(eyes),
              "wings %d" % sum(1 for l in survey.limbs if l.kind == "wing"), "tail %d" % len(survey.tail)]
     return "%s: creature rig (%s)" % (obj.name, ", ".join(parts))

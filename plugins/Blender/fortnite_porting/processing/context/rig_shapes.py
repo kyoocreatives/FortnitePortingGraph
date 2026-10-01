@@ -46,7 +46,19 @@ def _foot():
     return verts, edges
 
 
-SHAPES = {"CR_Arrow": _arrow, "CR_Turn": _turn, "CR_Swing": lambda: _turn(18.0), "CR_Foot": _foot}
+def _glasses():
+    """Two rings in the XZ plane (facing Y) at X -1 and 1, 0.55 across, a bridge between: the eyes."""
+    verts, edges, steps = [], [], 16
+    for cx in (-1.0, 1.0):
+        first = len(verts)
+        verts += [(cx + 0.55 * cos(radians(360.0 * i / steps)), 0.0, 0.55 * sin(radians(360.0 * i / steps))) for i in range(steps)]
+        edges += [(first + i, first + (i + 1) % steps) for i in range(steps)]
+    verts += [(-0.45, 0.0, 0.1), (0.45, 0.0, 0.1)]
+    edges.append((len(verts) - 2, len(verts) - 1))
+    return verts, edges
+
+
+SHAPES = {"CR_Arrow": _arrow, "CR_Turn": _turn, "CR_Swing": lambda: _turn(18.0), "CR_Foot": _foot, "CR_Glasses": _glasses}
 
 
 def ensure(name):
