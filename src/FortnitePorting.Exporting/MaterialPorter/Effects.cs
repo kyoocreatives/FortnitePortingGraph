@@ -286,6 +286,41 @@ public static class Effects
         return emitters;
     }
 
+    /// <summary>
+    /// The texture a curve of the system becomes where it is exposed to materials (a renderer binds
+    /// a material's texture parameter to it: Voyager Unleashed's head flames take their colours from
+    /// the system's colour curve, not from their material's own ramp), by the parameter the system's
+    /// scripts know the curve by (System.X, Emitter.X, User.X). Its cooked texture is written to
+    /// <see cref="FigureRecipe.GeneratedDir"/>, named for its content; the generated texture's path,
+    /// or null where the variable names no such curve.
+    /// </summary>
+    public static string? ExposedCurve(UObject system, string variable)
+    {
+        if (FigureRecipe.GeneratedDir is not { } dir) return null;
+        var map = system.Properties.FirstOrDefault(p => p.Name.Text == "ScriptRuntimeCookedDataMap")?.Tag?.GenericValue;
+        if (map is null) return null;
+        var serializer = JsonSerializer.Create(new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore });
+        var reference = JToken.FromObject(map, serializer).SelectTokens("$..ResolvedDataInterfaces[*]")
+            .Where(d => (string?)d["ResolvedVariable"]?["Name"] == variable || (string?)d["ParameterStoreVariable"]?["Name"] == variable)
+            .Select(d => (string?)d["ResolvedDataInterface"]?["ObjectName"])
+            .FirstOrDefault(n => n is not null && n.Contains('\''));
+        if (reference is null) return null;
+        // NiagaraDataInterfaceColorCurve'NS_X:SystemSpawnScript.NiagaraDataInterfaceColorCurve_0': its name and its outer's
+        var inner = reference.Split('\'')[1].Split(':')[^1].Split('.');
+        var curve = system.Owner!.GetExports().FirstOrDefault(e => e.Name == inner[^1] && (inner.Length < 2 || e.Outer?.Name.Text == inner[^2]));
+        if (curve is null || !curve.GetOrDefault("bExposeCurve", false)
+            || curve.GetOrDefault<global::CUE4Parse.UE4.Assets.Exports.Texture.UTexture?>("ExposedTexture") is not { } texture
+            || global::CUE4Parse_Conversion.Textures.TextureDecoder.Decode(texture, global::CUE4Parse.UE4.Assets.Exports.Texture.ETexturePlatform.DesktopMobile) is not { } decoded)
+            return null;
+        var data = global::CUE4Parse_Conversion.Textures.TextureEncoder.Encode(decoded,
+            global::CUE4Parse_Conversion.Options.ETextureFormat.Png, true, out var ext);
+        // linear: the curve's own values (HDR where they go past 1)
+        var name = "Curve_" + Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(data))[..12] + "_Lin";
+        var file = System.IO.Path.Combine(dir, name + "." + ext.Trim('.').ToLowerInvariant());
+        if (!System.IO.File.Exists(file)) System.IO.File.WriteAllBytes(file, data);
+        return FigureRecipe.GeneratedRoot + name + "." + name;
+    }
+
     // compiled data only the engine's own VM and the editor read
     private static readonly HashSet<string> Unread =
         ["ExperimentalContextData", "StatScopes", "CompileTags", "ShaderScriptParametersMetadata", "SimulationStageMetaData"];

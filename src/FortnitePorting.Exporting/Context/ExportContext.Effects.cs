@@ -235,7 +235,7 @@ public partial class ExportContext
             {
                 try
                 {
-                    node.Children.AddRange(EffectRenderer(emitter, renderer));
+                    node.Children.AddRange(EffectRenderer(system, emitter, renderer));
                 }
                 catch (Exception e)
                 {
@@ -249,7 +249,7 @@ public partial class ExportContext
     }
 
     /// <summary>A renderer's material parameters (scalars, vectors, textures it sets on its materials), or null.</summary>
-    private static ParamSet? RendererValues(UObject renderer)
+    private static ParamSet? RendererValues(UObject system, UObject renderer)
     {
         if (!renderer.TryGetValue(out FStructFallback parameters, "MaterialParameters")) return null;
         var values = new ParamSet();
@@ -263,6 +263,18 @@ public partial class ExportContext
         foreach (var p in parameters.GetOrDefault("TextureParameters", Array.Empty<FStructFallback>()))
             if (p.GetOrDefault<UTexture?>("Texture") is { } texture)
                 values.Textures[p.GetOrDefault<FName>("MaterialParameterName").Text] = texture.GetPathName();
+        // a texture parameter bound to a curve of the system's, exposed as a texture (a colour ramp)
+        foreach (var p in parameters.GetOrDefault("AttributeBindings", Array.Empty<FStructFallback>()))
+        {
+            // (the variables are Niagara structs: read as JSON)
+            var binding = Newtonsoft.Json.Linq.JObject.FromObject(p);
+            var variable = (string?)binding["ResolvedNiagaraVariable"]?["Name"] ?? (string?)binding["NiagaraVariable"]?["Name"];
+            var parameter = p.GetOrDefault<FName>("MaterialParameterName").Text;
+            if (string.IsNullOrEmpty(variable) || !variable.Contains('.')) continue;
+            if (Effects.ExposedCurve(system, variable) is { } curve) values.Textures[parameter] = curve;
+            else Serilog.Log.Information("[Material Porter] {System}: {Parameter} is bound to {Variable}, not a curve exposed as a texture: left as the material has it",
+                system.Name, parameter, variable);
+        }
         return values.Scalars.Count + values.Vectors.Count + values.Textures.Count > 0 ? values : null;
     }
 
@@ -285,9 +297,9 @@ public partial class ExportContext
         return new MaterialPorterMaterial(export) { MPValues = values, Hash = HashCode.Combine(export.Hash, values.Key()) };
     }
 
-    private IEnumerable<ExportMesh> EffectRenderer(Effects.Emitter emitter, UObject renderer)
+    private IEnumerable<ExportMesh> EffectRenderer(UObject system, Effects.Emitter emitter, UObject renderer)
     {
-        var values = RendererValues(renderer);
+        var values = RendererValues(system, renderer);
         switch (renderer.ExportType)
         {
             case "NiagaraMeshRendererProperties":

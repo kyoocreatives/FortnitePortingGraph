@@ -50,6 +50,21 @@ def merge_armatures(base_armature, extra_armatures):
         except AttributeError:
             pass
 
+    # Material Porter fork: what hangs from a joined skeleton's bone (a head's own effect on its
+    # "root", now "root.001") moves to the bone it duplicates before that is deleted, where it is
+    bpy.context.view_layer.update()
+    for child in master_skeleton.children:
+        if child.parent_type != 'BONE' or not re.search(r"\.\d\d\d$", child.parent_bone):
+            continue
+        base_name = re.sub(r"\.\d\d\d$", "", child.parent_bone)
+        if base_name not in master_skeleton.data.bones:
+            continue
+        world = child.matrix_world.copy()
+        child.parent_bone = base_name
+        child.matrix_parent_inverse = Matrix.Identity(4)
+        bpy.context.view_layer.update()
+        child.matrix_world = world
+
     bpy.context.view_layer.objects.active = master_skeleton
     bpy.ops.object.mode_set(mode='EDIT')
     bpy.ops.armature.select_all(action='DESELECT')

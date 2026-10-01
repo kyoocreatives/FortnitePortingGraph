@@ -446,9 +446,9 @@ public sealed class MaterialService
     const int TextureCacheVersion = 2;
 
     /// <summary>
-    /// Textures made here, not in the game (a LEGO figure's colour grids):
-    /// /MaterialPorter/Generated/&lt;name&gt;.&lt;name&gt; is &lt;GeneratedDir&gt;/&lt;name&gt;.png, named
-    /// for its content; a name ending in _Lin is linear, else sRGB.
+    /// Textures made here, not in the game (a LEGO figure's colour grids, an effect's exposed curve):
+    /// /MaterialPorter/Generated/&lt;name&gt;.&lt;name&gt; is &lt;GeneratedDir&gt;/&lt;name&gt;.png (or .hdr,
+    /// linear), named for its content; a name ending in _Lin is linear, else sRGB.
     /// </summary>
     public const string GeneratedRoot = "/MaterialPorter/Generated/";
 
@@ -457,6 +457,10 @@ public sealed class MaterialService
     TextureFile GeneratedTexture(string path)
     {
         var name = path[GeneratedRoot.Length..].Split('.')[0];
+        // an effect's curve past 1 (FortnitePorting's Effects.ExposedCurve): Radiance HDR, linear
+        var hdr = System.IO.Path.Combine(GeneratedDir, name + ".hdr");
+        if (File.Exists(hdr) && HdrSize(hdr) is (int w, int h))
+            return new TextureFile { File = hdr, Width = w, Height = h, Srgb = false, Hdr = true };
         var file = System.IO.Path.Combine(GeneratedDir, name + ".png");
         if (!File.Exists(file)) throw new FileNotFoundException("no generated texture " + name);
         using var codec = SkiaSharp.SKCodec.Create(file);
@@ -465,6 +469,19 @@ public sealed class MaterialService
             File = file, Width = codec.Info.Width, Height = codec.Info.Height,
             Srgb = !name.EndsWith("_Lin", StringComparison.OrdinalIgnoreCase),
         };
+    }
+
+    /// <summary>A Radiance HDR file's size, from its header's resolution line ("-Y h +X w"), or null.</summary>
+    static (int Width, int Height)? HdrSize(string file)
+    {
+        using var reader = new StreamReader(file, System.Text.Encoding.ASCII);
+        for (var i = 0; i < 32 && reader.ReadLine() is { } line; i++)
+        {
+            var parts = line.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+            if (parts.Length == 4 && parts[0] is "-Y" or "+Y" && int.TryParse(parts[1], out var h) && int.TryParse(parts[3], out var w))
+                return (w, h);
+        }
+        return null;
     }
 
     async Task<TextureFile> ExportTextureAsync(string path, int cap = 0, bool raw = false)

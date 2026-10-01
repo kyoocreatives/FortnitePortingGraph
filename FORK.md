@@ -240,7 +240,11 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   (tagged CPU, GPU or Stateless), and under it what its renderers draw - a mesh renderer's meshes
   with the materials it puts on them, a sprite or ribbon renderer's material on a plane the plugin
   makes (`material_porter/effects.py`), a decal renderer's on a quad across its projection. A
-  renderer's own material parameters ride on the material as `MPValues`.
+  renderer's own material parameters ride on the material as `MPValues`; a texture parameter it
+  binds to a curve of the system's that is exposed as a texture (`AttributeBindings`: Voyager
+  Unleashed's head flames take their colour from the system's colour curve, not their material's
+  own fire ramp, which came out white) is that curve's cooked texture, written as a generated HDR
+  texture (`Effects.ExposedCurve`, `/MaterialPorter/Generated/Curve_<hash>_Lin`).
   Test routes: `fork-screenshot?type=&search=&filters=A,B&select=&path=` (the window showing a tab,
   rendered to a PNG), `fork-loader?type=Effect&described=1` (the listing, its descriptions, how many play),
   `fork-export-asset?type=Effect&listed=1&path=<object path>` (the export of the item as listed).
@@ -329,6 +333,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     `effects.ue_rest` rebuilds the game's frame (all 358 bones of an outfit match a plain import's
     to 0.0000 degrees), and an effect on a bone or socket, the bones and sockets its scripts read
     (`effect_replay.Stand`) and a held pickaxe (`_hold`) are placed in it (`effects.ue_offset`).
+    A head's own effect (on its skeleton's `root`) survives FP's merge of the parts' skeletons: the
+    join renames the head's bones (`root.001`) and deletes them, so what hangs from one moves to the
+    bone it duplicates first, where it is (`processing/utils.merge_armatures`; it was at the feet).
   - **Other items' own effects.** The same Effects pick is on a back bling's, an outfit's, a
     glider's and a weapon's page, only where the item has effects (`Effects.OwnEffectNames`; a part
     naming a blank system - `NS_Blank_Body`, `NS_Empty`: no emitter, there to switch a base part's

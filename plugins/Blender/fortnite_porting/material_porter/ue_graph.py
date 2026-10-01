@@ -3455,42 +3455,45 @@ class Translator:
         else:
             node = self.node("ShaderNodeGroup", section_name(fname))
             node.node_tree = ft.tree
+        linked = set()
+
+        def link_needs(needs):
+            # the env learns which function a parameter is reached through (a
+            # material's parameters can be grouped by it)
+            caller = getattr(self.env, "caller", None)
+            if self.function is None:
+                self.env.caller = section_name(fname)
+            for sock in sorted(needs - linked):
+                linked.add(sock)
+                kind, key = ft.kind[sock]
+                if kind == "ue_attr":
+                    fid, attr = key
+                    lazy = ins.get(fid)
+                    v = lazy.get(self) if lazy is not None else None
+                    attrs = v.s if v is not None and isinstance(v.s, Attrs) else Attrs()
+                    self.link(attrs.get(attr), node.inputs[sock])
+                    continue
+                if kind in ("ue", "ue_alpha"):
+                    lazy = ins.get(key)
+                    v = lazy.get(self) if lazy is not None else None
+                    if v is None and sock in ft.previews:
+                        v = self.input(fg, ft.previews[sock], {"_id": ("preview", fname, sock)}, None)
+                    if v is not None and kind == "ue_alpha":
+                        v = self.alpha(v)
+                else:
+                    v = self.env.group_input(key)
+                if v is not None:
+                    self.link(v, node.inputs[sock])
+            self.env.caller = caller
+
         if w == "attrs":
+            # each attribute links only the inputs it reaches, when something
+            # reads it: UE compiles a Material Attributes output one property
+            # at a time (InfoInvader's visor reads the Normal of the face's
+            # attributes, whose Emissive needs the visor's UVs - linking every
+            # attribute's inputs at once is a loop)
             souts = ft.attr_outs[fo["Properties"].get("Id")]
-            needs = set()
             passed = {}
-            for o in souts.values():
-                if o[0] == "socket":
-                    needs |= ft.reached(o[1])
-        else:
-            needs = ft.reached(name) | ft.reached(socket_name(name + " (A)")) if w == 4 else ft.reached(name)
-        # the env learns which function a parameter is reached through (a
-        # material's parameters can be grouped by it)
-        caller = getattr(self.env, "caller", None)
-        if self.function is None:
-            self.env.caller = section_name(fname)
-        for sock in sorted(needs):
-            kind, key = ft.kind[sock]
-            if kind == "ue_attr":
-                fid, attr = key
-                lazy = ins.get(fid)
-                v = lazy.get(self) if lazy is not None else None
-                attrs = v.s if v is not None and isinstance(v.s, Attrs) else Attrs()
-                self.link(attrs.get(attr), node.inputs[sock])
-                continue
-            if kind in ("ue", "ue_alpha"):
-                lazy = ins.get(key)
-                v = lazy.get(self) if lazy is not None else None
-                if v is None and sock in ft.previews:
-                    v = self.input(fg, ft.previews[sock], {"_id": ("preview", fname, sock)}, None)
-                if v is not None and kind == "ue_alpha":
-                    v = self.alpha(v)
-            else:
-                v = self.env.group_input(key)
-            if v is not None:
-                self.link(v, node.inputs[sock])
-        self.env.caller = caller
-        if w == "attrs":
             got = Attrs()
             for a, o in souts.items():
                 if o[0] == "pass":
@@ -3502,9 +3505,15 @@ class Translator:
                             passed[fid] = as_attrs(lazy.get(self) if lazy is not None else None)
                         return passed[fid].get(a)
                     got.thunks[a] = self.deferred(own)
+                elif o[0] == "const":
+                    got.vals[a] = o[1]
                 else:
-                    got.vals[a] = o[1] if o[0] == "const" else Val(node.outputs[o[1]], o[2])
+                    def made(sock=o[1], width=o[2]):
+                        link_needs(ft.reached(sock))
+                        return Val(node.outputs[sock], width)
+                    got.thunks[a] = self.deferred(made)
             return Val(got, 0)
+        link_needs(ft.reached(name) | ft.reached(socket_name(name + " (A)")) if w == 4 else ft.reached(name))
         if w == 4:
             return Val(node.outputs[name], 4, Val(node.outputs[socket_name(name + " (A)")], 1))
         return Val(node.outputs[name], w)
