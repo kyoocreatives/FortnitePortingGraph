@@ -453,7 +453,7 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   flash drew as its whole quad). 13: particle values from the instance, a sprite's sub-image.
   17: a particle material's World Position Offset, UE's division by zero. 18: a SmoothStep over an
   empty range, Particle Random from the particle. 19: a Niagara decal's colour and fade. 20: division
-  by zero per component. 21: view space, Object Position (below).
+  by zero per component. 21: view space, Object Position (below). 22: Power clamps a negative base.
   - **View space and Object Position.** A shader's camera space (Vector Transform to Camera) is
     UE's view space as it is - X right, Y up, Z forward - not the camera object's (-Z forward):
     the translator flipped Z, so every depth was negative and screen positions came out mirrored
@@ -461,6 +461,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     the object's bounds, not its pivot (Actor Position): each object carries its own
     (`mp_bounds_centre`, local, set as its exact materials are built: `build.mark_bounds`), which
     an Attribute node reads (the material stays shared); without it, the pivot.
+  - **Power** is UE's PositiveClampedPow, `pow(max(Base, 0), Exponent)` (since 4.16): a negative
+    base gives 0 where Blender's Power squares it - a variant sprite's sphere mask (1 - d / r,
+    squared) came out 1 far from its sphere, the base look showing through the variant.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the

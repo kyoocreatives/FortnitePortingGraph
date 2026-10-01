@@ -1276,9 +1276,16 @@ class Translator:
                 return self.divide(P("A"), P("B"), label=x["Name"][18:])
             return self.binop(op, P("A"), P("B"), label=x["Name"][18:])
         if t == "Power":
+            # UE's Power is pow(max(Base, 0), Exponent) (PositiveClampedPow, since 4.16): a negative
+            # base gives 0, where Blender's Power squares it (a variant sprite's sphere mask, 1 - d / r
+            # squared, came out 1 far from the sphere: its base look showed through)
             base, ex = P("Base", fallback=1.0), P("Exponent")
             if base.w == 1 and ex.w == 1:
+                if not (base.const and float(base.s) >= 0.0):
+                    base = self.math('MAXIMUM', base, self.const(0.0))
                 return self.math('POWER', base, ex)
+            if not (base.const and all(float(x) >= 0.0 for x in (base.s if isinstance(base.s, (tuple, list)) else (base.s,)))):
+                base = self.binop('MAXIMUM', base, self.const(0.0))
             return self.vmath('POWER', base, ex, out_w=base.w)
         if t == "LinearInterpolate":
             return self.lerp(P("A"), P("B"), P("Alpha"))
