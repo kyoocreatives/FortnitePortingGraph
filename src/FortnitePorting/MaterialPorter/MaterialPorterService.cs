@@ -561,7 +561,8 @@ public class MaterialPorterService : IService
             }));
         }
         // tests: /fork-export-world?path=<level package>[&landscape=1][&actor=name part], FP's world export of that
-        // one level (actors and instances, as the Map page sends it to Blender) as the plugin receives it
+        // one level (actors and instances, as the Map page sends it to Blender) as the plugin receives it;
+        // track=<Rocket Racing track object path>&points=x,y,z;x,y,z...: also that track's road laid along those points
         if (route != "fork-export-world") return null;
         var path = query["path"] ?? throw new ArgumentException("path missing");
         // a World Partition cell's world is named after its map, not its file
@@ -572,9 +573,17 @@ public class MaterialPorterService : IService
         meta.WorldFlags = EWorldFlags.Actors | EWorldFlags.InstancedFoliage | (query["landscape"] == "1" ? EWorldFlags.Landscape : 0);
         var session = new ExportSession(meta);
         Exporting.Context.ExportContext.MaterialPorterActorFilter = query["actor"];
+        if (query["track"] is { } track)
+            Exporting.MaterialPorter.DelMarTracks.TestTrack = (track, (query["points"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries)
+                .Select(p => p.Split(',').Select(x => float.Parse(x, System.Globalization.CultureInfo.InvariantCulture)).ToArray())
+                .Select(v => new System.Numerics.Vector3(v[0], v[1], v[2])).ToArray());
         Exporting.Models.ExportData data;
         try { data = await session.RunAsync(() => [session.CreateExport(world.Name, world, EExportType.World, [])]); }
-        finally { Exporting.Context.ExportContext.MaterialPorterActorFilter = null; }
+        finally
+        {
+            Exporting.Context.ExportContext.MaterialPorterActorFilter = null;
+            Exporting.MaterialPorter.DelMarTracks.TestTrack = null;
+        }
         var payload = new
         {
             MetaData = new
