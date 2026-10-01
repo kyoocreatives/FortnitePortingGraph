@@ -486,6 +486,114 @@ public class MaterialPorterService : IService
                 ["props"] = JToken.Parse(JsonConvert.SerializeObject(e.Properties.ToDictionary(p => p.Name.Text, p => p.Tag?.GenericValue), settings)),
             }));
         }
+        if (route == "fork-effect-census")
+        {
+            // tests: how the idle effects of a tab's items (?types=Outfit,Backpack: their parts') feed their
+            // materials (renderer parameters, bindings to the system's variables, materials from user
+            // parameters) and what their emitters run on / call: per kind, how many and where
+            var serializer = JsonSerializer.Create(new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore });
+            var owners = new Dictionary<string, (UObject System, List<string> Items)>(StringComparer.OrdinalIgnoreCase);
+            var variantKinds = new List<(string Kind, string Where)>();
+            foreach (var type in (query["types"] ?? "Outfit,Backpack").Split(','))
+            {
+                var exportType = Enum.Parse<EExportType>(type);
+                var listing = AppServices.AssetLoading.Get(exportType);
+                await listing.Load();
+                foreach (var item in listing.Source.Items.Select(a => a.CreationData).OfType<Models.Assets.Asset.AssetItemCreationArgs>())
+                {
+                    try
+                    {
+                        // its styles that set its effects' parameters or swap its effects
+                        if (query["variants"] == "1")
+                            foreach (var variant in item.Object.Owner!.GetExports().Where(e => e.ExportType.Contains("Variant")))
+                            {
+                                var props = new JObject();
+                                foreach (var p in variant.Properties)
+                                    if (p.Tag?.GenericValue is { } v && !props.ContainsKey(p.Name.Text)) props[p.Name.Text] = JToken.FromObject(v, serializer);
+                                foreach (var key in new[] { "VariantParticleParams", "VariantParticles", "InitalParticleSystemData" })
+                                    foreach (var list in props.SelectTokens("$.." + key).OfType<JArray>().Where(a => a.Count > 0))
+                                        variantKinds.Add((key, $"{item.DisplayName}: {list.ToString(Formatting.None)[..Math.Min(260, list.ToString(Formatting.None).Length)]}"));
+                            }
+                        var parts = exportType == EExportType.Backpack ? item.Object.GetOrDefault("CharacterParts", Array.Empty<UObject>()) : Effects.OutfitParts(item.Object);
+                        foreach (var part in parts)
+                        {
+                            if (Effects.Shown(part.GetOrDefault<global::CUE4Parse.UE4.Objects.UObject.FSoftObjectPath>(Effects.PartEffect)) is not { } system) continue;
+                            if (!owners.TryGetValue(system.GetPathName(), out var entry)) owners[system.GetPathName()] = entry = (system, []);
+                            entry.Items.Add($"{item.DisplayName} = {item.Object.GetPathName()}");
+                        }
+                    }
+                    catch (Exception e) { Log.Warning("census: {Item}: {Error}", item.Object.Name, e.Message); }
+                }
+            }
+            var kinds = new Dictionary<string, (int Count, List<string> Where)>();
+            void Count(string kind, string where)
+            {
+                var k = kinds.TryGetValue(kind, out var got) ? got : (0, []);
+                if (k.Where.Count < 8 && !k.Where.Contains(where)) k.Where.Add(where);
+                kinds[kind] = (k.Count + 1, k.Where);
+            }
+            JObject Props(UObject o)
+            {
+                var j = new JObject();
+                foreach (var p in o.Properties)
+                    if (p.Tag?.GenericValue is { } v && !j.ContainsKey(p.Name.Text)) j[p.Name.Text] = JToken.FromObject(v, serializer);
+                return j;
+            }
+            foreach (var group in variantKinds.GroupBy(v => v.Kind))
+                foreach (var (kind, where) in group)
+                    Count("style: " + kind, where);
+            var heavy = new List<(int Cpu, string Label, string Item)>();
+            foreach (var (_, (system, items)) in owners)
+            {
+                var label = system.Name + " <- " + items[0].Split(" = ")[0] + (items.Count > 1 ? $" +{items.Count - 1}" : "");
+                try
+                {
+                    var emitters = Effects.Emitters(system);
+                    Count("systems", label);
+                    if (emitters.All(e => e.Sim == "GPU")) Count("system: GPU only (not played)", label);
+                    else if (emitters.Any(e => e.Sim == "GPU")) Count("system: some GPU emitters (those not played)", label);
+                    heavy.Add((emitters.Count(e => e.Sim != "GPU"), label, items[0]));
+                    foreach (var emitter in emitters)
+                    {
+                        Count("emitter: " + emitter.Sim, label);
+                        foreach (var renderer in emitter.Renderers)
+                        {
+                            var r = Props(renderer);
+                            Count("renderer: " + renderer.ExportType, label);
+                            foreach (var b in r["MaterialParameters"]?["AttributeBindings"] as JArray ?? [])
+                            {
+                                var variable = (string?)b["ResolvedNiagaraVariable"]?["Name"] ?? (string?)b["NiagaraVariable"]?["Name"] ?? "";
+                                var typeDef = b["ResolvedNiagaraVariable"]?["TypeDef"] ?? b["NiagaraVariable"]?["TypeDef"];
+                                var cls = ((string?)typeDef?["ClassStructOrEnum"]?["ObjectName"] ?? "?").Split('\'').ElementAtOrDefault(1) ?? "?";
+                                var space = variable.Contains('.') ? variable[..variable.IndexOf('.')] : "?";
+                                var resolved = cls.Contains("Curve") && Effects.ExposedCurve(system, variable) is not null;
+                                Count($"binding: {space}.* {cls}{(resolved ? " (resolved)" : "")}", $"{label} [{(string?)b["MaterialParameterName"]} <- {variable}]");
+                            }
+                            foreach (var section in new[] { "ScalarParameters", "VectorParameters", "TextureParameters" })
+                                if ((r["MaterialParameters"]?[section] as JArray)?.Count > 0) Count("renderer values: " + section, label);
+                            foreach (var (key, value) in r)
+                                if (key.EndsWith("UserParamBinding") && (string?)value?["Parameter"]?["Name"] is { Length: > 0 } user && user != "None")
+                                    Count("user binding: " + key, $"{label} [{user}]");
+                            foreach (var o in r["OverrideMaterials"] as JArray ?? [])
+                                if ((string?)o["UserParamBinding"]?["Parameter"]?["Name"] is { Length: > 0 } user && user != "None")
+                                    Count("user binding: OverrideMaterials", $"{label} [{user}]");
+                        }
+                    }
+                    // the data interfaces the system's scripts call
+                    if (system.Properties.FirstOrDefault(p => p.Name.Text == "ScriptRuntimeCookedDataMap")?.Tag?.GenericValue is { } map)
+                        foreach (var cls in JToken.FromObject(map, serializer).SelectTokens("$..ResolvedDataInterfaces[*].ResolvedVariable.TypeDef.ClassStructOrEnum.ObjectName")
+                                     .Select(t => ((string?)t ?? "").Split('\'').ElementAtOrDefault(1) ?? "?").Distinct())
+                            Count("data interface: " + cls, label);
+                }
+                catch (Exception e) { Count("error: " + e.Message, label); }
+            }
+            return JToken.FromObject(new
+            {
+                systems = owners.Count,
+                kinds = kinds.OrderBy(k => k.Key).ToDictionary(k => k.Key, k => new { k.Value.Count, k.Value.Where }),
+                heavy = heavy.OrderByDescending(h => h.Cpu).Take(int.TryParse(query["heavy"], out var top) ? top : 60).Select(h => $"{h.Cpu} {h.Label} = {h.Item.Split(" = ").Last()}"),
+            });
+        }
         if (route == "fork-loader")
         {
             // tests: run one asset tab's loader as the Assets page does, and say what it lists (icons=1: with each one's icon)

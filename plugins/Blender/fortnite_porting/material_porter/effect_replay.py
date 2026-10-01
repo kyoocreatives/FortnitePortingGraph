@@ -197,11 +197,12 @@ def _between(a, b, t):
     return a[0] + (b[0] - a[0]) * t, a[1] + (b[1] - a[1]) * t, pose
 
 
-def replay(system, fps, frames, stand=None, first=1, last=None):
+def replay(system, fps, frames, stand=None, first=1, last=None, watch=()):
     """The system ticked through the frames: {emitter name: [(floats, ints) per frame]}. stand: where
     the effect and its character are on each scene frame (a Stand), for an effect that moves or sits
     on a character; without one it stays at its origin. last: the scene frame the game stops the
-    effect on (it spawns no more from there)."""
+    effect on (it spawns no more from there). watch: system, emitter and user variables whose values
+    each frame are kept as system.history ({name: [floats per frame]})."""
     ticks = max(1, round(60.0 / fps))
     dt = 1.0 / (fps * ticks)
     props = system.props
@@ -213,6 +214,7 @@ def replay(system, fps, frames, stand=None, first=1, last=None):
     for _ in range(min(warm, 600)):
         system.tick(float(props.get("WarmupTickDelta") or 1.0 / 15.0))
     tracks = {e.name: [] for e in system.emitters}
+    system.history = {name: [] for name in watch}
     total = 0
     for frame in range(frames):
         now = stand.at(first + frame) if stand is not None else None
@@ -227,13 +229,98 @@ def replay(system, fps, frames, stand=None, first=1, last=None):
             n = e.data.count
             tracks[e.name].append((e.data.floats[:, :n].copy(), e.data.ints[:, :n].copy()))
             total += n
+        for name, values in system.history.items():
+            values.append(_variable(system, name))
         if system.done or total > MOST_POINTS:
             break
     # the frames after the last particle hold nothing to play
     kept = max([i + 1 for frames in tracks.values() for i, f in enumerate(frames) if f[0].shape[1]] or [0])
-    for frames in tracks.values():
+    for frames in list(tracks.values()) + list(system.history.values()):
         del frames[kept:]
     return tracks
+
+
+def _variable(system, name):
+    """A system's, an emitter's ("<emitter>.X") or a user variable's value now, as floats (a bool as
+    0 or 1); None where the system has no such variable."""
+    v = system.read(name)
+    if v is None and name in system.user.offsets:
+        floats, _ = niagara.TYPES.get(system.user.offsets[name][1], (0, 1))
+        raw = system.user.raw(name)
+        v = np.frombuffer(raw, np.float32 if floats else np.int32)
+    if v is None:
+        return None
+    v = np.asarray(v)
+    if v.dtype.kind == "i":
+        return np.where(v != 0, 1.0, 0.0) if len(v) == 1 and int(v[0]) in (0, -1, 1) else v.astype(np.float64)
+    return v.astype(np.float64).copy()
+
+
+# a material parameter's value type in a renderer's binding: its components
+BOUND_WIDTHS = {"NiagaraFloat": 1, "NiagaraBool": 1, "NiagaraInt32": 1, "Vector2f": 2, "Vector3f": 3, "NiagaraPosition": 3,
+                "Vector4f": 4, "LinearColor": 4}
+
+
+def bindings(renderer, emitter):
+    """A renderer's material parameters bound to values of the system (MaterialParameters'
+    AttributeBindings to a System., an emitter's or a User. float or vector): [(parameter, variable,
+    components)]. A curve exposed as a texture is the app's to resolve, and a texture isn't a value."""
+    out = []
+    for b in (renderer.get("MaterialParameters") or {}).get("AttributeBindings") or []:
+        var = b.get("ResolvedNiagaraVariable") or b.get("NiagaraVariable") or {}
+        name, param = str(var.get("Name") or ""), str(b.get("MaterialParameterName") or "")
+        kind = str(((var.get("TypeDef") or {}).get("ClassStructOrEnum") or {}).get("ObjectName") or "")
+        width = BOUND_WIDTHS.get(kind.split("'")[1] if "'" in kind else kind)
+        if not name or not param or param == "None" or width is None:
+            continue
+        if name.startswith("Emitter."):
+            name = emitter.name + name[len("Emitter"):]
+        out.append((param, name, width))
+    return out
+
+
+def _bind(piece, carriers, bound, history, start, loop):
+    """A renderer's bound material parameters: each one's value over the replay (keyed where it
+    changes) on the piece and what draws it as mp_bind_<parameter>, which an Attribute node hands
+    the parameter's input on the piece's material - its own copy, as other pieces may draw the same
+    material with other values. Returns the parameters bound."""
+    done = []
+    # (the particles draw the piece's mesh, with the mesh's materials: the piece gets a mesh of its own)
+    if piece.data is not None and piece.data.users > 1:
+        piece.data = piece.data.copy()
+    for slot in piece.material_slots:
+        material = slot.material
+        if material is None or not material.use_nodes:
+            continue
+        if material.get("mp_bound_for") != piece.name:
+            material = material.copy()
+            material["mp_bound_for"] = piece.name
+            slot.material = material
+        tree = material.node_tree
+        groups = [n for n in tree.nodes if n.type == 'GROUP' and n.node_tree is not None]
+        for param, name, width in bound:
+            values = [v for v in history.get(name) or [] if v is not None]
+            sockets = [(g, i) for g in groups for i in g.inputs if i.name.lower() == param.lower()]
+            if not values or not sockets:
+                continue
+            key = "mp_bind_" + param
+            rows = np.array([np.resize(v, width) if len(v) else np.zeros(width) for v in values], np.float64)
+            for carrier in carriers:
+                carrier[key] = float(rows[-1][0]) if width == 1 else [float(x) for x in rows[-1]]
+                if len(rows) > 1 and np.ptp(rows, axis=0).max() > 1e-6:
+                    for c in range(width):
+                        _keys(carrier, '["%s"]' % key, c if width > 1 else 0, range(start, start + len(rows)), rows[:, c], loop)
+            attribute = tree.nodes.get(key) or tree.nodes.new("ShaderNodeAttribute")
+            attribute.name = attribute.label = key
+            attribute.attribute_type, attribute.attribute_name = 'OBJECT', key
+            for group, socket in sockets:
+                attribute.location = (group.location.x - 260, group.location.y - 60 * len(done))
+                tree.links.new(attribute.outputs["Fac" if width == 1 else "Color"], socket)
+                alpha = group.inputs.get(socket.name + " (A)")
+                if alpha is not None and width == 4:
+                    tree.links.new(attribute.outputs["Alpha"], alpha)
+            done.append(param)
+    return sorted(set(done))
 
 
 class Track:
@@ -946,6 +1033,13 @@ def play(root):
     # each play of it (an animation's notifies; else the one): its own run of the system, from its frame
     repeats = [int(x) for x in root.get(KEY_REPEATS) or [0]]
     lengths = [int(x) for x in root.get(KEY_LENGTHS) or []]
+    # the variables the renderers' materials are bound to: kept over the (first) replay
+    watch = set()
+    for node in root.children:
+        emitter = next((e for e in system.emitters if e.name == node.get(effects.KEY_EMITTER)), None)
+        for piece in node.children if emitter is not None else ():
+            renderer = next((e["props"] for e in exports if e["name"] == piece.get(effects.KEY_RENDERER) and e["outer"] == emitter.export["name"]), None)
+            watch.update(name for _, name, _ in bindings(renderer or {}, emitter))
     runs = []
     try:
         for i, offset in enumerate(repeats):
@@ -957,13 +1051,14 @@ def play(root):
                 _user(root, one)
                 one.camera = system.camera
             last = start + offset + lengths[i] if i < len(lengths) and lengths[i] > 0 else None
-            runs.append((offset, replay(one, fps, frames - offset, stand, start + offset, last)))
+            runs.append((offset, replay(one, fps, frames - offset, stand, start + offset, last, watch if i == 0 else ())))
     finally:
         if stand is not None:
             scene.frame_set(now)
     tracks = runs[0][1] if len(runs) == 1 else _together(runs, [e.name for e in system.emitters])
     emitters = {e.name: e for e in system.emitters}
     played, most, length = [], 0, 0
+    bound_params, clear_ones = set(), []
     for node in root.children:
         emitter = emitters.get(node.get(effects.KEY_EMITTER))
         if emitter is None or not tracks.get(emitter.name):
@@ -971,6 +1066,8 @@ def play(root):
         track = Track(emitter, tracks[emitter.name])
         if not track.total:
             continue
+        if track.has("Color") and float(track.get("Color", (1, 1, 1, 1))[:, 3].max()) <= 1e-4:
+            clear_ones.append(emitter.name)     # drawn, but see-through all along (an alpha the game raises)
         drawn = 0
         for piece in list(node.children):
             kind = piece.get(effects.KEY)
@@ -1016,6 +1113,9 @@ def play(root):
             _set(modifier, tree, "Start Frame", start)
             _set(modifier, tree, "Frames", len(track.frames))
             _set(modifier, tree, "Loop", loop)
+            tied = bindings(renderer, emitter)
+            if tied:
+                bound_params.update(_bind(piece, (piece, obj), tied, system.history, start, loop))
             if kind == "Ribbon":
                 _set(modifier, tree, "Material", piece.material_slots[0].material if piece.material_slots else None)
                 facing = str(renderer.get("FacingMode"))
@@ -1073,6 +1173,15 @@ def play(root):
         if root.get(effects.KEY_ROLE) in ("trail", "swing") and stand is not None and stand.still:
             yield "%s: a %s shows on what moves: animate it, set the effect's Start Frame where it starts, then Replay Effect" % (
                 _title(root), root[effects.KEY_ROLE])
+    if bound_params:
+        yield "%s: material parameters from the effect's values: %s" % (root.name, ", ".join(sorted(bound_params)[:8]))
+    if clear_ones:
+        # their colour's alpha stays 0 (Salvador's flames wait on User.Dissolve Progress): the user parameters
+        # at 0 are the likely switch
+        zero = [name for name, kind, value in system.users() if name.startswith("User.") and kind in ("NiagaraFloat", "NiagaraBool", "NiagaraInt32")
+                and not (value if not hasattr(value, "__len__") else any(value))]
+        yield "%s: %s drawn see-through all along (their colour's alpha 0: waiting on something the game sets%s)" % (
+            root.name, ", ".join(clear_ones[:6]), ": its %s at 0 - set on the effect's empty, then Replay Effect" % ", ".join(zero[:5]) if zero else "")
     approximate = [name for name in played if name in system.approximate]
     if approximate:
         yield "%s: %s: stateless emitters, played from their settings (the engine's random draws apart)" % (root.name, ", ".join(approximate))

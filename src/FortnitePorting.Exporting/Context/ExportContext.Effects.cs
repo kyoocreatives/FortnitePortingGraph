@@ -13,6 +13,7 @@ using CUE4Parse.UE4.Objects.UObject;
 using FortnitePorting.CUE4Parse.Extensions;
 using FortnitePorting.Exporting.MaterialPorter;
 using FortnitePorting.Exporting.Models;
+using Newtonsoft.Json.Linq;
 
 namespace FortnitePorting.Exporting.Context;
 
@@ -29,6 +30,49 @@ public partial class ExportContext
 {
     /// <summary>Whether an item's export takes its own effects along (the Effects pick of its page).</summary>
     public bool EffectsPick;
+
+    /// <summary>
+    /// What the picked styles do to the item's effects: a system a style swaps for another (a part's
+    /// NS_Empty for the style's own effect: VariantParticles) and the user parameters a style sets on a
+    /// system (its colours and floats: VariantParticleParams), by system path.
+    /// </summary>
+    public readonly Dictionary<string, FSoftObjectPath> EffectSwaps = new(StringComparer.OrdinalIgnoreCase);
+    public readonly Dictionary<string, Dictionary<string, object>> EffectUser = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>A picked style's effect swaps and user parameters (EffectSwaps, EffectUser).</summary>
+    public void AddEffectStyle(FStructFallback style)
+    {
+        foreach (var swap in style.GetOrDefault("VariantParticles", Array.Empty<FStructFallback>()))
+        {
+            var from = swap.GetOrDefault<FSoftObjectPath>("ParticleSystemToAlter").AssetPathName.Text;
+            if (Effects.Named(new FName(from))) EffectSwaps[from] = swap.GetOrDefault<FSoftObjectPath>("OverrideParticleSystem");
+        }
+        foreach (var set in style.GetOrDefault("VariantParticleParams", Array.Empty<FStructFallback>()))
+        {
+            var system = set.GetOrDefault<FSoftObjectPath>("ParticleSystemToAlter").AssetPathName.Text;
+            if (!Effects.Named(new FName(system))) continue;
+            if (!EffectUser.TryGetValue(system, out var values)) EffectUser[system] = values = new Dictionary<string, object>();
+            foreach (var kind in new[] { "ColorParams", "VectorParams", "FloatParams" })
+                foreach (var p in set.GetOrDefault(kind, Array.Empty<FStructFallback>()))
+                {
+                    var name = p.GetOrDefault<FName>("ParamName").Text;
+                    if (!Effects.Named(new FName(name))) continue;
+                    if (!name.StartsWith("User.", StringComparison.OrdinalIgnoreCase)) name = "User." + name;
+                    // (the values are engine structs: read as JSON)
+                    var value = JObject.FromObject(p)["Value"];
+                    values[name] = value switch
+                    {
+                        JObject c when c["R"] is not null => new[] { (float) c["R"]!, (float) c["G"]!, (float) c["B"]!, (float?) c["A"] ?? 1f },
+                        JObject v => new[] { "X", "Y", "Z", "W" }.Where(k => v[k] is not null).Select(k => (float) v[k]!).ToArray(),
+                        _ => (object) (float) (value ?? 0f),
+                    };
+                }
+        }
+    }
+
+    /// <summary>A system path as the picked styles swap it.</summary>
+    private FSoftObjectPath Swapped(FSoftObjectPath path) =>
+        EffectSwaps.TryGetValue(path.AssetPathName.Text, out var swapped) ? swapped : path;
 
     /// <summary>
     /// One of an item's own effects, under its mesh: the effect (Effect) with what it is ("trail",
@@ -77,6 +121,10 @@ public partial class ExportContext
         if (system is null || Effect(system) is not MaterialPorterMesh effect) return null;
         var node = effect.MPEffect ??= new Dictionary<string, object> { ["Kind"] = "System" };
         node["Role"] = role;
+        // the user parameters the picked styles set on it (its colours): the replay's, over the asset's own
+        if (EffectUser.TryGetValue(system.GetPathName(), out var user))
+            node["User"] = node.TryGetValue("User", out var had) && had is Dictionary<string, object> own
+                ? own.Concat(user).GroupBy(p => p.Key).ToDictionary(g => g.Key, g => g.Last().Value) : new Dictionary<string, object>(user);
         if (_meshSockets.TryGetValue(mesh, out var table)) node["Table"] = table;
         if (socket is not null) effect.MPParentBone = socket;
         if (place is { } at)
@@ -133,7 +181,7 @@ public partial class ExportContext
     {
         try
         {
-            if (Effects.Shown(part.GetOrDefault<FSoftObjectPath>(Effects.PartEffect)) is not { } system) return;
+            if (Effects.Shown(Swapped(part.GetOrDefault<FSoftObjectPath>(Effects.PartEffect))) is not { } system) return;
             var socket = part.GetOrDefault<FName>(Effects.PartSocket);
             OwnEffect(mesh, system, "idle", Effects.Named(socket) ? socket.Text : null);
         }
@@ -263,19 +311,29 @@ public partial class ExportContext
         foreach (var p in parameters.GetOrDefault("TextureParameters", Array.Empty<FStructFallback>()))
             if (p.GetOrDefault<UTexture?>("Texture") is { } texture)
                 values.Textures[p.GetOrDefault<FName>("MaterialParameterName").Text] = texture.GetPathName();
-        // a texture parameter bound to a curve of the system's, exposed as a texture (a colour ramp)
+        // a texture parameter bound to a curve of the system's, exposed as a texture (a colour ramp), or
+        // to a user parameter's texture (its own, until the game sets another); a value bound to the
+        // system's variables is the plugin's (the replay has them: effect_replay.bindings)
         foreach (var p in parameters.GetOrDefault("AttributeBindings", Array.Empty<FStructFallback>()))
         {
             // (the variables are Niagara structs: read as JSON)
-            var binding = Newtonsoft.Json.Linq.JObject.FromObject(p);
+            var binding = JObject.FromObject(p);
             var variable = (string?)binding["ResolvedNiagaraVariable"]?["Name"] ?? (string?)binding["NiagaraVariable"]?["Name"];
             var parameter = p.GetOrDefault<FName>("MaterialParameterName").Text;
             if (string.IsNullOrEmpty(variable) || !variable.Contains('.')) continue;
             if (Effects.ExposedCurve(system, variable) is { } curve) values.Textures[parameter] = curve;
-            else Serilog.Log.Information("[Material Porter] {System}: {Parameter} is bound to {Variable}, not a curve exposed as a texture: left as the material has it",
-                system.Name, parameter, variable);
+            else if (variable.StartsWith("User.", StringComparison.OrdinalIgnoreCase) && Effects.UserObject(system, variable) is UTexture own)
+                values.Textures[parameter] = own.GetPathName();
         }
         return values.Scalars.Count + values.Vectors.Count + values.Textures.Count > 0 ? values : null;
+    }
+
+    /// <summary>A sprite's, ribbon's or decal's material: the user parameter's it binds (its own, until the game sets another), else its own.</summary>
+    private static UMaterialInterface? RendererMaterial(UObject system, UObject renderer)
+    {
+        var bound = renderer.Properties.FirstOrDefault(p => p.Name.Text == "MaterialUserParamBinding")?.Tag?.GenericValue;
+        if (Effects.UserBinding(bound) is { } user && Effects.UserObject(system, user) is UMaterialInterface own) return own;
+        return renderer.GetOrDefault<UMaterialInterface?>("Material");
     }
 
     private ExportMaterial? EffectMaterial(UMaterialInterface? material, int slot, ParamSet? values)
@@ -322,7 +380,10 @@ public partial class ExportContext
                     // (a mesh whose own slot holds no material still has the slot: the override's)
                     foreach (var slot in mesh.Materials.Select(m => m.Slot).Concat(Enumerable.Range(0, overrides.Length)).Distinct())
                     {
-                        var material = slot < overrides.Length ? overrides[slot].GetOrDefault<UMaterialInterface?>("ExplicitMat") : null;
+                        var material = slot < overrides.Length
+                            ? Effects.UserBinding(overrides[slot].Properties.FirstOrDefault(p => p.Name.Text == "UserParamBinding")?.Tag?.GenericValue) is { } user
+                              && Effects.UserObject(system, user) is UMaterialInterface userMaterial ? userMaterial : overrides[slot].GetOrDefault<UMaterialInterface?>("ExplicitMat")
+                            : null;
                         if (material is not null)
                         {
                             if (EffectMaterial(material, slot, values) is { } over) export.OverrideMaterials.Add(over);
@@ -338,7 +399,7 @@ public partial class ExportContext
             }
             case "NiagaraSpriteRendererProperties" or "NiagaraRibbonRendererProperties":
             {
-                if (EffectMaterial(renderer.GetOrDefault<UMaterialInterface?>("Material"), 0, values) is not { } material) break;
+                if (EffectMaterial(RendererMaterial(system, renderer), 0, values) is not { } material) break;
                 var sub = renderer.GetOrDefault("SubImageSize", new FVector2D(1, 1));
                 // a flipbook: each particle shows one sub-image, which the material picks (the plugin's env.uv)
                 if (renderer.ExportType.Contains("Ribbon"))
@@ -385,7 +446,7 @@ public partial class ExportContext
             {
                 // a decal a particle: the plugin draws it as a quad across its projection (a decal lies on
                 // the scene it projects onto, which isn't here: a ground decal lies flat)
-                if (EffectMaterial(renderer.GetOrDefault<UMaterialInterface?>("Material"), 0, values) is not { } material) break;
+                if (EffectMaterial(RendererMaterial(system, renderer), 0, values) is not { } material) break;
                 yield return new MaterialPorterMesh
                 {
                     Name = $"{emitter.Name} decal",

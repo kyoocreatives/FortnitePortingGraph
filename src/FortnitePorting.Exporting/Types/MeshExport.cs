@@ -66,6 +66,8 @@ public class MeshExport : BaseExport
         CarPicks = styles.OfType<MaterialPorter.ExportCarStyle>().ToDictionary(s => s.Channel, s => s.Option);
         // a LEGO figure's expression (feature -> rig pose)
         FacePicks = styles.OfType<MaterialPorter.ExportFigureFaceStyle>().Where(s => s.Pose >= 0).ToDictionary(s => s.Feature, s => s.Pose);
+        // what the picked styles do to the item's effects, known before its parts' effects are exported
+        foreach (var style in styles.OfType<ExportStructStyle>()) Context.AddEffectStyle(style.StyleData);
         Export(asset, exportType);
 
         var assetStyles = styles.OfType<ExportStructStyle>();

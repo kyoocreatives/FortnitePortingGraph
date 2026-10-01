@@ -169,6 +169,32 @@ public static class Effects
         }
     }
 
+    /// <summary>Whether a style of the item swaps one of its effects for one that shows something (a part's NS_Empty for an aura).</summary>
+    public static bool StyleEffects(UObject item)
+    {
+        try
+        {
+            foreach (var variant in item.GetOrDefault("ItemVariants", Array.Empty<UObject>()))
+                foreach (var property in variant.Properties)
+                    if (property.Tag?.GenericValue is UScriptArray { Properties: var options })
+                        foreach (var option in options.Select(o => o.GetValue(typeof(FStructFallback))).OfType<FStructFallback>())
+                        {
+                            if (option.GetOrDefault("VariantParticles", Array.Empty<FStructFallback>())
+                                .Any(s => Shown(s.GetOrDefault<FSoftObjectPath>("OverrideParticleSystem")) is not null))
+                                return true;
+                            // a style's own parts (Blackheart's later stages: a body whose part has the aura)
+                            foreach (var path in option.GetOrDefault("VariantParts", Array.Empty<FSoftObjectPath>()))
+                                if (path.TryLoad(out UObject? part) && Shown(part.GetOrDefault<FSoftObjectPath>(PartEffect)) is not null)
+                                    return true;
+                        }
+        }
+        catch (Exception)
+        {
+            // an item whose styles don't read: as if it had none
+        }
+        return false;
+    }
+
     /// <summary>An outfit's character parts: its own, else its hero definition's first specialization's.</summary>
     public static UObject[] OutfitParts(UObject outfit)
     {
@@ -239,7 +265,7 @@ public static class Effects
                 return item.GetOrDefault<UObject?>("WeaponDefinition") is { } weapon ? PickaxeEffectNames(weapon) : [];
             case EExportType.Backpack or EExportType.Outfit:
                 var parts = type is EExportType.Backpack ? item.GetOrDefault("CharacterParts", Array.Empty<UObject>()) : OutfitParts(item);
-                return parts.Any(p => Shown(p.GetOrDefault<FSoftObjectPath>(PartEffect)) is not null) ? ["idle"] : [];
+                return parts.Any(p => Shown(p.GetOrDefault<FSoftObjectPath>(PartEffect)) is not null) || StyleEffects(item) ? ["idle"] : [];
             case EExportType.Glider:
                 return GliderTrails(item).Any(t => Shown(t.System) is not null) ? ["trail"] : [];
             case EExportType.Sprite:
@@ -319,6 +345,33 @@ public static class Effects
         var file = System.IO.Path.Combine(dir, name + "." + ext.Trim('.').ToLowerInvariant());
         if (!System.IO.File.Exists(file)) System.IO.File.WriteAllBytes(file, data);
         return FigureRecipe.GeneratedRoot + name + "." + name;
+    }
+
+    /// <summary>
+    /// A user parameter's own object (User.X: a texture, a material, a mesh) as the system's user
+    /// store holds it - what the effect has until the game sets another (Renzo's hair layers are
+    /// materials a mesh renderer takes from user parameters); null where it holds none.
+    /// </summary>
+    public static UObject? UserObject(UObject system, string variable)
+    {
+        if (system.GetOrDefault<FStructFallback?>("ExposedParameters") is not { } store) return null;
+        var serializer = JsonSerializer.Create(new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore });
+        var offsets = JToken.FromObject(store, serializer)["SortedParameterOffsets"] as JArray ?? [];
+        var entry = offsets.FirstOrDefault(e => string.Equals((string?)e["Name"], variable, StringComparison.OrdinalIgnoreCase));
+        var kind = (string?)entry?["TypeDef"]?["ClassStructOrEnum"]?["ObjectName"] ?? "";
+        if (entry is null || (int?)entry["TypeDef"]?["UnderlyingType"] != 1 || kind.Contains("NiagaraDataInterface")) return null;
+        var objects = store.GetOrDefault("UObjects", Array.Empty<FPackageIndex>());
+        var at = (int?)entry["Offset"] ?? -1;
+        return at >= 0 && at < objects.Length ? objects[at].Load() : null;
+    }
+
+    /// <summary>The user parameter a renderer's property binds (a MaterialUserParamBinding, an override's UserParamBinding), or null.</summary>
+    public static string? UserBinding(object? binding)
+    {
+        if (binding is null) return null;
+        var serializer = JsonSerializer.Create(new JsonSerializerSettings { ReferenceLoopHandling = ReferenceLoopHandling.Ignore });
+        var name = (string?)JToken.FromObject(binding, serializer)["Parameter"]?["Name"];
+        return name is { Length: > 0 } && name != "None" ? name : null;
     }
 
     // compiled data only the engine's own VM and the editor read

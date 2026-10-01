@@ -244,7 +244,19 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   binds to a curve of the system's that is exposed as a texture (`AttributeBindings`: Voyager
   Unleashed's head flames take their colour from the system's colour curve, not their material's
   own fire ramp, which came out white) is that curve's cooked texture, written as a generated HDR
-  texture (`Effects.ExposedCurve`, `/MaterialPorter/Generated/Curve_<hash>_Lin`).
+  texture (`Effects.ExposedCurve`, `/MaterialPorter/Generated/Curve_<hash>_Lin`); one bound to a
+  user parameter's texture takes the texture the system's user store holds (`Effects.UserObject`),
+  and a renderer whose material is a user parameter's (`MaterialUserParamBinding`, a mesh override's
+  `UserParamBinding`: Renzo's hair layers) draws that material. A material value bound to the
+  system's variables (a System., an emitter's or a User. float or colour: Geno's outline colours,
+  Cerberus's flame colours) is the replay's: it keeps each such variable over the frames
+  (`effect_replay.bindings`, `system.history`) and keys it on the drawn piece as `mp_bind_<parameter>`,
+  which an Attribute node (Object) hands the parameter's input on the piece's own copy of the
+  material (the piece gets its own mesh: the particles draw the mesh's materials). Census of the
+  idle effects of all outfits and back blings (1,076 systems): `fork-effect-census?types=Outfit,Backpack`
+  (`variants=1`: the styles that set or swap effects). An emitter that plays but stays see-through
+  (its colour's alpha 0 all along: Salvador's flames wait on `User.Dissolve Progress`, which the game
+  raises) is reported with the user parameters at 0 to set on the effect's empty.
   Test routes: `fork-screenshot?type=&search=&filters=A,B&select=&path=` (the window showing a tab,
   rendered to a PNG), `fork-loader?type=Effect&described=1` (the listing, its descriptions, how many play),
   `fork-export-asset?type=Effect&listed=1&path=<object path>` (the export of the item as listed).
@@ -254,7 +266,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     `niagara_vm.py` is the VM in numpy (every particle at once, as the engine does), `niagara.py`
     what the engine does around the scripts (the system's spawn and update scripts, each emitter's
     update then spawn, events between emitters, the constant blocks laid out as the engine's
-    structs, the parameter stores as cooked, data interfaces: curves, arrays, vector fields,
+    structs, the parameter stores as cooked, data interfaces: curves, arrays (an empty one reads as the
+    engine's default: white for a colour - a variant's colour array the game fills), vector fields,
     particle reads, renderer info, camera). `niagara_stateless.py` works a stateless emitter's
     particles out from its modules' settings (same ranges and curves, not the engine's random
     draws). `effect_replay.py` runs the system over the scene's frame range (a whole number of
@@ -341,7 +354,12 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     naming a blank system - `NS_Blank_Body`, `NS_Empty`: no emitter, there to switch a base part's
     effect off - has none: `Effects.Shown`):
     - a back bling's and an outfit's parts' idle effect (`IdleEffectNiagara` on `IdleFXSocketName`:
-      `ExportContext.PartEffects`, from `CharacterPart`);
+      `ExportContext.PartEffects`, from `CharacterPart`), as the picked styles make it: a style's
+      `VariantParticles` swap a part's system (often a blank `NS_Empty` for the style's own aura) and its
+      `VariantParticleParams` set the system's user parameters (colours, vectors, floats: Blackheart's
+      stage colours) - `ExportContext.AddEffectStyle`, gathered before the parts export, the values as
+      the effect's `User` (466 outfit styles set some, 263 swap one); the Effects pick shows where only
+      a style's swap or parts bring an effect (`Effects.StyleEffects`);
     - a sprite's effect (its definition's DataList `NiagaraSystem`, beside its `SkeletalMesh` and
       `Material`: a fire sprite's flames) on bone `spine_4_bind`, where the game's held sprite
       (`BP_Weapon_Extractable`'s ExtractableFX) has it: `ExportContext.SpriteEffects`. A sprite's

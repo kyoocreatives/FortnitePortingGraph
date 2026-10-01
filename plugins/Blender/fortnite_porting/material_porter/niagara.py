@@ -224,6 +224,10 @@ class Array:
         width = next((w for suffix, w in (("Float2", 2), ("Float3", 3), ("Position", 3), ("Float4", 4), ("Color", 4), ("Quat", 4),
                                           ("NiagaraID", 2), ("Matrix", 16)) if kind.endswith(suffix)), 1)
         self.rows = np.array(rows, I if self.ints else F).reshape(len(rows), -1) if rows else np.zeros((0, width), I if self.ints else F)
+        # what reading an empty one gives (the engine's GetDefaultValue): white for a colour (a variant's
+        # colour array the game fills: Cerberus's flames are white x their material's colours, not black),
+        # the identity for a quaternion or a matrix, else zeros
+        self.default = (1.0, 1.0, 1.0, 1.0) if kind.endswith("Color") else (0.0, 0.0, 0.0, 1.0) if kind.endswith("Quat") else             tuple(np.eye(4, dtype=float).ravel()) if kind.endswith("Matrix") else None
 
     def _table(self, width):
         return self.rows
@@ -246,6 +250,8 @@ class Array:
             def get(count, args):
                 table = self._table(outputs)
                 if not len(table):
+                    if self.default is not None and len(self.default) == outputs:
+                        return [np.full(count, v, kind) for v in self.default]
                     return [np.zeros(count, kind)] * outputs
                 index = np.clip(np.broadcast_to(vm.it(args[-1]), (count,)), 0, len(table) - 1)
                 return [table[index, i] for i in range(outputs)]
