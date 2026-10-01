@@ -15,8 +15,13 @@ public static class Fork
     public static string AppFolder => Profile.Length == 0 ? "FortnitePorting MP" : $"FortnitePorting MP {Profile}";
     public static string InstancePipe => "FortnitePortingMP" + Profile;
     public static string InstanceMutex => "FortnitePortingMPMutex" + Profile;
-    /// <summary>Where Blender asks for exact materials (Material Porter's own app uses 24300).</summary>
-    public static int BridgePort => Profile.Length == 0 ? 24320 : 24322;
+    /// <summary>
+    /// Where Blender asks for exact materials (Material Porter's own app uses 24300). FORTNITEPORTING_MP_BRIDGE_PORT
+    /// sets it, so two test profiles can run at once.
+    /// </summary>
+    public static int BridgePort => int.TryParse(Environment.GetEnvironmentVariable("FORTNITEPORTING_MP_BRIDGE_PORT"), out var port) && port > 0
+        ? port
+        : Profile.Length == 0 ? 24320 : 24322;
     /// <summary>The Blender plugin's folder in Blender's scripts/startup (its Python package name).</summary>
     public const string PluginFolder = "fortnite_porting_mp";
     /// <summary>Upstream's Blender plugin listens on 40000.</summary>

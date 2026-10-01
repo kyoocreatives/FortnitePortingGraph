@@ -30,7 +30,8 @@ namespace FortnitePorting.Exporting.Context;
 /// level instances, spline meshes (bent in Blender), water bodies; HLODs,
 /// devices, hidden actors, ziplines and meshes drawn only into the terrain's
 /// virtual texture are left out. Landscapes and FP's HLOD export still go
-/// through FP's own actor export.
+/// through FP's own actor export. A Rocket Racing track whose level didn't
+/// save its road pieces gets them laid along its spline (DelMarTracks).
 /// </summary>
 public partial class ExportContext
 {
@@ -54,14 +55,15 @@ public partial class ExportContext
             };
             var scan = new MapScan { Name = package, Key = package };
             var reader = new MapReader(new MapGame { Provider = FileProvider }, options, scan);
+            // a UEFN island's cells aren't in its runtime hash (FP never visits them): read them with it
+            var levels = new List<string> { package };
+            levels.AddRange(IslandCells(level, package));
             try
             {
-                reader.LevelAsync(package, Matrix4x4.Identity, 0, CancellationToken).GetAwaiter().GetResult();
-                // a UEFN island's cells aren't in its runtime hash (FP never visits them): read them with it
-                foreach (var cell in IslandCells(level, package))
+                foreach (var read in levels)
                 {
-                    if (CancellationToken.IsCancellationRequested) break;
-                    reader.LevelAsync(cell, Matrix4x4.Identity, 0, CancellationToken).GetAwaiter().GetResult();
+                    CancellationToken.ThrowIfCancellationRequested();
+                    reader.LevelAsync(read, Matrix4x4.Identity, 0, CancellationToken).GetAwaiter().GetResult();
                 }
             }
             catch (OperationCanceledException)
@@ -69,7 +71,24 @@ public partial class ExportContext
                 return meshes;
             }
 
-            var placed = reader.Placed.Where(m => MaterialPorterActorFilter is null || m.Actor.Contains(MaterialPorterActorFilter, StringComparison.OrdinalIgnoreCase))
+            // Rocket Racing tracks: the road pieces of the tracks whose level didn't save them (DelMarTracks)
+            var tracks = new List<MapMesh>();
+            foreach (var read in levels)
+            {
+                if (CancellationToken.IsCancellationRequested) break;
+                tracks.AddRange(DelMarTracks.Place(FileProvider, read, (what, n) => scan.Skip(what, n)));
+            }
+            if (DelMarTracks.TestTrack is { } test)
+            {
+                // (once: a world's streamed levels come through here too)
+                DelMarTracks.TestTrack = null;
+                if (LoadMaterialPorterObject(test.Actor) is { } testActor) tracks.AddRange(DelMarTracks.Lay(FileProvider, testActor, package, test.Points));
+            }
+            if (tracks.Count > 0)
+                Log.Information("[Material Porter] {Level}: {Pieces} Rocket Racing road pieces laid along {Tracks} tracks", package, tracks.Count,
+                    tracks.Select(t => t.Actor).Distinct().Count());
+
+            var placed = reader.Placed.Concat(tracks).Where(m => MaterialPorterActorFilter is null || m.Actor.Contains(MaterialPorterActorFilter, StringComparison.OrdinalIgnoreCase))
                 .OrderBy(m => m.Actor, StringComparer.Ordinal).ThenBy(m => m.Mesh, StringComparer.Ordinal).ToList();
             var done = 0;
             foreach (var m in placed)

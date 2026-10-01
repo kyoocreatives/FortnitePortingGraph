@@ -469,6 +469,26 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   `Cosmetics.Variant.Property.Vehicle.Painted.<row>` tag: the Patty Wagon's
   "None" row keeps its burger's textures), the wheel's own default painted row,
   and the windows of the tier's mode-less `WindowQueryInfos` entry.
+- **Rocket Racing tracks.** The install holds Rocket Racing's (DelMar) track kit, not its
+  tracks: `DelMarGame/Track` (the track actor `DelMarTrack_BP`, palettes, road pieces),
+  `/FortDelMarTrack` (the UEFN one), the environments and one playlist per track
+  (`Playlist_DelMar_<Track>_*`, tagged `DelMar.Map.Racing.<Track>`, over the empty
+  `DelMar_RootLevel`). A track's level comes as an island Fortnite downloads when it is
+  played (an encrypted GameCustom bundle), so it exports as islands do: in the owner's
+  builds, Map > Unlock Island with its code, then the Map page or the Files tab (its
+  plugin's `.umap` > Export). A track actor keeps its road as a spline, a style tag per
+  point (`TrackSplinePointData`) and a palette (`TrackPalette_V2`: style -> segment
+  actor class, a ~2048 cm spline mesh piece); the game lays the pieces when it builds the
+  track. A level that saved them places them as spline meshes; for a track whose level
+  holds none, `Exporting/MaterialPorter/DelMarTracks.cs` lays them as the track does:
+  each span cut into pieces of about the piece's length, each bent over its stretch of
+  the curve (SplineCurves, else the 5.6 spline), turned to the spline's up (rotation
+  channel; the rotation-minimal frames where a point asks for stable roll), widened by
+  its scale. Not laid: transition pieces between styles, end caps, the out-of-bounds
+  tube, the road UVs the track's Blueprint sets per piece (custom primitive data).
+  No official track was on disk to check against: the laying was checked on the
+  tracks' class defaults and the bridge's test track (`/fork-export-world?track=<track
+  object path>&points=x,y,z;...`, laid in the level exported).
 - **LEGO figures.** Assets > Lego > Outfits lists the LEGO outfits
   (`JunoAthenaCharacterItemOverrideDefinition`), all 2,480
   (`Exporting/MaterialPorter/Figures.cs`):
@@ -549,7 +569,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
 single-instance pipe/mutex `FortnitePortingMP`, Blender plugin installed as
 `scripts/startup/fortnite_porting_mp`, listening on port 40010 (upstream 40000),
 bridge on 24320. `FORTNITEPORTING_MP_PROFILE=test` runs a separate instance
-(own folders, lock, bridge 24322) for tests; its bridge's `/fork-export-world`
+(own folders, lock, bridge 24322; `FORTNITEPORTING_MP_BRIDGE_PORT` sets another, so two
+test profiles run at once) for tests; its bridge's `/fork-export-world`
 and `/fork-export-asset` routes return a level's or an asset's export as the
 plugin receives it, `/fork-loader?type=` runs one Assets tab's loader (`check=1`: every listed figure's mesh resolved).
 With both plugins in one Blender, the fork's panels/operators replace
