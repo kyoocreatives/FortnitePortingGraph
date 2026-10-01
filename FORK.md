@@ -149,6 +149,14 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   slider (`ik_<leg>`, 0 to play an animation). The original bones keep their names, rest pose and
   hierarchy. The shapes Tasty's data blend lacks (`CR_Foot`, `CR_Arrow`, `CR_Turn`) are built by
   `processing/context/rig_shapes.py`.
+- **LEGO figure rig.** LEGO Fortnite figures share one skeleton (FigureBody_r2, 48 bones: root >
+  pelvis > leg_l/leg_r and torso > arm > hand, neck_accessory > head > head_accessory, sockets and
+  effect points), rigid as a minifigure; with the Tasty rig setting on (Tasty's own rig skips LEGO
+  figures) `processing/context/lego_rig.py` gives it FK controls on its own bones, sized from its
+  joints: the root a footprint, a plate at the hips (the pelvis moves the figure), rings on the
+  torso and head, a dial on each hip's axis (a leg turns about it only), a dial on each shoulder's
+  axis, a ring at each wrist (a hand twists about it only), a box on the hair or hat; sockets,
+  effect points and extensions are hidden. The Rig panel's Rig LEGO Figure does any LEGO armature.
 - **Sidekick rig.** Sidekicks (Cosmetic Companions: quadrupeds, bipeds, flyers - UE-style skeletons,
   pelvis > spine > neck > head, shoulder_fr/thigh_bk legs, clavicle > upperarm > lowerarm > hand)
   get the creature rig at import with the Tasty rig setting on, which now also: takes head_01 for a

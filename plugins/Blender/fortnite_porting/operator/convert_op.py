@@ -197,7 +197,7 @@ class FPMP_OT_CreatureRig(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.type == 'ARMATURE' and not obj.data.get("is_creature_rig") and not obj.data.get("is_tasty")
+        return obj is not None and obj.type == 'ARMATURE' and not obj.data.get("is_creature_rig") and not obj.data.get("is_tasty") and not obj.data.get("is_lego_rig")
 
     def execute(self, context):
         from ..processing.context.creature_rig import create
@@ -215,10 +215,29 @@ class FPMP_OT_VehicleRig(bpy.types.Operator):
     @classmethod
     def poll(cls, context):
         obj = context.active_object
-        return obj is not None and obj.type == 'ARMATURE' and not obj.data.get("is_vehicle_rig") and not obj.data.get("is_creature_rig") and not obj.data.get("is_tasty")
+        return obj is not None and obj.type == 'ARMATURE' and not obj.data.get("is_vehicle_rig") and not obj.data.get("is_creature_rig") and not obj.data.get("is_tasty") and not obj.data.get("is_lego_rig")
 
     def execute(self, context):
         from ..processing.context.vehicle_rig import create
+        self.report({'INFO'}, create(context.active_object))
+        return {'FINISHED'}
+
+
+class FPMP_OT_LegoRig(bpy.types.Operator):
+    """Give the selected LEGO figure's armature a rig: its root a footprint, a plate at the hips, rings on
+    the torso and head, dials on the hips and shoulders (legs swing about their hip's axis only)"""
+    bl_idname = "fpmp.lego_rig"
+    bl_label = "Rig LEGO Figure"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        from ..processing.context import lego_rig
+        obj = context.active_object
+        return lego_rig.fits(obj) and not obj.data.get("is_lego_rig")
+
+    def execute(self, context):
+        from ..processing.context.lego_rig import create
         self.report({'INFO'}, create(context.active_object))
         return {'FINISHED'}
 
@@ -247,9 +266,13 @@ class FPMP_PT_CreatureRig(bpy.types.Panel):
                 if key in obj:          # (a rig made before they were)
                     col.prop(obj, '["%s"]' % key, text=text, slider=True)
             return
+        if obj.data.get("is_lego_rig"):
+            col.label(text="Dials: legs swing, arms turn; rings: hands twist")
+            return
         if not obj.data.get("is_creature_rig"):
             col.operator(FPMP_OT_CreatureRig.bl_idname)
             col.operator(FPMP_OT_VehicleRig.bl_idname)
+            col.operator(FPMP_OT_LegoRig.bl_idname)
             return
         # each limb's IK (0: FK, as an animation plays it); the eyes' aim
         col.label(text="IK (0 to play an animation):")
@@ -280,7 +303,7 @@ class FPMP_PT_Exact(bpy.types.Panel):
         col.operator(FPMP_OT_ReplayEffect.bl_idname, text="Replay Effect")
 
 
-classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_OT_ReplayEffect, FPMP_PT_Exact, FPMP_OT_CreatureRig, FPMP_OT_VehicleRig, FPMP_PT_CreatureRig)
+classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_OT_ReplayEffect, FPMP_PT_Exact, FPMP_OT_CreatureRig, FPMP_OT_VehicleRig, FPMP_OT_LegoRig, FPMP_PT_CreatureRig)
 
 
 def register():

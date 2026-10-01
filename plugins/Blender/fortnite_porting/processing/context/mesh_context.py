@@ -118,12 +118,26 @@ class MeshImportContext:
                     if key := best(shape_keys.key_blocks, lambda block: block.name.lower(), morph_target.get("Name").lower()):
                         key.value = morph_target.get("Value")
                         
-        # Material Porter fork: a creature's, a sidekick's or a vehicle's armature gets a rig of its own, as an outfit's gets Tasty's
-        if rig_type == ERigType.TASTY and self.type in [EExportType.WILDLIFE, EExportType.LEGO_WILDLIFE, EExportType.SIDEKICK, EExportType.VEHICLE]:
-            skeleton = next((m.get("Skeleton") for m in self.imported_meshes if m.get("Skeleton") is not None and m["Skeleton"].type == 'ARMATURE'), None)
-            if skeleton is not None and not skeleton.data.get("is_creature_rig") and not skeleton.data.get("is_vehicle_rig"):
+        # Material Porter fork: a creature's, a sidekick's, a vehicle's or a LEGO figure's armature gets a rig of its own, as an
+        # outfit's gets Tasty's
+        if rig_type == ERigType.TASTY and self.type in [EExportType.WILDLIFE, EExportType.LEGO_WILDLIFE, EExportType.SIDEKICK,
+                                                         EExportType.VEHICLE, EExportType.LEGO_OUTFIT]:
+            from . import lego_rig
+
+            def armature(o):
+                try:        # (a part's armature merged into the body's is gone)
+                    return o is not None and o.name in bpy.data.objects and o.type == 'ARMATURE'
+                except ReferenceError:
+                    return False
+            skeletons = [m.get("Skeleton") for m in self.imported_meshes if armature(m.get("Skeleton"))]
+            if self.type == EExportType.LEGO_OUTFIT:
+                skeletons = [o for o in skeletons if lego_rig.fits(o)]
+            skeleton = skeletons[0] if skeletons else None
+            if skeleton is not None and not [k for k in ("is_creature_rig", "is_vehicle_rig", "is_lego_rig") if skeleton.data.get(k)]:
                 if self.type == EExportType.VEHICLE:
                     from .vehicle_rig import create as create_rig
+                elif self.type == EExportType.LEGO_OUTFIT:
+                    create_rig = lego_rig.create
                 else:
                     from .creature_rig import create as create_rig
                 try:
