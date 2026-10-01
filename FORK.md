@@ -140,7 +140,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   pole (`CR_Pole_<leg>`, out from the leg's bend, its angle keeping the rest pose); the foot is the
   first bone named foot/ankle/wrist/paw/hoof, else the first standing on the ground (a spider's
   claw tip, a toe), else the one above the toe; the pole sits out from the joint furthest off the
-  hip-to-foot line (a spider's high knee). The rest is FK on the
+  hip-to-foot line (a spider's high knee). A straight leg (a LEGO wolf's front legs: IK can't tell which way to
+  bend it, and doesn't) gets its knee a hair (1% of the leg) off the line - a hind knee forward, a
+  front elbow back; the mesh doesn't move at rest. The rest is FK on the
   original bones, with Tasty's shapes sized in metres from the creature's height (a LEGO pelvis is
   a centimetre long); a foot control is a footprint on the ground facing where the creature does,
   and the legs' IK-driven FK bones go to a hidden Creature Leg FK collection. Each leg's IK is a

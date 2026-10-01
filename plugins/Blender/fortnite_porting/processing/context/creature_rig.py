@@ -237,6 +237,25 @@ def create(obj):
         off = lambda p: p - (base.head + line * ((p - base.head).dot(line) / max(line.length_squared, 1e-9)))
         middle = max([edit[n].head for n in leg.chain[1:]] or [base.tail], key=lambda p: off(p).length)
         bend = off(middle)
+        if bend.length < 2e-3 * length and len(leg.chain) > 1:
+            # a straight leg (a LEGO wolf's): IK can't tell which way to bend it, and doesn't - its knee
+            # goes a hair (1% of the leg) off the line, the mesh unmoved at rest: a hind leg's knee
+            # forward, a front leg's elbow back
+            ahead = Vector((0.0, -1.0, 0.0))        # (UE's forward, without a head)
+            if survey.head and survey.pelvis:
+                ahead = survey.bones[survey.head].head - survey.bones[survey.pelvis].head
+                ahead.z = 0.0
+            front = survey.pelvis and (base.head - survey.bones[survey.pelvis].head).dot(ahead) > 0.5 * ahead.length_squared
+            bend = off(middle + (-ahead if front else ahead))
+            if bend.length < 1e-6:
+                bend = base.x_axis.copy()
+            knee = edit[leg.chain[len(leg.chain) // 2]]
+            nudge = bend.normalized() * length * 0.01
+            if knee.parent is not None and knee.parent.name in leg.chain:
+                knee.parent.tail = knee.parent.tail + nudge
+            knee.head = knee.head + nudge if not knee.use_connect else knee.head
+            middle = knee.head.copy()
+            bend = off(middle)
         if bend.length < 1e-4 * length:
             bend = base.z_axis.copy()
         location = middle + bend.normalized() * length * 0.4      # (near: the knee points at it)
