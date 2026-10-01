@@ -225,6 +225,12 @@ public static class Effects
     /// "event effects"): a pickaxe's weapon definition's, a back bling's or an outfit's parts' idle
     /// effects, a glider's trails, a weapon's actor class's Niagara components.
     /// </summary>
+    /// <summary>A sprite definition's DataList entry for its own effect (beside its SkeletalMesh and Material).</summary>
+    public const string SpriteEffect = "NiagaraSystem";
+
+    /// <summary>The bone a sprite's effect is on (BP_Weapon_Extractable attaches its ExtractableFX there).</summary>
+    public const string SpriteEffectBone = "spine_4_bind";
+
     public static List<string> OwnEffectNames(UObject item, EExportType type)
     {
         switch (type)
@@ -236,6 +242,8 @@ public static class Effects
                 return parts.Any(p => Shown(p.GetOrDefault<FSoftObjectPath>(PartEffect)) is not null) ? ["idle"] : [];
             case EExportType.Glider:
                 return GliderTrails(item).Any(t => Shown(t.System) is not null) ? ["trail"] : [];
+            case EExportType.Sprite:
+                return Shown(item.GetDataListItem<FSoftObjectPath>(SpriteEffect)) is not null ? ["idle"] : [];
             case EExportType.Item:
                 var components = WeaponComponents(item.GetOrDefault<UObject?>("WeaponActorClass") ?? item.GetDataListItem<UObject?>("WeaponActorClass"));
                 var names = new List<string>();

@@ -324,6 +324,10 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     effect off - has none: `Effects.Shown`):
     - a back bling's and an outfit's parts' idle effect (`IdleEffectNiagara` on `IdleFXSocketName`:
       `ExportContext.PartEffects`, from `CharacterPart`);
+    - a sprite's effect (its definition's DataList `NiagaraSystem`, beside its `SkeletalMesh` and
+      `Material`: a fire sprite's flames) on bone `spine_4_bind`, where the game's held sprite
+      (`BP_Weapon_Extractable`'s ExtractableFX) has it: `ExportContext.SpriteEffects`. A sprite's
+      `MaterialSlot2` goes on its mesh's second slot too;
     - a glider's trails (`TrailEffectDefinitions`: system, socket, offset; the older
       `TrailEffectNiagara` / `2`: `GliderEffects`), sent with the locker's flags once the glider is
       out (`User.bIsFrontEnd`, `User.bIsFrontEndPreview`, `User.bIsFullyDeployed`: a speed line's
@@ -449,7 +453,14 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   flash drew as its whole quad). 13: particle values from the instance, a sprite's sub-image.
   17: a particle material's World Position Offset, UE's division by zero. 18: a SmoothStep over an
   empty range, Particle Random from the particle. 19: a Niagara decal's colour and fade. 20: division
-  by zero per component.
+  by zero per component. 21: view space, Object Position (below).
+  - **View space and Object Position.** A shader's camera space (Vector Transform to Camera) is
+    UE's view space as it is - X right, Y up, Z forward - not the camera object's (-Z forward):
+    the translator flipped Z, so every depth was negative and screen positions came out mirrored
+    (a sprite's screen-space inner glow fell off its body). UE's Object Position is the centre of
+    the object's bounds, not its pivot (Actor Position): each object carries its own
+    (`mp_bounds_centre`, local, set as its exact materials are built: `build.mark_bounds`), which
+    an Attribute node reads (the material stays shared); without it, the pivot.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the

@@ -386,6 +386,10 @@ public class MeshExport : BaseExport
                 var material = asset.GetDataListItem<UMaterialInterface>("Material");
                 var exportMaterial = Context.Material(material, 0);
                 exportMesh?.OverrideMaterials.AddIfNotNull(exportMaterial);
+                // Material Porter fork: a sprite's second material slot, its own effect (a fire sprite's flames)
+                if (asset.GetDataListItem<UMaterialInterface>("MaterialSlot2") is { } second)
+                    exportMesh?.OverrideMaterials.AddIfNotNull(Context.Material(second, 1));
+                if (Context.EffectsPick && exportMesh is not null) Context.SpriteEffects(asset, exportMesh);
 
                 Meshes.AddIfNotNull(exportMesh);
 

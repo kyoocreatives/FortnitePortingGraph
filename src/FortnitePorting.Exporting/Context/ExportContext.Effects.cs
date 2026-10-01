@@ -144,6 +144,23 @@ public partial class ExportContext
     }
 
     /// <summary>
+    /// A sprite's own effect (its definition's NiagaraSystem: a fire sprite's flames), playing on the bone
+    /// the game's held sprite puts it on (BP_Weapon_Extractable's ExtractableFX: spine_4_bind).
+    /// </summary>
+    public void SpriteEffects(UObject sprite, ExportMesh mesh)
+    {
+        try
+        {
+            if (Effects.Shown(sprite.GetDataListItem<FSoftObjectPath>(Effects.SpriteEffect)) is { } system)
+                OwnEffect(mesh, system, "idle", Effects.SpriteEffectBone);
+        }
+        catch (Exception e)
+        {
+            Serilog.Log.Warning("[Material Porter] {Sprite}: its effect wasn't read ({Error})", sprite.Name, e.Message);
+        }
+    }
+
+    /// <summary>
     /// A glider's trails, each on its socket, played as the locker shows them once the glider is out
     /// (the glider needn't fly): front end, fully deployed (a speed line's opacity waits for it).
     /// </summary>

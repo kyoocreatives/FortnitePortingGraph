@@ -126,6 +126,7 @@ def build_exact(context, material_data, texture_data=None, override_parameters=N
     job = _session(context)
     if job["down"]:
         return None
+    build.mark_bounds([obj] if obj else [])     # (UE's Object Position: each object's own, a shared material)
     path = material_data.get("Path")
     if not path:
         return None

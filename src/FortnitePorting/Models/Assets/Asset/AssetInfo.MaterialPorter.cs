@@ -133,13 +133,13 @@ public partial class AssetInfo
     /// <summary>
     /// An item's Effects: without (as FP exports it), or with its own effects (Effects.OwnEffectNames:
     /// a pickaxe's trail, swing and idle effects, a back bling's or an outfit's idle effect, a glider's
-    /// trails, a weapon's), which the export puts on the item and the plugin plays on its sockets.
+    /// trails, a weapon's, a sprite's), which the export puts on the item and the plugin plays on its sockets.
     /// </summary>
     private void AddEffectStyles()
     {
         var item = Asset.CreationData.Object;
         var type = Asset.CreationData.ExportType;
-        if (item is null || type is not (EExportType.Pickaxe or EExportType.Backpack or EExportType.Outfit or EExportType.Glider or EExportType.Item)) return;
+        if (item is null || type is not (EExportType.Pickaxe or EExportType.Backpack or EExportType.Outfit or EExportType.Glider or EExportType.Item or EExportType.Sprite)) return;
         _ = Task.Run(async () =>
         {
             try

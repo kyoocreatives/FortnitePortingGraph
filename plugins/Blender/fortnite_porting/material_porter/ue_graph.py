@@ -188,6 +188,7 @@ COMPILE_SWITCHES = {
 }
 
 # Transform / TransformPosition spaces, by enum suffix
+BOUNDS_CENTRE = "mp_bounds_centre"     # an object's bounds centre (local, Blender metres): UE's Object Position
 VECTOR_SPACES = {"Tangent": "tangent", "Local": "local", "World": "world", "View": "view", "Camera": "view",
                  "ParticleWorld": "world", "Instance": "local"}
 POSITION_SPACES = {"Local": "local", "World": "world", "TranslatedWorld": "translated", "View": "view",
@@ -2150,12 +2151,14 @@ class Translator:
     # UE space here, Blender's in the nodes: FP mirrors Y and scales by 0.01;
     # UE view space is x right, y up, z forward, Blender's camera -z forward.
     def to_blender(self, v, point=False, view=False):
+        # (a shader's camera space is UE's view space: X right, Y up, Z forward - not the camera
+        # object's, which looks down -Z)
         s = 0.01 if point else 1.0
-        return self.vmath('MULTIPLY', self.as3(v), self.const((s, s, -s) if view else (s, -s, s), 3), out_w=3)
+        return self.vmath('MULTIPLY', self.as3(v), self.const((s, s, s) if view else (s, -s, s), 3), out_w=3)
 
     def from_blender(self, v, point=False, view=False):
         s = 100.0 if point else 1.0
-        return self.vmath('MULTIPLY', v, self.const((s, s, -s) if view else (s, -s, s), 3), out_w=3)
+        return self.vmath('MULTIPLY', v, self.const((s, s, s) if view else (s, -s, s), 3), out_w=3)
 
     def blender_transform(self, v, src, dst, point):
         n = self.node("ShaderNodeVectorTransform", "%s to %s" % (src.lower(), dst.lower()),
@@ -2627,8 +2630,18 @@ class Translator:
         if t == "PixelDepth":
             return self.pixel_depth()
         if t == "ObjectPositionWS":
+            # UE's Object Position is the centre of the object's bounds, not its pivot (that's Actor
+            # Position): a sprite's pivot is at its feet, its screen-space glow centred on its body.
+            # The centre (local, Blender metres) is a property the import sets on each object
+            # (mp_bounds_centre: the material stays shared); an object without it: its pivot
             rel = "CameraRelative" in str(p.get("OriginType", ""))
-            return self._hook("object_position", lambda: env.actor_position(rel), rel)
+
+            def centre():
+                n = self.node("ShaderNodeAttribute", "bounds centre", attribute_type='OBJECT',
+                              attribute_name=BOUNDS_CENTRE)
+                world = self.from_blender(self.blender_transform(Val(n.outputs["Vector"], 3), 'OBJECT', 'WORLD', True), True)
+                return self.vmath('SUBTRACT', world, env.camera_position(), out_w=3) if rel else world
+            return self._hook("object_position", centre, rel)
         if t == "LocalPosition":
             return self.local_position()
         if t == "PreSkinnedPosition":
