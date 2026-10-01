@@ -18,9 +18,30 @@ one answers for a FortnitePorting import:
 * Graphs and textures come from the app, as the build reaches them.
 * Mesh inputs use FP's names: UV maps "UV0", "UV1"..., vertex colour "COL0".
 """
+import re
+
 import bpy
 
 from .ue_graph import WATER_DEPTH_DEFAULT, Val
+
+# a vector parameter that names a colour gets a colour socket (a picker); any other - an offset, a
+# direction, a channel, a size - a vector socket: a colour socket clamps negatives to 0 (a sprite
+# variant's sphere offset (0, -9.7, -23.5) was read as (0, 0, 0), its fade at the feet)
+COLOURISH = re.compile(r"colou?r|tint|albedo|emissive|diffuse|glow|light|fog|sky|fresnelcol", re.IGNORECASE)
+
+
+def vector_socket(name, *values):
+    """'NodeSocketColor' or 'NodeSocketVector' for a vector parameter (its known values: none negative
+    for a colour socket)."""
+    negative = any(float(x) < 0.0 for v in values if v is not None for x in tuple(v)[:3])
+    return 'NodeSocketColor' if COLOURISH.search(name or "") and not negative else 'NodeSocketVector'
+
+
+def fit_socket(sock, value):
+    """A vector parameter's value (r, g, b, a) as the socket takes it (a vector socket: x, y, z)."""
+    value = tuple(value)
+    n = len(sock.default_value)
+    return value[:n] + (1.0,) * (n - len(value))
 
 COLORSPACE_SRGB = "sRGB"
 COLORSPACE_DATA = "Non-Color"
@@ -330,14 +351,17 @@ class MaterialEnv:
             rgba = tuple(rgba) + (1.0,) * (4 - len(rgba))
             return self.tr.const(tuple(float(x) for x in rgba[:3]), 3), self.tr.const(float(rgba[3]))
         self.graph_defaults.setdefault("V: " + name, tuple(float(x) for x in rgba) + (1.0,) * (4 - len(rgba)))
+        graph_default = rgba
         rgba = tuple(self.entry.get("vectors", {}).get(name, rgba)) + (1.0,) * (4 - len(rgba))
         self._defaults["V: " + name] = rgba
         alpha = self.tr.const(float(rgba[3]))
+        socket = vector_socket(name, graph_default, rgba)
+        value = rgba if socket == 'NodeSocketColor' else tuple(rgba[:3])
         fn = self.tr.function
         if fn is not None:
-            return fn.env_input("V: " + name, 'NodeSocketColor', rgba, "UE vector parameter " + name), alpha
+            return fn.env_input("V: " + name, socket, value, "UE vector parameter " + name), alpha
         if self._at_root():
-            return (self._root_input("V: " + name, name, 'NodeSocketColor', rgba, 3, "UE vector parameter"),
+            return (self._root_input("V: " + name, name, socket, value, 3, "UE vector parameter"),
                     self._root_input("A: " + name, name + " (A)", 'NodeSocketFloat', float(rgba[3]), 1,
                                      "UE vector parameter, its alpha"))
 

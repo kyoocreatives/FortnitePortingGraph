@@ -454,6 +454,7 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   17: a particle material's World Position Offset, UE's division by zero. 18: a SmoothStep over an
   empty range, Particle Random from the particle. 19: a Niagara decal's colour and fade. 20: division
   by zero per component. 21: view space, Object Position (below). 22: Power clamps a negative base.
+  23: vector parameters on vector sockets (below).
   - **View space and Object Position.** A shader's camera space (Vector Transform to Camera) is
     UE's view space as it is - X right, Y up, Z forward - not the camera object's (-Z forward):
     the translator flipped Z, so every depth was negative and screen positions came out mirrored
@@ -464,6 +465,13 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   - **Power** is UE's PositiveClampedPow, `pow(max(Base, 0), Exponent)` (since 4.16): a negative
     base gives 0 where Blender's Power squares it - a variant sprite's sphere mask (1 - d / r,
     squared) came out 1 far from its sphere, the base look showing through the variant.
+  - **Vector parameters.** A Blender colour socket clamps negative values to 0, so every UE vector
+    parameter with a negative component lost it (a sprite variant's sphere offset (0, -9.7, -23.5)
+    read as (0, 0, 0): its fade sat at the feet, not on the face). A vector parameter now gets a
+    colour socket only when its name says it is a colour (`env.COLOURISH`) and none of its known
+    values is negative; any other - offsets, directions, channels, sizes - a vector socket (x, y, z;
+    its alpha its own input). A copied instance (`build_like`) whose colour socket would clamp
+    its value is built anew.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the
