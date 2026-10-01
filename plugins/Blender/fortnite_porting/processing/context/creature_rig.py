@@ -127,7 +127,9 @@ class Survey:
         start = 1 if SHOULDER_BLADE.search(names[0]) and len(names) > 3 else 0
         foot = next((i for i in range(start + 1, len(names)) if any(FOOT.match(w.lower()) for w in re.split(r"[_\d]+", names[i]))), None)
         if foot is None:
-            foot = len(names) - 2 if len(names) - start >= 3 else None     # (the last is its toe)
+            # unnamed: the first bone standing on the ground (a claw's tip, a toe), else the one above the toe
+            touching = [i for i in range(start + 2, len(names)) if self.bones[names[i]].head.z < self.ground + 0.06 * self.height]
+            foot = touching[0] if touching else (len(names) - 2 if len(names) - start >= 3 else None)
         if foot is None or foot - start < 2:
             limb.kind = "arm"       # too short to bend: FK
             return
@@ -228,15 +230,16 @@ def create(obj):
         target.head, target.tail, target.roll = foot.head.copy(), foot.tail.copy(), foot.roll
         target.parent = edit.get(survey.root)
         target.use_deform = False
-        # the pole: out from the chain's bend, a limb's length away (in front of a knee, behind a hock)
+        # the pole: out from the chain's bend (in front of a knee, behind a hock)
         length = sum(edit[n].length for n in leg.chain)
-        line = tip.tail - base.head
-        middle = edit[leg.chain[len(leg.chain) // 2]].head if len(leg.chain) > 1 else base.tail
-        along = base.head + line * ((middle - base.head).dot(line) / max(line.length_squared, 1e-9))
-        bend = middle - along
+        # (the bend: the joint furthest off the line from hip to foot - a spider's knee, high over it)
+        line = foot.head - base.head
+        off = lambda p: p - (base.head + line * ((p - base.head).dot(line) / max(line.length_squared, 1e-9)))
+        middle = max([edit[n].head for n in leg.chain[1:]] or [base.tail], key=lambda p: off(p).length)
+        bend = off(middle)
         if bend.length < 1e-4 * length:
             bend = base.z_axis.copy()
-        location = middle + bend.normalized() * length
+        location = middle + bend.normalized() * length * 0.4      # (near: the knee points at it)
         pole = edit.new(PREFIX + "Pole_" + leg.name)
         pole.head, pole.tail = location, location + Vector((0, 0, 0.1 * length))
         pole.parent = edit.get(survey.root)
