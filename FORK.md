@@ -146,21 +146,30 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   hierarchy. The shapes Tasty's data blend lacks (`CR_Foot`, `CR_Arrow`, `CR_Turn`) are built by
   `processing/context/rig_shapes.py`.
 - **Vehicle rig.** With the Tasty rig setting on, a vehicle (Vehicles, Rocket Racing cars) gets a rig
-  at import (`processing/context/vehicle_rig.py`); the Rig panel's Rig Vehicle gives one to any
-  selected armature. Fortnite's vehicles share a layout (root > frame > body; each wheel under a
-  differential: axle_pivot > steering_knuckle > wheel_steering > wheel_disc > tire; a tank's
-  road_wheel > rot_road_wheel), read by name with fallbacks on position. CR_Main places and turns
-  it; CR_Drive (its child, moved along its own Y) drives it - the root follows it (Child Of) and
-  every wheel's topmost spinning bone turns by the distance over its radius (its head's height),
-  about its local axis across the vehicle (a Transformation constraint, extrapolated); CR_Steer
-  (on the front axle) turns the front wheel_steering bones about their upright axis, and the
-  cockpit's steering wheel three times as much, within 60 degrees. A Rocket Racing car's wheels
-  (an armature each, parented to the body's object) are put on their hub's spinning bone, other
-  loose parts on the body. The rest are FK parts (turret, guns, doors, hatch); the wheels' bones and
-  the game's helpers (sockets, effect points, seats) are hidden. Sliders: Wheels Spin, Wheels Steer.
-  The controls fit the vehicle's meshes (its bones' tails reach past it): CR_Main a ring on the
-  ground around it, CR_Drive an arrow off its nose, CR_Steer an arc round the front axle at bonnet
-  height, the body a box around it.
+  at import (`processing/context/vehicle_rig.py`), after the big car rigs (Rigacar, Car-Rig Pro); the
+  Rig panel's Rig Vehicle gives one to any selected armature. Fortnite's vehicles share a layout
+  (root > frame > body; each wheel under a differential: axle_pivot > steering_knuckle >
+  wheel_steering > wheel_disc > tire; a tank's road_wheel > rot_road_wheel), read by name with
+  fallbacks on position. The controls (fit to the vehicle's meshes, own colours):
+  - CR_Main, a ring on the ground: places and turns it;
+  - CR_Drive, an arrow off the nose, moved along its Y: every wheel's topmost spinning bone turns by
+    the distance over its radius about its axle (a Transformation constraint, extrapolated);
+  - CR_Drift, an arc behind it, turned about the front axle: the root follows it (Child Of), the
+    rear swings out and the front wheels counter-steer (Counter-steer slider) to keep pointing where
+    it drives;
+  - CR_Steer, an arc around the front axle: the front wheel_steering bones turn about their upright
+    axis, the cockpit's steering wheel three times as much, within 60 degrees;
+  - CR_Body, a slab over the roof: moves and tilts the body (Copy Transforms from a bone under it),
+    the wheels - on the frame - staying put;
+  - CR_Wheel_<bone>, a ring on each wheel: up/down lifts the wheel's chain (a bump), about its axle
+    turns it (a wheelspin). The body rises, pitches and rolls with the plane through the rings
+    (least squares, linear in the lifts: simple-expression drivers on CR_Suspension, under
+    CR_Body; a tank's corner wheels), and rolls out of a turn (Lean in Turns, off by default).
+  The parts that move vertices (a turret, guns, a hatch, a tailgate, mirrors: names, weighted over
+  half) get a box around what they move; the rest - the wheels' bones, the mechanism, the game's
+  helpers - is hidden. A Rocket Racing car's wheels (an armature each, parented to the body's
+  object) are put on their hub's spinning bone and hidden (their bones), other loose parts on the
+  body. Sliders: Wheels Spin, Wheels Steer, Counter-steer, Body Follows Wheels, Lean in Turns.
 - **Animations tab.** Assets > Gameplay > Animations lists the game's 69,600 animations (sequences
   and montages), which the cooked registry mostly leaves out (2,248, nearly all islands'): found by
   path (an animation folder, "anim" or "montage" in the name: 133,000 packages of 2 million), each

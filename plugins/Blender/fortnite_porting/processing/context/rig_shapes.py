@@ -16,9 +16,9 @@ def _arrow():
     return verts, [(i, (i + 1) % len(verts)) for i in range(len(verts))]
 
 
-def _turn():
-    """An arc of radius 1 about Z, 55 degrees each side of +Y, an arrowhead at each end: turn it."""
-    span, steps = radians(55.0), 24
+def _turn(degrees=55.0):
+    """An arc of radius 1 about Z, `degrees` each side of +Y, an arrowhead at each end: turn it."""
+    span, steps = radians(degrees), 24
     angles = [-span + 2.0 * span * i / steps for i in range(steps + 1)]
     verts = [(sin(a), cos(a), 0.0) for a in angles]
     edges = [(i, i + 1) for i in range(steps)]
@@ -46,7 +46,7 @@ def _foot():
     return verts, edges
 
 
-SHAPES = {"CR_Arrow": _arrow, "CR_Turn": _turn, "CR_Foot": _foot}
+SHAPES = {"CR_Arrow": _arrow, "CR_Turn": _turn, "CR_Swing": lambda: _turn(18.0), "CR_Foot": _foot}
 
 
 def ensure(name):
@@ -64,3 +64,11 @@ def place(obj, pose_bone, at):
     """Move a control's shape to a point (armature space) off its bone."""
     bone = obj.data.bones[pose_bone.name]
     pose_bone.custom_shape_translation = bone.matrix_local.to_3x3().inverted() @ (at - bone.head_local)
+
+
+def color(pose_bone, rgb):
+    """A control's own colour (the theme's sets are dark as wires): `rgb` 0-1, lighter selected."""
+    pose_bone.color.palette = 'CUSTOM'
+    pose_bone.color.custom.normal = rgb
+    pose_bone.color.custom.select = tuple(min(1.0, c * 0.5 + 0.5) for c in rgb)
+    pose_bone.color.custom.active = (1.0, 1.0, 1.0)

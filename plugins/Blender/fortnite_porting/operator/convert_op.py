@@ -238,9 +238,13 @@ class FPMP_PT_CreatureRig(bpy.types.Panel):
         obj = context.active_object
         col = self.layout.column(align=True)
         if obj.data.get("is_vehicle_rig"):
-            col.label(text="CR_Drive forward: drive; CR_Steer: steer")
+            # arrow: move forward; arcs: rotate; roof slab: move/tilt; wheel rings: lift/turn
+            col.label(text="Drive: arrow. Steer, drift: arcs. Body: roof")
             col.prop(obj, '["auto_wheels"]', text="Wheels Spin", slider=True)
             col.prop(obj, '["auto_steer"]', text="Wheels Steer", slider=True)
+            for key, text in (("countersteer", "Counter-steer"), ("suspension", "Body Follows Wheels"), ("lean", "Lean in Turns")):
+                if key in obj:          # (a rig made before they were)
+                    col.prop(obj, '["%s"]' % key, text=text, slider=True)
             return
         if not obj.data.get("is_creature_rig"):
             col.operator(FPMP_OT_CreatureRig.bl_idname)
