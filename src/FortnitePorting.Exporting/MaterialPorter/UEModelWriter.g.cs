@@ -24,8 +24,9 @@ namespace FortnitePorting.Exporting.MaterialPorter;
 public static class UEModelWriter
 {
     const byte Version = 9;
-    /// <summary>Bumped when what this writer puts in a file changes (cached exports are named by it).</summary>
-    public const int Revision = 1;
+    /// <summary>Bumped when what this writer puts in a file changes (cached exports are named by it). 2: a
+    /// Mutable-built mesh's 8-bit vertex colours read as B G R A (MutableMeshes.ColorIsBgra).</summary>
+    public const int Revision = 2;
 
     sealed class Out
     {

@@ -58,7 +58,20 @@ def _glasses():
     return verts, edges
 
 
-SHAPES = {"CR_Arrow": _arrow, "CR_Turn": _turn, "CR_Swing": lambda: _turn(18.0), "CR_Foot": _foot, "CR_Glasses": _glasses}
+def _updown():
+    """A double arrow along Y (-1 to 1), drawn in the XY and the ZY planes: seen from any side."""
+    verts, edges = [], []
+    for across in (0, 2):
+        first = len(verts)
+        for a, b in ((0.0, -1.0), (0.0, 1.0), (-0.35, 0.6), (0.35, 0.6), (-0.35, -0.6), (0.35, -0.6)):
+            v = [0.0, b, 0.0]
+            v[across] = a
+            verts.append(tuple(v))
+        edges += [(first, first + 1), (first + 1, first + 2), (first + 1, first + 3), (first, first + 4), (first, first + 5)]
+    return verts, edges
+
+
+SHAPES = {"CR_Arrow": _arrow, "CR_Turn": _turn, "CR_Swing": lambda: _turn(18.0), "CR_Foot": _foot, "CR_Glasses": _glasses, "CR_UpDown": _updown}
 
 
 def ensure(name):

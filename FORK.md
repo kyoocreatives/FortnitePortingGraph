@@ -188,6 +188,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     the wheels - on the frame - staying put;
   - CR_Wheel_<bone>, a ring on each wheel: up/down lifts the wheel (a bump), about its axle turns
     it (a wheelspin);
+  - CR_Arch_<bone>, a double arrow over each wheel's arch: up/down moves the wheel's zone - the
+    chain's top (axle_pivot) and what hangs off it: an upright, a fender, a shock, a caliper - and
+    not the wheel (its spinning bone, with a Rocket Racing wheel's object on it, moves back);
   - Ground (the Rig panel; the armature object's `fpmp_ground`): a mesh the wheels follow - each
     has a sensor (CR_Ground_<bone>, its ring's parent) projected onto it along world Z both ways
     (a Shrinkwrap, muted with no ground). A wheel's height is its ring's lift and its ground's;
@@ -473,6 +476,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     its alpha its own input). A copied instance (`build_like`) whose colour socket would clamp
     its value is built anew.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
+  A Mutable-built mesh's 8-bit vertex colours are UE's FColor bytes, B G R A (`MutableMeshes.ColorIsBgra`;
+  they were read as R G B A: a Mutable wheel's tire mask landed in the wrong channel and its tire drew
+  the rim's masks). UEModelWriter.Revision 2 renames built meshes, so cached ones are built again.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the
   export is the body (the decal's material when one is picked), the wheels

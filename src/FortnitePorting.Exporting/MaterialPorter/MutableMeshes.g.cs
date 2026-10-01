@@ -194,7 +194,7 @@ public sealed class MutableMeshes
             if (Channel(vb, EMeshBufferSemantic.TexCoords, k, out var uc) is { } uv) mesh.Uvs.Add(Take(uv, uc, 2));
             else break;
         if (Channel(vb, EMeshBufferSemantic.Color, 0, out var cc) is { } col)
-            mesh.Colors = Take(col, cc, 4, 1f).Select(x => (byte)Math.Clamp(MathF.Round(x * 255f), 0, 255)).ToArray();
+            mesh.Colors = Rgba(Take(col, cc, 4, 1f), ColorIsBgra(vb)).Select(x => (byte)Math.Clamp(MathF.Round(x * 255f), 0, 255)).ToArray();
         mesh.Indices = Indices(geo.IndexBuffers) ?? throw new InvalidDataException("no indices");
 
         var byId = new Dictionary<uint, short>();
@@ -243,6 +243,23 @@ public sealed class MutableMeshes
     }
 
     /// <summary>n x `from` components as n x `to` (missing ones `fill`).</summary>
+    /// <summary>
+    /// Whether a buffer set's colour channel holds 8-bit colours: those are UE's FColor bytes, B G R A (a
+    /// Mutable-built wheel's tire mask, R in the cooked mesh, came out in B: its tire drew the rim's masks).
+    /// </summary>
+    static bool ColorIsBgra(FMeshBufferSet set) =>
+        set.Buffers.SelectMany(b => b.Channels).FirstOrDefault(c => c.Semantic == EMeshBufferSemantic.Color && c.SemanticIndex == 0) is { } ch
+        && ch.Format is EMeshBufferFormat.NUInt8 or EMeshBufferFormat.UInt8 && ch.ComponentCount >= 3;
+
+    /// <summary>Colours (n x 4) as R G B A, from B G R A when asked.</summary>
+    static float[] Rgba(float[] colours, bool bgra)
+    {
+        if (!bgra) return colours;
+        for (var i = 0; i + 2 < colours.Length; i += 4)
+            (colours[i], colours[i + 2]) = (colours[i + 2], colours[i]);
+        return colours;
+    }
+
     static float[] Take(float[] src, int from, int to, float fill = 0f)
     {
         var n = src.Length / Math.Max(1, from);

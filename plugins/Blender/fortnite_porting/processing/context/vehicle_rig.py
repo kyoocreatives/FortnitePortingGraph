@@ -44,7 +44,7 @@ COCKPIT_RATIO = 3.0         # the steering wheel turns this much more than the w
 LEAN = 0.15                 # the body's roll out of a turn, per radian of steer (at Lean in Turns 1)
 PLANE_WHEELS = 10           # past this many wheels (a tank's), the body's plane is its corner wheels'
 COLORS = {"main": (0.96, 0.79, 0.05), "drive": (0.18, 0.55, 1.0), "steer": (1.0, 0.23, 0.19),
-          "drift": (0.88, 0.25, 0.98), "body": (0.24, 0.86, 0.52), "wheel": (1.0, 0.58, 0.0),
+          "drift": (0.88, 0.25, 0.98), "body": (0.24, 0.86, 0.52), "wheel": (1.0, 0.58, 0.0), "arch": (0.6, 1.0, 0.25),
           "part": (0.13, 0.83, 0.93)}
 
 
@@ -315,7 +315,7 @@ def create(obj):
     if body:
         follow = new("Body_Follow", body.head, body.tail, body_control)  # the body where it rests, under CR_Body
         follow.roll = body.roll
-    controls = {}                   # wheel: its ring, ground sensor, lift; which way it points (+1 left)
+    controls = {}                   # wheel: its ring, ground sensor, lift, arch; which way it points (+1 left)
     for name in survey.wheels:
         at = survey.bones[name].head.copy()
         out = 1.0 if (at - survey.centre).dot(left) >= 0 else -1.0
@@ -323,13 +323,21 @@ def create(obj):
         sensor = new("Ground_" + name, under, under + left * out * radii[name] * 0.6, drift)
         ring = new("Wheel_" + name, at, at + left * out * radii[name] * 0.6, sensor)
         lift = new("Lift_" + name, at, at + left * out * radii[name] * 0.3, drift)
-        controls[name] = (ring.name, sensor.name, lift.name, out)
+        # its arch: over the wheel, on the vehicle's side (it rides with the body)
+        arch = None
+        if survey.top(name) != name:
+            side = abs((at - survey.centre).dot(left))
+            outside = max(width * 0.5 - side, 0.0) if side > width * 0.1 else 0.0
+            over = at + up * radii[name] * 1.3 + left * out * outside
+            arch = new("Arch_" + name, over, over + left * out * radii[name] * 0.4, lean).name
+        controls[name] = (ring.name, sensor.name, lift.name, out, arch)
     # the local axes each needs: which is up, across, forward (letter and sign)
     axes = {b.name: {"up": _axis(b.matrix, up), "left": _axis(b.matrix, left), "forward": _axis(b.matrix, forward)}
             for b in edit if b.name.startswith(PREFIX)}
     tops = {n: survey.top(n) for n in survey.wheels}
     top_up = {t: _axis(edit[t].matrix, up) for t in set(tops.values())}
     spins = {n: _axis(edit[n].matrix, left) for n in survey.wheels}
+    spin_up = {n: _axis(edit[n].matrix, up) for n in survey.wheels}
     turns = {n: _axis(edit[n].matrix, up) for n in survey.steering}
     cockpits = {n: _axis(edit[n].matrix, -forward) for n in survey.cockpit}
     names = {k: (b.name if b is not None else None) for k, b in (
@@ -356,12 +364,19 @@ def create(obj):
         con = _transform(pose[name], obj, names["drive"], "Y", axis, sign / radii[name], 'LOCATION')
         _driven(obj, con, "auto_wheels")
         # its ring turns it too (about the ring's Y, outwards)
-        ring, sensor, lift, out = controls[name]
+        ring, sensor, lift, out, arch = controls[name]
         _transform(pose[name], obj, ring, "Y", axis, sign * out, 'ROTATION', name="CR Spin")
         # and lifts it, with its chain from the differential down, off the vehicle's plane
         letter, way = axes[lift]["up"]
         top_letter, top_way = top_up[tops[name]]
         _moved(pose[tops[name]], obj, lift, letter, top_letter, way * top_way, "CR Lift")
+        if arch:
+            # its arch moves its zone - the chain's top and what hangs off it (an upright, a fender, a
+            # shock, a caliper) - and not the wheel: the spinning bone (the wheel's object on it) moves back
+            letter, way = axes[arch]["up"]
+            _moved(pose[tops[name]], obj, arch, letter, top_letter, way * top_way, "CR Arch")
+            s_letter, s_way = spin_up[name]
+            _moved(pose[name], obj, arch, letter, s_letter, -way * s_way, "CR Arch Keep")
         # the ground under it, once there is one (the armature object's Ground)
         con = pose[sensor].constraints.new('SHRINKWRAP')
         con.name = "CR Ground"
@@ -391,10 +406,13 @@ def create(obj):
     pose[names["drive"]].lock_location = (True, False, True)      # it drives along its own axis
     pose[names["drift"]].lock_location = (True, True, True)       # it turns about the front axle
     pose[names["drift"]].lock_rotation = tuple(letter != drift_letter for letter in "XYZ")
-    for name, (ring, sensor, lift, out) in controls.items():
+    for name, (ring, sensor, lift, out, arch) in controls.items():
         letter = axes[ring]["up"][0]
         pose[ring].lock_location = tuple(a != letter for a in "XYZ")       # up and down
         pose[ring].lock_rotation = (True, False, True)                     # about its axle
+        if arch:
+            pose[arch].lock_location = tuple(a != axes[arch]["up"][0] for a in "XYZ")
+            pose[arch].lock_rotation = pose[arch].lock_scale = (True, True, True)
 
     # the suspension: each wheel's height is its ring's lift and its ground's; the vehicle rises by their
     # mean, pitches and rolls with the plane through them (least squares: linear in the heights), and
@@ -520,7 +538,15 @@ def create(obj):
         shown.append(names["body"])
     for name in shown:
         collections["Vehicle Controls"].assign(armature.bones[name])
-    for name, (control, sensor, lift, out) in controls.items():
+    for name, (control, sensor, lift, out, arch) in controls.items():
+        if arch:
+            # a double arrow over the wheel's arch: up and down
+            sized(pose[arch], "CTRL_Box", "THEME03", 0.1, wire=2.5)
+            pose[arch].custom_shape = rig_shapes.ensure("CR_UpDown")
+            pose[arch].custom_shape_scale_xyz = (radii[name] * 0.45,) * 3
+            align_shape(obj, pose[arch], x=forward, y=up)
+            rig_shapes.color(pose[arch], COLORS["arch"])
+            collections["Vehicle Wheel Controls"].assign(armature.bones[arch])
         # a ring on the wheel's outer side
         ring = pose[control]
         sized(ring, "CTRL_Spine", "THEME02", radii[name] * 2.3, wire=2.5)

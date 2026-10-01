@@ -305,7 +305,9 @@ public class MaterialPorterService : IService
             var plan = await CarPlanAsync(query["path"] ?? throw new ArgumentException("path missing"), picks);
             return new
             {
-                channels = plan.Channels.Select(c => new { c.Name, c.Default, options = c.Options.Count, first = c.Options.Take(4).Select(o => o.Name) }),
+                // (all=1: every option with its item's package, to find one by its asset)
+                channels = plan.Channels.Select(c => new { c.Name, c.Default, options = c.Options.Count,
+                    first = query["all"] == "1" ? c.Options.Select(o => o.Name + " | " + (o.IconItem?.Package ?? o.Icon)) : c.Options.Take(4).Select(o => o.Name) }),
                 plan.Styles, plan.BodyMesh, plan.BodyOverrides, plan.WheelMesh,
                 wheels = plan.Wheels.Select(w => new { w.Label, at = new[] { w.Transform.M41, w.Transform.M42, w.Transform.M43 } }),
                 @params = plan.Params.ToDictionary(kv => kv.Key, kv => new { kv.Value.Vectors, kv.Value.Scalars }),
