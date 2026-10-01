@@ -139,8 +139,12 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   control (`CR_IK_<foot>`, a copy of the foot under the root, the foot turning with it) and a knee
   pole (`CR_Pole_<leg>`, out from the leg's bend, its angle keeping the rest pose); the foot is the
   first bone named foot/ankle/wrist/paw/hoof, else the one above the toe. The rest is FK on the
-  original bones, with Tasty's shapes. Each leg's IK is a slider (`ik_<leg>`, 0 to play an
-  animation). The original bones keep their names, rest pose and hierarchy.
+  original bones, with Tasty's shapes sized in metres from the creature's height (a LEGO pelvis is
+  a centimetre long); a foot control is a footprint on the ground facing where the creature does,
+  and the legs' IK-driven FK bones go to a hidden Creature Leg FK collection. Each leg's IK is a
+  slider (`ik_<leg>`, 0 to play an animation). The original bones keep their names, rest pose and
+  hierarchy. The shapes Tasty's data blend lacks (`CR_Foot`, `CR_Arrow`, `CR_Turn`) are built by
+  `processing/context/rig_shapes.py`.
 - **Vehicle rig.** With the Tasty rig setting on, a vehicle (Vehicles, Rocket Racing cars) gets a rig
   at import (`processing/context/vehicle_rig.py`); the Rig panel's Rig Vehicle gives one to any
   selected armature. Fortnite's vehicles share a layout (root > frame > body; each wheel under a
@@ -154,6 +158,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   (an armature each, parented to the body's object) are put on their hub's spinning bone, other
   loose parts on the body. The rest are FK parts (turret, guns, doors, hatch); the wheels' bones and
   the game's helpers (sockets, effect points, seats) are hidden. Sliders: Wheels Spin, Wheels Steer.
+  The controls fit the vehicle's meshes (its bones' tails reach past it): CR_Main a ring on the
+  ground around it, CR_Drive an arrow off its nose, CR_Steer an arc round the front axle at bonnet
+  height, the body a box around it.
 - **Animations tab.** Assets > Gameplay > Animations lists the game's 69,600 animations (sequences
   and montages), which the cooked registry mostly leaves out (2,248, nearly all islands'): found by
   path (an animation folder, "anim" or "montage" in the name: 133,000 packages of 2 million), each

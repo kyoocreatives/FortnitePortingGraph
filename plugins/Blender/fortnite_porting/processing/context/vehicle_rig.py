@@ -26,6 +26,7 @@ STEER = re.compile(r"^wheel_steering", re.IGNORECASE)
 COCKPIT = re.compile(r"^(steering_wheel|handlebars?)$", re.IGNORECASE)
 FRONT = re.compile(r"(^|_)(fr|fl|front|f)(_|$)", re.IGNORECASE)
 BACK = re.compile(r"(^|_)(bk|br|bl|back|rear|b)(_|$)", re.IGNORECASE)
+PART = re.compile(r"door|hatch|turret|gun|cannon|trunk|hood|bonnet|boot|antenna|ramp|lid|flap|spoiler|wing|arm|^steering_wheel$|handlebar", re.IGNORECASE)
 HELPER = re.compile(r"fx_|socket|physlight|passenger|driver|exit|choice|pushforce|^center$|watertest|lookahead|"
                     r"muzzle|attach|_hand_|^frontwheels$|^rearwheels$|thrust|lensflare|taillight", re.IGNORECASE)
 STEER_LIMIT = pi / 3        # the steer control's full turn: the front wheels' (60 degrees)
@@ -62,9 +63,9 @@ class Survey:
         self.forward = forward.normalized() if forward.length > 1e-6 else Vector((1.0, 0.0, 0.0))
         self.left = Vector((0.0, 0.0, 1.0)).cross(self.forward)
         heads = [b.head for b in edit_bones] + [b.tail for b in edit_bones]
-        along = [h.dot(self.forward) for h in heads] or [0.0]
-        self.length = max(max(along) - min(along), 0.5)
-        middle = sum(along) / len(along)
+        heads = heads or [Vector()]
+        self.fit(heads)         # (then the meshes', if any)
+        middle = sum(h.dot(self.forward) for h in heads) / len(heads)
         steering = [n for n in self.bones if STEER.search(n)]
         self.steering = [n for n in steering if FRONT.search(n) or (not BACK.search(n) and self.bones[n].head.dot(self.forward) > middle)]
         self.cockpit = [n for n in self.bones if COCKPIT.search(n)]
@@ -78,6 +79,18 @@ class Survey:
                 if "differential" in p.name.lower() or p.name in (self.root, "frame", "body"):
                     break
                 self.wheel_chains.add(p.name)
+
+    def fit(self, points):
+        """The vehicle's extent from points about it (armature space): its length, width and height,
+        the middle of its footprint (on the ground) and how far its nose is."""
+        along = [p.dot(self.forward) for p in points]
+        side = [p.dot(self.left) for p in points]
+        self.length = max(max(along) - min(along), 0.5)
+        self.width = max(max(side) - min(side), 0.3)
+        self.height = max(max(p.z for p in points) - self.ground, 0.3)
+        self.centre = (self.forward * (max(along) + min(along)) + self.left * (max(side) + min(side))) / 2.0
+        self.centre.z = self.ground
+        self.nose = max(along)
 
     def radius(self, name):
         height = self.bones[name].head.z - self.ground
@@ -132,6 +145,12 @@ def create(obj):
     if armature.get(KEY):
         return "%s: already has a vehicle rig" % obj.name
     ensure_blend_data()             # the control shapes (CTRL_Root, CTRL_Box...)
+    # the vehicle's extent is its meshes' (its bones' tails reach past it: effect points, sockets)
+    inverse = obj.matrix_world.inverted()
+    carried = set(obj.children_recursive)
+    meshes = [o for o in bpy.data.objects if o.type == 'MESH' and (o in carried or any(
+        m.type == 'ARMATURE' and m.object == obj for m in o.modifiers))]
+    extent = [inverse @ (o.matrix_world @ Vector(corner)) for o in meshes for corner in o.bound_box]
     view_layer = bpy.context.view_layer
     for o in view_layer.objects:
         o.select_set(False)
@@ -143,6 +162,8 @@ def create(obj):
     if survey.root is None:
         bpy.ops.object.mode_set(mode='OBJECT')
         return "%s: no bones" % obj.name
+    if extent:
+        survey.fit(extent)
 
     # the controls: on the ground under the vehicle, pointing forward (their Y), Z up
     base = survey.bones[survey.root].head.copy()
@@ -157,7 +178,7 @@ def create(obj):
     steer_name = None
     if survey.steering and survey.front_axle is not None:
         steer = edit.new(PREFIX + "Steer")
-        at = Vector((survey.front_axle.x, survey.front_axle.y, base.z)) + survey.forward * survey.length * 0.15
+        at = Vector((survey.front_axle.x, survey.front_axle.y, base.z))
         steer.head, steer.tail = at, at + Vector((0.0, 0.0, survey.length * 0.15))
         steer.roll, steer.parent, steer.use_deform = 0.0, drive, False
         steer_name = steer.name
@@ -211,13 +232,32 @@ def create(obj):
     for name, visible in zip(ours, (True, True, False, False)):
         collections[name] = armature.collections.get(name) or armature.collections.new(name)
         collections[name].is_visible = visible
-    size = survey.length
-    _shape(pose[PREFIX + "Main"], "CTRL_Root", "THEME09", size * 0.7)
-    _shape(pose[PREFIX + "Drive"], "CTRL_Box", "THEME04", size * 0.25)
+    from .creature_rig import align_shape, sized
+    from . import rig_shapes
+    up, forward, left = Vector((0.0, 0.0, 1.0)), survey.forward, survey.left
+    length, width, height = survey.length, survey.width, survey.height
+    main = pose[PREFIX + "Main"]
+    sized(main, "CTRL_Root", "THEME09", max(length, width) * 1.2, wire=3.0)
+    align_shape(obj, main, y=up)                                    # a ring on the ground around it
+    rig_shapes.place(obj, main, survey.centre)
+    drive = pose[PREFIX + "Drive"]
+    sized(drive, "CTRL_Box", "THEME04", 0.1)
+    drive.custom_shape = rig_shapes.ensure("CR_Arrow")
+    drive.custom_shape_scale_xyz = (width * 0.9, length * 0.3, 1.0)
+    align_shape(obj, drive, x=-left, y=forward, z=up)               # an arrow on the ground off its nose
+    rig_shapes.place(obj, drive, survey.centre + forward * (survey.nose - survey.centre.dot(forward) + length * 0.06))
     collections["Vehicle Controls"].assign(armature.bones[PREFIX + "Main"])
     collections["Vehicle Controls"].assign(armature.bones[PREFIX + "Drive"])
     if steer_name:
-        _shape(pose[steer_name], "CTRL_Pole", "THEME01", size * 0.08)
+        # an arc around the front axle, out past the nose at bonnet height, arrows at its ends
+        steer = pose[steer_name]
+        axle = obj.data.bones[steer_name].head_local
+        radius = max(survey.nose - axle.dot(forward) + length * 0.04, width * 0.62)
+        sized(steer, "CTRL_Box", "THEME01", 0.1, wire=3.0)
+        steer.custom_shape = rig_shapes.ensure("CR_Turn")
+        steer.custom_shape_scale_xyz = (radius, radius, radius)
+        align_shape(obj, steer, x=-left, y=forward, z=up)
+        rig_shapes.place(obj, steer, axle + up * height * 0.45)
         collections["Vehicle Controls"].assign(armature.bones[steer_name])
     for name in armature.bones.keys():
         if name.startswith(PREFIX):
@@ -225,12 +265,18 @@ def create(obj):
         bone = armature.bones[name]
         if name in survey.wheel_chains:
             collections["Vehicle Wheels"].assign(bone)
-        elif HELPER.search(name) or name == survey.root:
-            collections["Vehicle Other"].assign(bone)
-        else:
+        elif name.lower() == "body":
+            # a box around the vehicle: lean, pitch and bounce it
             collections["Vehicle Parts"].assign(bone)
-            big = name.lower() in ("body", "frame")
-            _shape(pose[name], "CTRL_Box", "THEME09" if big else "THEME02", size * (0.45 if big else 0.06))
+            sized(pose[name], "CTRL_Box", "THEME09", 1.0, wire=2.0)
+            pose[name].custom_shape_scale_xyz = (length * 10.4, width * 10.4, height * 10.4)
+            align_shape(obj, pose[name], x=forward, y=left, z=up)
+            rig_shapes.place(obj, pose[name], survey.centre + up * height * 0.5)
+        elif PART.search(name) and not HELPER.search(name):
+            collections["Vehicle Parts"].assign(bone)
+            sized(pose[name], "CTRL_Box", "THEME02", survey.length * 0.06)
+        else:
+            collections["Vehicle Other"].assign(bone)
     armature[KEY] = True
     bpy.ops.object.mode_set(mode='OBJECT')
     attached = _attach(obj, survey, radii)

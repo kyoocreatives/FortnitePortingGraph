@@ -159,6 +159,35 @@ def _shape(pose_bone, shape, palette, scale=1.0, by_length=True, wire=2.0):
     pose_bone.custom_shape_wire_width = wire
 
 
+# the control shapes' own sizes (Blender units), to size them in metres
+NATIVE = {"CTRL_Root": 1.0, "CTRL_Spine": 0.231, "CTRL_Box": 0.1, "CTRL_Pole": 0.1, "CTRL_Pole_Leg": 0.103, "CTRL_Dynamic": 1.175}
+
+
+def sized(pose_bone, shape, palette, size, wire=2.5):
+    """A control's shape, `size` metres across."""
+    _shape(pose_bone, shape, palette, size / NATIVE.get(shape, 0.1), by_length=False, wire=wire)
+
+
+def align_shape(obj, pose_bone, x=None, y=None, z=None):
+    """Turn a control's shape so its axes point where asked (armature space; a ring's plane is its XZ,
+    so y=up lays it flat). Axes not given are completed to a right-handed frame."""
+    from mathutils import Matrix
+    axes = [x, y, z]
+    if axes.count(None) == 2:       # one given: any frame with it
+        i = next(i for i in range(3) if axes[i] is not None)
+        a = axes[i].normalized()
+        other = Vector((1, 0, 0)) if abs(a.x) < 0.9 else Vector((0, 1, 0))
+        b = a.cross(other).normalized()
+        axes = [None] * 3
+        axes[i], axes[(i + 1) % 3], axes[(i + 2) % 3] = a, b, a.cross(b)
+    elif None in axes:
+        i = axes.index(None)
+        axes[i] = axes[(i + 1) % 3].cross(axes[(i + 2) % 3])
+    want = Matrix([axes[0], axes[1], axes[2]]).transposed()      # columns: the shape's axes in armature space
+    rest = obj.data.bones[pose_bone.name].matrix_local.to_3x3()
+    pose_bone.custom_shape_rotation_euler = (rest.inverted() @ want).to_euler()
+
+
 def _palette(name, centre="THEME09"):
     side = side_of(name)
     return "THEME01" if side == "R" else "THEME04" if side == "L" else centre
@@ -215,58 +244,84 @@ def create(obj):
         poles[leg.name] = _pole_angle(base, foot.head, location)
     bpy.ops.object.mode_set(mode='POSE')
 
-    ours = ("Creature Controls", "Creature Face", "Creature Other")
+    ours = ("Creature Controls", "Creature Face", "Creature Leg FK", "Creature Other")
     for collection in armature.collections:
         if collection.name not in ours:
             collection.is_visible = False       # (the import's own: the rig's say what shows)
     controls = _collection(armature, "Creature Controls")
     face = _collection(armature, "Creature Face")
+    leg_fk = _collection(armature, "Creature Leg FK", visible=False)    # (IK drives them: shown to key FK)
     others = _collection(armature, "Creature Other", visible=False)
     pose = obj.pose.bones
 
-    def show(name, collection, shape, palette, factor=1.0):
-        """A control's shape, sized by its bone (a bone of a centimetre - a LEGO pelvis - by the creature)."""
+    from . import rig_shapes
+    h = survey.height
+    up = Vector((0.0, 0.0, 1.0))
+    # where it faces: from its pelvis to its head, on the ground (else the armature's -Y, UE's forward)
+    forward = Vector((0.0, -1.0, 0.0))
+    if survey.head and survey.pelvis:
+        towards = armature.bones[survey.head].head_local - armature.bones[survey.pelvis].head_local
+        towards.z = 0.0
+        if towards.length > 1e-6:
+            forward = towards.normalized()
+
+    def show(name, collection, shape, palette, size):
+        """A control's shape, `size` metres across (a creature's own scale: a LEGO pelvis is a centimetre long)."""
         if name not in pose:
             return
-        bone = armature.bones[name]
-        _shape(pose[name], shape, palette, max(bone.length, 0.08 * survey.height) * factor, by_length=False)
-        collection.assign(bone)
+        sized(pose[name], shape, palette, size)
+        collection.assign(armature.bones[name])
 
     for name in armature.bones.keys():
         others.assign(armature.bones[name])
     if survey.root:
-        show(survey.root, controls, "CTRL_Root", "THEME09")
-        pose[survey.root].custom_shape_scale_xyz = (survey.height * 0.6,) * 3
+        show(survey.root, controls, "CTRL_Root", "THEME09", h * 1.3)
+        align_shape(obj, pose[survey.root], y=up)        # flat on the ground
     for name in survey.spine:
-        show(name, controls, "CTRL_Spine", "THEME09", 1.2)
+        show(name, controls, "CTRL_Spine", "THEME09", h * (0.3 if name != survey.head else 0.22))
     if survey.pelvis in pose:
-        show(survey.pelvis, controls, "CTRL_Box", "THEME09", 1.5)
+        show(survey.pelvis, controls, "CTRL_Spine", "THEME09", h * 0.45)
+        align_shape(obj, pose[survey.pelvis], y=up)
     # the bones between the spine and a limb or the tail (a hips bone the rear legs hang from)
     spine = set(survey.spine)
     for root in [l.bones[0] for l in survey.limbs if l.kind != "face"] + survey.tail[:1]:
         at = armature.bones[root].parent
         while at is not None and at.name not in spine and side_of(at.name) == "C":
-            show(at.name, controls, "CTRL_Box", "THEME09", 1.0)
+            show(at.name, controls, "CTRL_Spine", "THEME09", h * 0.3)
             at = at.parent
-    for name in survey.tail:
-        show(name, controls, "CTRL_Box", "THEME09", 0.5)
+    for i, name in enumerate(survey.tail):
+        show(name, controls, "CTRL_Spine", "THEME09", h * max(0.14 - 0.012 * i, 0.06))
+    ik_driven = {n for leg in legs for n in leg.chain + [leg.foot]}
     for limb in survey.limbs:
         target = face if limb.kind == "face" else controls
         for name in limb.bones:
-            show(name, target, "CTRL_Box", _palette(name), 0.4 if limb.kind == "face" else 0.5)
+            if name in ik_driven:
+                show(name, leg_fk, "CTRL_Spine", _palette(name), h * (0.07 if name == limb.foot else 0.11))
+                continue
+            if limb.kind == "face":
+                show(name, target, "CTRL_Box", _palette(name, "THEME02"), h * 0.035)
+            else:
+                show(name, target, "CTRL_Spine", _palette(name), h * (0.07 if name == limb.foot or name in limb.bones[-2:] else 0.11))
     if survey.head:
         for child in armature.bones[survey.head].children_recursive:
             if child.name not in pose or HELPER.search(child.name) or any(child.name in l.bones for l in survey.limbs):
                 continue
-            show(child.name, face, "CTRL_Box", _palette(child.name, "THEME02"), 0.4)
+            show(child.name, face, "CTRL_Box", _palette(child.name, "THEME02"), h * 0.035)
 
     for leg in legs:
         prop = "ik_" + leg.name
         obj[prop] = 1.0
         obj.id_properties_ui(prop).update(min=0.0, max=1.0, description="IK on this leg (0: FK, as an animation plays it)")
         target_name, pole_name = PREFIX + "IK_" + leg.foot, PREFIX + "Pole_" + leg.name
-        show(target_name, controls, "CTRL_Box", _palette(leg.foot), 1.2)
-        show(pole_name, controls, "CTRL_Pole", _palette(leg.foot), 0.5)
+        # a footprint on the ground under the foot, facing where the creature does
+        show(target_name, controls, "CTRL_Box", _palette(leg.foot), 0.1)
+        pose[target_name].custom_shape = rig_shapes.ensure("CR_Foot")
+        pose[target_name].custom_shape_scale_xyz = (h * 0.3, h * 0.3, h * 0.3)
+        align_shape(obj, pose[target_name], y=forward, z=up)
+        foot = armature.bones[leg.foot].head_local
+        rig_shapes.place(obj, pose[target_name], Vector((foot.x, foot.y, survey.ground)))
+        pose[target_name].custom_shape_wire_width = 3.5
+        show(pole_name, controls, "CTRL_Pole_Leg", _palette(leg.foot), h * 0.08)
         # on the foot, its head the chain's tip: a reoriented bone's tail needn't meet its child's head
         ik = pose[leg.foot].constraints.new('IK')
         ik.name = "CR IK"
