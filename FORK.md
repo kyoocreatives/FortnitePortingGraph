@@ -151,7 +151,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   (root > frame > body; each wheel under a differential: axle_pivot > steering_knuckle >
   wheel_steering > wheel_disc > tire; a tank's road_wheel > rot_road_wheel), read by name with
   fallbacks on position. The controls (fit to the vehicle's meshes, own colours):
-  - CR_Main, a ring on the ground: places and turns it;
+  - CR_Main, the vehicle's footprint on the ground (a rounded rectangle its meshes' size, a chevron
+    at its front): places and turns it;
   - CR_Drive, an arrow off the nose, moved along its Y: every wheel's topmost spinning bone turns by
     the distance over its radius about its axle (a Transformation constraint, extrapolated);
   - CR_Drift, an arc behind it, turned about the front axle: the root follows it (Child Of), the
@@ -161,15 +162,21 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     axis, the cockpit's steering wheel three times as much, within 60 degrees;
   - CR_Body, a slab over the roof: moves and tilts the body (Copy Transforms from a bone under it),
     the wheels - on the frame - staying put;
-  - CR_Wheel_<bone>, a ring on each wheel: up/down lifts the wheel's chain (a bump), about its axle
-    turns it (a wheelspin). The body rises, pitches and rolls with the plane through the rings
-    (least squares, linear in the lifts: simple-expression drivers on CR_Suspension, under
-    CR_Body; a tank's corner wheels), and rolls out of a turn (Lean in Turns, off by default).
+  - CR_Wheel_<bone>, a ring on each wheel: up/down lifts the wheel (a bump), about its axle turns
+    it (a wheelspin);
+  - Ground (the Rig panel; the armature object's `fpmp_ground`): a mesh the wheels follow - each
+    has a sensor (CR_Ground_<bone>, its ring's parent) projected onto it along world Z both ways
+    (a Shrinkwrap, muted with no ground). A wheel's height is its ring's lift and its ground's;
+    the whole vehicle (its root's Child Of is CR_Suspension) rises by their mean, pitches and
+    rolls with the least-squares plane through them (simple-expression drivers, linear in the
+    heights, asin of the slope; a tank's corner wheels), and each wheel's chain takes what's left
+    (CR_Lift_<bone>, driven; on a flat or sloping ground, nothing). Body Follows Wheels scales it;
+    Lean in Turns (off by default) rolls the body out of a turn (CR_Lean, under it).
   The parts that move vertices (a turret, guns, a hatch, a tailgate, mirrors: names, weighted over
   half) get a box around what they move; the rest - the wheels' bones, the mechanism, the game's
   helpers - is hidden. A Rocket Racing car's wheels (an armature each, parented to the body's
   object) are put on their hub's spinning bone and hidden (their bones), other loose parts on the
-  body. Sliders: Wheels Spin, Wheels Steer, Counter-steer, Body Follows Wheels, Lean in Turns.
+  body. Panel: Ground; sliders Wheels Spin, Wheels Steer, Counter-steer, Body Follows Wheels, Lean in Turns.
 - **Animations tab.** Assets > Gameplay > Animations lists the game's 69,600 animations (sequences
   and montages), which the cooked registry mostly leaves out (2,248, nearly all islands'): found by
   path (an animation folder, "anim" or "montage" in the name: 133,000 packages of 2 million), each

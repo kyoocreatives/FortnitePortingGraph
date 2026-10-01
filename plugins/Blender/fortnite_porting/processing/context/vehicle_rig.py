@@ -4,7 +4,7 @@ suspension. Fortnite's vehicles share a layout - root > frame > body, and each w
 differential: axle_pivot > steering_knuckle > wheel_steering > wheel_disc > tire (a tank's
 road_wheel > rot_road_wheel) - which the rig reads by name, with fallbacks on position:
 
-- CR_Main places and turns the vehicle; CR_Drive (under it, an arrow off the nose) is moved forward
+- CR_Main (its footprint on the ground) places and turns the vehicle; CR_Drive (under it, an arrow off the nose) is moved forward
   along its own axis to drive: every wheel spins by the distance over its radius (a Transformation
   constraint: driving a metre turns a wheel 1/r radians);
 - CR_Drift (an arc behind the vehicle) turns about the front axle: the vehicle follows it (the root's
@@ -13,8 +13,10 @@ road_wheel > rot_road_wheel) - which the rig reads by name, with fallbacks on po
 - CR_Steer (an arc around the front axle) turns the front wheels, the cockpit's steering wheel three
   times as much;
 - CR_Body (a slab over the roof) moves and tilts the body on its suspension, the wheels staying put;
-- a ring on each wheel (CR_Wheel_<bone>) lifts the wheel (a bump) - the body pitches and rolls with
-  the wheels' plane (and leans out of a turn) - and turns it by hand (a wheelspin);
+- a ring on each wheel (CR_Wheel_<bone>) lifts the wheel (a bump) and turns it by hand (a
+  wheelspin); with a Ground (the armature object's), each wheel follows it too. The vehicle rises,
+  pitches and rolls with the wheels' plane, each wheel taking what's left (the body leans out of a
+  turn, if asked);
 - the parts that move something (a turret, doors, a tailgate, mirrors) get a box around what they
   move. The original bones keep their names, rest pose and hierarchy."""
 
@@ -205,6 +207,26 @@ def _signed(way, expression):
     return ("-(%s)" if way < 0 else "%s") % expression
 
 
+def _ground_changed(self, context):
+    """The armature object's Ground: its wheels' sensors project onto it (none: they stay put)."""
+    ground = self.fpmp_ground
+    for bone in getattr(self.pose, "bones", ()):
+        for con in bone.constraints:
+            if con.name == "CR Ground":
+                con.target = ground
+                con.mute = ground is None
+
+
+def register():
+    bpy.types.Object.fpmp_ground = bpy.props.PointerProperty(
+        type=bpy.types.Object, name="Ground", update=_ground_changed, poll=lambda self, o: o.type == 'MESH',
+        description="The mesh a vehicle rig's wheels follow (its terrain, a road)")
+
+
+def unregister():
+    del bpy.types.Object.fpmp_ground
+
+
 def _parts(obj, meshes, inverse):
     """The points (armature space) each part bone moves - its vertices weighted over half to it."""
     points = {}
@@ -272,19 +294,36 @@ def create(obj):
     reach = max(pivot.dot(forward) - survey.tail_end, length * 0.3)
     drift = new("Drift", pivot, pivot - forward * reach, drive)          # Y backwards: it swings the rear
     steer = new("Steer", pivot, pivot + up * length * 0.15, drift) if survey.steering and front is not None else None
-    middle = survey.centre + up * hub
+    where = {n: (survey.bones[n].head.dot(forward), survey.bones[n].head.dot(left)) for n in survey.wheels}
+    # the wheels the vehicle's plane goes through (a tank's: its corners)
+    plane = list(survey.wheels)
+    if len(plane) > PLANE_WHEELS:
+        corner = lambda k: max(plane, key=lambda n: k[0] * where[n][0] + k[1] * where[n][1])
+        plane = list(dict.fromkeys(corner(k) for k in ((1, 1), (1, -1), (-1, 1), (-1, -1))))
+    # the suspension (the vehicle's root follows it) turns about the plane wheels' middle, at their hubs
+    if plane:
+        mean_a = sum(where[w][0] for w in plane) / len(plane)
+        mean_s = sum(where[w][1] for w in plane) / len(plane)
+        middle = forward * mean_a + left * mean_s
+        middle.z = base.z + hub
+    else:
+        middle = survey.centre + up * hub
     suspension = new("Suspension", middle, middle + forward * length * 0.3, drift)
+    lean = new("Lean", middle, middle + forward * length * 0.3, suspension)
     body = next((b for b in edit if b.name.lower() == "body"), None)
-    body_control = new("Body", middle, middle + forward * length * 0.3, suspension) if body else None
+    body_control = new("Body", middle, middle + forward * length * 0.3, lean) if body else None
     if body:
         follow = new("Body_Follow", body.head, body.tail, body_control)  # the body where it rests, under CR_Body
         follow.roll = body.roll
-    controls = {}                   # wheel: (its control's name, which way it points: +1 left, -1 right)
+    controls = {}                   # wheel: its ring, ground sensor, lift; which way it points (+1 left)
     for name in survey.wheels:
         at = survey.bones[name].head.copy()
         out = 1.0 if (at - survey.centre).dot(left) >= 0 else -1.0
-        bone = new("Wheel_" + name, at, at + left * out * radii[name] * 0.6, drift)
-        controls[name] = (bone.name, out)
+        under = Vector((at.x, at.y, base.z))
+        sensor = new("Ground_" + name, under, under + left * out * radii[name] * 0.6, drift)
+        ring = new("Wheel_" + name, at, at + left * out * radii[name] * 0.6, sensor)
+        lift = new("Lift_" + name, at, at + left * out * radii[name] * 0.3, drift)
+        controls[name] = (ring.name, sensor.name, lift.name, out)
     # the local axes each needs: which is up, across, forward (letter and sign)
     axes = {b.name: {"up": _axis(b.matrix, up), "left": _axis(b.matrix, left), "forward": _axis(b.matrix, forward)}
             for b in edit if b.name.startswith(PREFIX)}
@@ -293,36 +332,45 @@ def create(obj):
     spins = {n: _axis(edit[n].matrix, left) for n in survey.wheels}
     turns = {n: _axis(edit[n].matrix, up) for n in survey.steering}
     cockpits = {n: _axis(edit[n].matrix, -forward) for n in survey.cockpit}
-    where = {n: (survey.bones[n].head.dot(forward), survey.bones[n].head.dot(left)) for n in survey.wheels}
     names = {k: (b.name if b is not None else None) for k, b in (
-        ("drive", drive), ("drift", drift), ("steer", steer), ("suspension", suspension), ("body", body_control))}
+        ("drive", drive), ("drift", drift), ("steer", steer), ("suspension", suspension), ("lean", lean),
+        ("body", body_control))}
     body_name = body.name if body else None
     bpy.ops.object.mode_set(mode='POSE')
     pose = obj.pose.bones
     view_layer.update()
 
-    # the vehicle follows CR_Drift (its root, from where it is at rest)
+    # the vehicle follows CR_Suspension (its root, from where it is at rest): drifting, on its wheels
     follow = pose[survey.root].constraints.new('CHILD_OF')
     follow.name = "CR Follow"
-    follow.target, follow.subtarget = obj, names["drift"]
-    follow.inverse_matrix = (obj.matrix_world @ pose[names["drift"]].matrix).inverted()
+    follow.target, follow.subtarget = obj, names["suspension"]
+    follow.inverse_matrix = (obj.matrix_world @ pose[names["suspension"]].matrix).inverted()
 
     _property(obj, "auto_wheels", 1.0, "The wheels spin as CR_Drive moves forward")
     _property(obj, "auto_steer", 1.0, "The front wheels and the steering wheel turn with CR_Steer")
     _property(obj, "countersteer", 1.0, "The front wheels turn against CR_Drift, pointing where the vehicle drives")
-    _property(obj, "suspension", 1.0, "The body pitches and rolls with the wheels' rings, lifted")
+    _property(obj, "suspension", 1.0, "The vehicle rises, pitches and rolls with its wheels (lifted, on the ground)")
     _property(obj, "lean", 0.0, "The body rolls out of a turn as CR_Steer turns")
     for name, (axis, sign) in spins.items():
         # driving forward a metre turns the wheel 1/r radians about its axle (forward roll: about +left)
         con = _transform(pose[name], obj, names["drive"], "Y", axis, sign / radii[name], 'LOCATION')
         _driven(obj, con, "auto_wheels")
         # its ring turns it too (about the ring's Y, outwards)
-        control, out = controls[name]
-        _transform(pose[name], obj, control, "Y", axis, sign * out, 'ROTATION', name="CR Spin")
-        # and lifts it, with its chain from the differential down
-        letter, way = axes[control]["up"]
+        ring, sensor, lift, out = controls[name]
+        _transform(pose[name], obj, ring, "Y", axis, sign * out, 'ROTATION', name="CR Spin")
+        # and lifts it, with its chain from the differential down, off the vehicle's plane
+        letter, way = axes[lift]["up"]
         top_letter, top_way = top_up[tops[name]]
-        _moved(pose[tops[name]], obj, control, letter, top_letter, way * top_way, "CR Lift")
+        _moved(pose[tops[name]], obj, lift, letter, top_letter, way * top_way, "CR Lift")
+        # the ground under it, once there is one (the armature object's Ground)
+        con = pose[sensor].constraints.new('SHRINKWRAP')
+        con.name = "CR Ground"
+        con.shrinkwrap_type = 'PROJECT'
+        con.project_axis, con.project_axis_space = 'NEG_Z', 'WORLD'
+        con.use_project_opposite = True             # (a hill above it too)
+        con.project_limit = max(height * 2.0, 1.0)
+        con.target = getattr(obj, "fpmp_ground", None)
+        con.mute = con.target is None
     drift_letter, drift_way = axes[names["drift"]]["up"]
     for name, (axis, sign) in list(turns.items()) + [(n, (a, s * COCKPIT_RATIO)) for n, (a, s) in cockpits.items()]:
         if names["steer"]:
@@ -343,51 +391,72 @@ def create(obj):
     pose[names["drive"]].lock_location = (True, False, True)      # it drives along its own axis
     pose[names["drift"]].lock_location = (True, True, True)       # it turns about the front axle
     pose[names["drift"]].lock_rotation = tuple(letter != drift_letter for letter in "XYZ")
-    for name, (control, out) in controls.items():
-        letter = axes[control]["up"][0]
-        pose[control].lock_location = tuple(a != letter for a in "XYZ")    # up and down
-        pose[control].lock_rotation = (True, False, True)                  # about its axle
+    for name, (ring, sensor, lift, out) in controls.items():
+        letter = axes[ring]["up"][0]
+        pose[ring].lock_location = tuple(a != letter for a in "XYZ")       # up and down
+        pose[ring].lock_rotation = (True, False, True)                     # about its axle
 
-    # the suspension: it rises by the wheels' mean lift, pitches and rolls with the plane through them
-    # (least squares: linear in the lifts), rolls out of a turn
-    wheels = list(survey.wheels)
-    if len(wheels) > PLANE_WHEELS:
-        corners = lambda k: max(wheels, key=lambda n: k[0] * where[n][0] + k[1] * where[n][1])
-        wheels = list(dict.fromkeys(corners(k) for k in ((1, 1), (1, -1), (-1, 1), (-1, -1))))
-    if wheels:
-        lifts, variables = [], []
-        for i, name in enumerate(wheels):
-            control = controls[name][0]
-            letter, way = axes[control]["up"]
-            variables.append(("w%d" % i, control, "LOC_" + letter))
-            lifts.append(("w%d" % i, way))
-        variables.append(("f", "suspension"))
-        n = len(wheels)
-        mean_a = sum(where[w][0] for w in wheels) / n
-        mean_s = sum(where[w][1] for w in wheels) / n
-        spread_a = sum((where[w][0] - mean_a) ** 2 for w in wheels)
-        spread_s = sum((where[w][1] - mean_s) ** 2 for w in wheels)
-        rise = [(v, way / n) for v, way in lifts]
-        pitch = [(v, way * (where[w][0] - mean_a) / spread_a) for (v, way), w in zip(lifts, wheels)] if spread_a > 1e-4 else []
-        roll = [(v, way * (where[w][1] - mean_s) / spread_s) for (v, way), w in zip(lifts, wheels)] if spread_s > 1e-4 else []
+    # the suspension: each wheel's height is its ring's lift and its ground's; the vehicle rises by their
+    # mean, pitches and rolls with the plane through them (least squares: linear in the heights), and
+    # each wheel takes what's left (on a flat or sloping ground, nothing)
+    if plane:
+        index = {n: i for i, n in enumerate(survey.wheels)}
+
+        def height_of(name):
+            i = index[name]
+            ring, sensor = controls[name][0], controls[name][1]
+            (r_letter, r_way), (s_letter, s_way) = axes[ring]["up"], axes[sensor]["up"]
+            variables = [("w%d" % i, ring, "LOC_" + r_letter), ("g%d" % i, sensor, "LOC_" + s_letter)]
+            return "(%sw%d%sg%d)" % ("-" if r_way < 0 else "", i, "-" if s_way < 0 else "+", i), variables
+
+        n = len(plane)
+        spread_a = sum((where[w][0] - mean_a) ** 2 for w in plane)
+        spread_s = sum((where[w][1] - mean_s) ** 2 for w in plane)
+        heights = {w: height_of(w) for w in survey.wheels}
+        plane_variables = [v for w in plane for v in heights[w][1]] + [("f", "suspension")]
+
+        def through(coefficient):
+            return _sum([(heights[w][0], coefficient(w)) for w in plane])
+
         bone = pose[names["suspension"]]
         bone.rotation_mode = 'XYZ'
         letter, way = axes[names["suspension"]]["up"]
-        _drive_channel(obj, bone, "location", "XYZ".index(letter), _signed(way, "(%s)*f" % _sum(rise)), variables)
-        if pitch:
+        _drive_channel(obj, bone, "location", "XYZ".index(letter), _signed(way, "(%s)*f" % through(lambda w: 1.0 / n)), plane_variables)
+        clamp = "asin(min(1,max(-1,%s)))*f"   # (a slope's sine: a wheel a metre ahead rises by the slope)
+        if spread_a > 1e-4:
             # nose up when the front is higher: about +left, that's negative
             letter, way = axes[names["suspension"]]["left"]
-            _drive_channel(obj, bone, "rotation_euler", "XYZ".index(letter), _signed(-way, "atan(%s)*f" % _sum(pitch)), variables)
-        lean = ""
-        lean_variables = []
-        if names["steer"]:
-            lean = "+%g*l*st" % LEAN          # a left turn (+ about up) rolls the body right: its left up
-            lean_variables = [("l", "lean"), ("st", names["steer"], "ROT_Y")]
-        if roll or lean:
+            _drive_channel(obj, bone, "rotation_euler", "XYZ".index(letter),
+                           _signed(-way, clamp % through(lambda w: (where[w][0] - mean_a) / spread_a)), plane_variables)
+        if spread_s > 1e-4:
             # its left up when the left is higher: about +forward, that's positive
             letter, way = axes[names["suspension"]]["forward"]
-            expression = _signed(way, "atan(%s)*f%s" % (_sum(roll), lean))
-            _drive_channel(obj, bone, "rotation_euler", "XYZ".index(letter), expression, variables + lean_variables)
+            _drive_channel(obj, bone, "rotation_euler", "XYZ".index(letter),
+                           _signed(way, clamp % through(lambda w: (where[w][1] - mean_s) / spread_s)), plane_variables)
+        for name in survey.wheels:
+            # what the plane leaves the wheel: its height less the plane's there
+            a, s = where[name]
+
+            def at_wheel(w):
+                value = 1.0 / n
+                if spread_a > 1e-4:
+                    value += (a - mean_a) * (where[w][0] - mean_a) / spread_a
+                if spread_s > 1e-4:
+                    value += (s - mean_s) * (where[w][1] - mean_s) / spread_s
+                return value
+
+            lift = controls[name][2]
+            letter, way = axes[lift]["up"]
+            own, variables = heights[name]
+            _drive_channel(obj, pose[lift], "location", "XYZ".index(letter),
+                           _signed(way, "%s-f*(%s)" % (own, through(at_wheel))),
+                           list({v[0]: v for v in variables + plane_variables}.values()))
+    if names["steer"]:
+        # a left turn (+ about up) rolls the body right: its left up - about +forward, positive
+        letter, way = axes[names["lean"]]["forward"]
+        pose[names["lean"]].rotation_mode = 'XYZ'
+        _drive_channel(obj, pose[names["lean"]], "rotation_euler", "XYZ".index(letter),
+                       _signed(way, "%g*l*st" % LEAN), [("l", "lean"), ("st", names["steer"], "ROT_Y")])
     if body_name:
         # the body where CR_Body has it (the wheels, on the frame, stay)
         copy = pose[body_name].constraints.new('COPY_TRANSFORMS')
@@ -407,8 +476,10 @@ def create(obj):
     centre = survey.centre
 
     main = pose[PREFIX + "Main"]
-    sized(main, "CTRL_Root", "THEME09", max(length, width) * 1.2, wire=3.0)
-    align_shape(obj, main, y=up)                                    # a ring on the ground around it
+    sized(main, "CTRL_Box", "THEME09", 0.1, wire=3.0)
+    # the vehicle's footprint, a chevron at its front
+    main.custom_shape = rig_shapes.footprint(PREFIX + "Footprint_" + obj.name, length * 1.03, width * 1.03)
+    align_shape(obj, main, x=-left, y=forward, z=up)
     rig_shapes.place(obj, main, centre)
     rig_shapes.color(main, COLORS["main"])
     drive = pose[names["drive"]]
@@ -449,7 +520,7 @@ def create(obj):
         shown.append(names["body"])
     for name in shown:
         collections["Vehicle Controls"].assign(armature.bones[name])
-    for name, (control, out) in controls.items():
+    for name, (control, sensor, lift, out) in controls.items():
         # a ring on the wheel's outer side
         ring = pose[control]
         sized(ring, "CTRL_Spine", "THEME02", radii[name] * 2.3, wire=2.5)

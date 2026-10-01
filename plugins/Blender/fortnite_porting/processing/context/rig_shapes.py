@@ -72,3 +72,27 @@ def color(pose_bone, rgb):
     pose_bone.color.custom.normal = rgb
     pose_bone.color.custom.select = tuple(min(1.0, c * 0.5 + 0.5) for c in rgb)
     pose_bone.color.custom.active = (1.0, 1.0, 1.0)
+
+
+def footprint(name, length, width):
+    """A vehicle's footprint, `length` along Y and `width` across, its corners rounded, a chevron at
+    its front: built to its size (rounded corners don't scale)."""
+    hx, hy = width / 2.0, length / 2.0
+    r, steps = min(width, length) * 0.18, 6
+    verts = []
+    for cx, cy, start in ((hx - r, hy - r, 0.0), (r - hx, hy - r, 90.0), (r - hx, r - hy, 180.0), (hx - r, r - hy, 270.0)):
+        for i in range(steps + 1):
+            a = radians(start + 90.0 * i / steps)
+            verts.append((cx + r * cos(a), cy + r * sin(a), 0.0))
+    edges = [(i, (i + 1) % len(verts)) for i in range(len(verts))]
+    tip, wing = hy - length * 0.05, hy - length * 0.13
+    verts += [(-width * 0.18, wing, 0.0), (0.0, tip, 0.0), (width * 0.18, wing, 0.0)]
+    n = len(verts)
+    edges += [(n - 3, n - 2), (n - 2, n - 1)]
+    obj = bpy.data.objects.get(name)
+    mesh = bpy.data.meshes.new(name)
+    mesh.from_pydata(verts, edges, [])
+    if obj is None or obj.type != 'MESH':
+        return bpy.data.objects.new(name, mesh)
+    obj.data = mesh
+    return obj

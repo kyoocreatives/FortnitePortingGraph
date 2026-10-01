@@ -240,6 +240,7 @@ class FPMP_PT_CreatureRig(bpy.types.Panel):
         if obj.data.get("is_vehicle_rig"):
             # arrow: move forward; arcs: rotate; roof slab: move/tilt; wheel rings: lift/turn
             col.label(text="Drive: arrow. Steer, drift: arcs. Body: roof")
+            col.prop(obj, "fpmp_ground", text="Ground")             # the wheels follow it
             col.prop(obj, '["auto_wheels"]', text="Wheels Spin", slider=True)
             col.prop(obj, '["auto_steer"]', text="Wheels Steer", slider=True)
             for key, text in (("countersteer", "Counter-steer"), ("suspension", "Body Follows Wheels"), ("lean", "Lean in Turns")):
@@ -281,10 +282,14 @@ classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_OT_ReplayEffect, FPMP_
 
 
 def register():
+    from ..processing.context import vehicle_rig
     for c in classes:
         bpy.utils.register_class(c)
+    vehicle_rig.register()          # (the armature object's Ground)
 
 
 def unregister():
+    from ..processing.context import vehicle_rig
+    vehicle_rig.unregister()
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
