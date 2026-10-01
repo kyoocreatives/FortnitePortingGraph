@@ -2423,9 +2423,20 @@ class Translator:
             v = P("Value")
             return self.stand_in("%s as 1e-4" % t, self.const(0.0001) if v.w == 1 else self.const((0.0001,) * 3, v.w))
         if t == "DepthFade":
-            # soft-particle fade against the scene's depth: far from any surface
-            return self.stand_in("DepthFade as its opacity", self.input(
-                g, p.get("InOpacity"), scope, self.const(float(p.get("InOpacityDefault", 1.0)))))
+            # soft-particle fade against the scene's depth: InOpacity x saturate((scene depth - pixel
+            # depth) / FadeDistance). A material reads no scene depth here; where the env knows how far
+            # the surface behind is (env.depth_behind(): cm, and whether it's known - an effect's mesh
+            # on a character, measured at import) it fades by that, else not at all
+            opacity = self.input(g, p.get("InOpacity"), scope, self.const(float(p.get("InOpacityDefault", 1.0))))
+            behind = getattr(self.env, "depth_behind", None)
+            got = behind() if behind is not None else None
+            if got is None:
+                return self.stand_in("DepthFade as its opacity", opacity)
+            distance, known = got
+            fade = self.input(g, p.get("FadeDistance"), scope, self.const(float(p.get("FadeDistanceDefault", 100.0))))
+            near = self.saturate(self.binop('DIVIDE', distance, fade, label="depth fade"))
+            factor = self.math('ADD', self.const(1.0), self.math('MULTIPLY', self.math('SUBTRACT', near, self.const(1.0)), known))
+            return self.binop('MULTIPLY', opacity, factor, label="depth fade")
         if t == "SceneDepth":
             return self.stand_in("SceneDepth as far (1e6)", self.const(1e6))
         if t == "SceneDepthWithoutWater":

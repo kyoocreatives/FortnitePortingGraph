@@ -429,6 +429,24 @@ class MaterialEnv:
         """UE's Particle Speed: how fast a particle moves (mp_velocity's length; 0 where there is none)."""
         return self.tr.vmath('LENGTH', self._particle_attr("mp_velocity")[0], out_w=1)
 
+    def depth_behind(self):
+        """For UE's DepthFade on an effect's piece: how far the surface behind each vertex is (UE cm,
+        mp_depth_behind) and whether that was measured (mp_depth_known: an effect's mesh on a
+        character, effect_replay measures it at import); None for anything else."""
+        if not self.entry.get("particle"):
+            return None
+        tr = self.tr
+
+        def attr(name):
+            def make():
+                with tr.at("Parameters"):
+                    n = tr.node("ShaderNodeAttribute", name)
+                n.attribute_type = 'GEOMETRY'
+                n.attribute_name = name
+                return Val(n.outputs["Fac"], 1)
+            return self.once("attr " + name, make)
+        return attr("mp_depth_behind"), attr("mp_depth_known")
+
     def decal_fade(self):
         """UE's Decal Lifetime Opacity on an effect's decal: its particle's DecalFade (mp_decal_fade; the
         still piece's own property, 1). None for anything else."""
