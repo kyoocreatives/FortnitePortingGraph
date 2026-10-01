@@ -282,7 +282,10 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     ends in a Material Attributes pin keeps its vertices.
   - **Division by zero.** UE's `A / B` with B zero is an infinity of A's sign, which a saturate
     turns into 1 or 0 (a camera fade over a length of 0 shows everything); a Blender Divide gives 0
-    (the glow drew nothing). `Translator.divide` checks a socket divisor as the material runs. A
+    (the glow drew nothing). `Translator.divide` checks a socket divisor as the material runs, a
+    vector's per component (a Sprite's missing mouth: Scale UVs By Center by a scale of 0 pushes the
+    flipbook's UVs off the texture; Blender's 0 drew the mouth's middle cell - black, metallic - over
+    the whole body: Spooky Dash, Vampire Sprite rendered black). A
     SmoothStep over an empty range (Min = Max: a softness of 0.5 taken off both ends) is likewise a
     hard edge at Min, where a Map Range gives 0 (`Translator.smoothstep`: embers drew nothing).
   - **Particle Random** is the particle's own random number (`mp_random`, the renderer's
@@ -445,7 +448,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   Build revision 12: an additive material's light is Emissive * Opacity (it was Emissive alone: a
   flash drew as its whole quad). 13: particle values from the instance, a sprite's sub-image.
   17: a particle material's World Position Offset, UE's division by zero. 18: a SmoothStep over an
-  empty range, Particle Random from the particle. 19: a Niagara decal's colour and fade.
+  empty range, Particle Random from the particle. 19: a Niagara decal's colour and fade. 20: division
+  by zero per component.
 - **Rocket Racing cars.** Assets > Rocket Racing > Cars lists the car bodies.
   Styles (Tier, Body Color, Painted, Decal, Decal Color, Wheels) come from
   Material Porter's car assembly (`Exporting/MaterialPorter/Cars.cs`); the

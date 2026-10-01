@@ -1015,9 +1015,16 @@ class Translator:
                 return self.binop('DIVIDE', a, b, label=label)
             if b.w == 1:
                 return self.binop('MULTIPLY', a, self.const(big), label=label)
+        if b.w == 4:
             return self.binop('DIVIDE', a, b, label=label)
         if b.w != 1:
-            return self.binop('DIVIDE', a, b, label=label)
+            # the same per component (a scale of 0 put through Scale UVs By Center - a sprite's
+            # missing mouth - pushes its UVs off the texture: Blender's 0 drew the mouth's middle
+            # over the whole body): 1 - sign(|B|) is 1 where a component is 0
+            zero = self.vmath('SUBTRACT', self.const(1.0, b.w),
+                              self.vmath('SIGN', self.vmath('ABSOLUTE', b, out_w=b.w), out_w=b.w), out_w=b.w)
+            return self.binop('ADD', self.binop('DIVIDE', a, b, label=label),
+                              self.binop('MULTIPLY', a, self.vmath('MULTIPLY', zero, self.const(big, b.w), out_w=b.w)))
         # (1 where B is exactly 0) * big * A, added to the Divide's 0
         zero = self.math('COMPARE', b, self.const(0.0), self.const(0.0))
         return self.binop('ADD', self.binop('DIVIDE', a, b, label=label),
