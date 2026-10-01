@@ -205,8 +205,26 @@ class FPMP_OT_CreatureRig(bpy.types.Operator):
         return {'FINISHED'}
 
 
+class FPMP_OT_VehicleRig(bpy.types.Operator):
+    """Give the selected armature a vehicle rig: CR_Main places it, CR_Drive moved forward drives it (the
+    wheels spin by the distance), CR_Steer turns the front wheels and the steering wheel"""
+    bl_idname = "fpmp.vehicle_rig"
+    bl_label = "Rig Vehicle"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    @classmethod
+    def poll(cls, context):
+        obj = context.active_object
+        return obj is not None and obj.type == 'ARMATURE' and not obj.data.get("is_vehicle_rig") and not obj.data.get("is_creature_rig") and not obj.data.get("is_tasty")
+
+    def execute(self, context):
+        from ..processing.context.vehicle_rig import create
+        self.report({'INFO'}, create(context.active_object))
+        return {'FINISHED'}
+
+
 class FPMP_PT_CreatureRig(bpy.types.Panel):
-    bl_label = "Creature Rig"
+    bl_label = "Rig"
     bl_idname = "FPMP_PT_creature_rig"
     bl_space_type = 'VIEW_3D'
     bl_region_type = 'UI'
@@ -219,8 +237,14 @@ class FPMP_PT_CreatureRig(bpy.types.Panel):
     def draw(self, context):
         obj = context.active_object
         col = self.layout.column(align=True)
+        if obj.data.get("is_vehicle_rig"):
+            col.label(text="CR_Drive forward: drive; CR_Steer: steer")
+            col.prop(obj, '["auto_wheels"]', text="Wheels Spin", slider=True)
+            col.prop(obj, '["auto_steer"]', text="Wheels Steer", slider=True)
+            return
         if not obj.data.get("is_creature_rig"):
             col.operator(FPMP_OT_CreatureRig.bl_idname)
+            col.operator(FPMP_OT_VehicleRig.bl_idname)
             return
         # each leg's IK (0: FK, as an animation plays it)
         col.label(text="Leg IK (0 to play an animation):")
@@ -249,7 +273,7 @@ class FPMP_PT_Exact(bpy.types.Panel):
         col.operator(FPMP_OT_ReplayEffect.bl_idname, text="Replay Effect")
 
 
-classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_OT_ReplayEffect, FPMP_PT_Exact, FPMP_OT_CreatureRig, FPMP_PT_CreatureRig)
+classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_OT_ReplayEffect, FPMP_PT_Exact, FPMP_OT_CreatureRig, FPMP_OT_VehicleRig, FPMP_PT_CreatureRig)
 
 
 def register():

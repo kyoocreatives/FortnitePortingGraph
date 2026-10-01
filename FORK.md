@@ -141,6 +141,19 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   first bone named foot/ankle/wrist/paw/hoof, else the one above the toe. The rest is FK on the
   original bones, with Tasty's shapes. Each leg's IK is a slider (`ik_<leg>`, 0 to play an
   animation). The original bones keep their names, rest pose and hierarchy.
+- **Vehicle rig.** With the Tasty rig setting on, a vehicle (Vehicles, Rocket Racing cars) gets a rig
+  at import (`processing/context/vehicle_rig.py`); the Rig panel's Rig Vehicle gives one to any
+  selected armature. Fortnite's vehicles share a layout (root > frame > body; each wheel under a
+  differential: axle_pivot > steering_knuckle > wheel_steering > wheel_disc > tire; a tank's
+  road_wheel > rot_road_wheel), read by name with fallbacks on position. CR_Main places and turns
+  it; CR_Drive (its child, moved along its own Y) drives it - the root follows it (Child Of) and
+  every wheel's topmost spinning bone turns by the distance over its radius (its head's height),
+  about its local axis across the vehicle (a Transformation constraint, extrapolated); CR_Steer
+  (on the front axle) turns the front wheel_steering bones about their upright axis, and the
+  cockpit's steering wheel three times as much, within 60 degrees. A Rocket Racing car's wheels
+  (an armature each, parented to the body's object) are put on their hub's spinning bone, other
+  loose parts on the body. The rest are FK parts (turret, guns, doors, hatch); the wheels' bones and
+  the game's helpers (sockets, effect points, seats) are hidden. Sliders: Wheels Spin, Wheels Steer.
 - **Animations tab.** Assets > Gameplay > Animations lists the game's 69,600 animations (sequences
   and montages), which the cooked registry mostly leaves out (2,248, nearly all islands'): found by
   path (an animation folder, "anim" or "montage" in the name: 133,000 packages of 2 million), each
