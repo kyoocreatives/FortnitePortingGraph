@@ -486,6 +486,43 @@ public class MaterialPorterService : IService
                 ["props"] = JToken.Parse(JsonConvert.SerializeObject(e.Properties.ToDictionary(p => p.Name.Text, p => p.Tag?.GenericValue), settings)),
             }));
         }
+        if (route == "fork-emote-census")
+        {
+            // tests: how emotes play effects - each kind of notify their montages (and its sections'
+            // sequences) carry, a Template's class with it (Niagara, Cascade): in how many emotes, which
+            var listing = AppServices.AssetLoading.Get(Enum.Parse<EExportType>(query["type"] ?? "Emote"));
+            await listing.Load();
+            var kinds = new Dictionary<string, (int Count, List<string> Where)>();
+            var emotes = 0;
+            foreach (var item in listing.Source.Items.Select(a => a.CreationData).OfType<Models.Assets.Asset.AssetItemCreationArgs>())
+            {
+                try
+                {
+                    var montage = item.Object.GetOrDefault<global::CUE4Parse.UE4.Assets.Exports.Animation.UAnimMontage?>("Animation")
+                                  ?? item.Object.GetOrDefault<global::CUE4Parse.UE4.Assets.Exports.Animation.UAnimMontage?>("FrontEndAnimation");
+                    if (montage is null) continue;
+                    emotes++;
+                    var notifies = new List<global::CUE4Parse.UE4.Assets.Exports.Animation.FAnimNotifyEvent>(montage.Notifies ?? []);
+                    foreach (var section in montage.CompositeSections)
+                        if (section.LinkedSequence.Load<global::CUE4Parse.UE4.Assets.Exports.Animation.UAnimSequenceBase>() is { } sequence)
+                            notifies.AddRange(sequence.Notifies ?? []);
+                    var seen = new HashSet<string>();
+                    foreach (var notify in notifies)
+                    {
+                        var played = notify.NotifyStateClass?.Load<UObject>() ?? notify.Notify?.Load<UObject>();
+                        if (played is null) continue;
+                        var kind = played.ExportType;
+                        if (played.GetOrDefault<UObject?>("Template") is { } template) kind += " [" + template.ExportType + "]";
+                        if (!seen.Add(kind)) continue;
+                        var k = kinds.TryGetValue(kind, out var got) ? got : (0, []);
+                        if (k.Where.Count < 6) k.Where.Add(item.DisplayName);
+                        kinds[kind] = (k.Count + 1, k.Where);
+                    }
+                }
+                catch (Exception e) { Log.Warning("emote census: {Item}: {Error}", item.Object.Name, e.Message); }
+            }
+            return JToken.FromObject(new { emotes, kinds = kinds.OrderByDescending(k => k.Value.Count).ToDictionary(k => k.Key, k => new { k.Value.Count, k.Value.Where }) });
+        }
         if (route == "fork-effect-census")
         {
             // tests: how the idle effects of a tab's items (?types=Outfit,Backpack: their parts') feed their
