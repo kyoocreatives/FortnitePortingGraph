@@ -430,22 +430,28 @@ class MaterialEnv:
         return self.tr.vmath('LENGTH', self._particle_attr("mp_velocity")[0], out_w=1)
 
     def depth_behind(self):
-        """For UE's DepthFade on an effect's piece: how far the surface behind each vertex is (UE cm,
-        mp_depth_behind) and whether that was measured (mp_depth_known: an effect's mesh on a
-        character, effect_replay measures it at import); None for anything else."""
-        if not self.entry.get("particle"):
+        """For UE's DepthFade and SceneDepth: how far the surface behind this pixel is along the view
+        ray (UE cm) and whether there is one - Blender's Raycast node from the shading point away from
+        the camera (in EEVEE, against the screen's depth: a blended surface leaves it to what is
+        behind). None for an opaque or masked material, which is that surface itself."""
+        asset, over = self.entry.get("asset") or {}, self.entry.get("overrides") or {}
+        blend = str(over.get("BlendMode", asset.get("BlendMode", "")) or "")
+        if not blend or "Opaque" in blend or "Masked" in blend:
             return None
         tr = self.tr
 
-        def attr(name):
-            def make():
-                with tr.at("Parameters"):
-                    n = tr.node("ShaderNodeAttribute", name)
-                n.attribute_type = 'GEOMETRY'
-                n.attribute_name = name
-                return Val(n.outputs["Fac"], 1)
-            return self.once("attr " + name, make)
-        return attr("mp_depth_behind"), attr("mp_depth_known")
+        def make():
+            with tr.at("Parameters"):
+                away = tr.node("ShaderNodeVectorMath", "away from the camera", operation='SCALE')
+                away.inputs["Scale"].default_value = -1.0
+                tr.L.new(self._geo().outputs["Incoming"], away.inputs[0])
+                ray = tr.node("ShaderNodeRaycast", "the surface behind")
+                tr.L.new(self._geo().outputs["Position"], ray.inputs["Position"])
+                tr.L.new(away.outputs[0], ray.inputs["Direction"])
+                ray.inputs["Length"].default_value = 100.0
+            return (tr.math('MULTIPLY', Val(ray.outputs["Hit Distance"], 1), tr.const(100.0)),
+                    Val(ray.outputs["Is Hit"], 1))
+        return self.once("raycast behind", make)
 
     def decal_fade(self):
         """UE's Decal Lifetime Opacity on an effect's decal: its particle's DecalFade (mp_decal_fade; the

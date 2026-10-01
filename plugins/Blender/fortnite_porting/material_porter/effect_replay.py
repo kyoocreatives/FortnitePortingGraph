@@ -279,56 +279,6 @@ def bindings(renderer, emitter):
     return out
 
 
-def _depth_behind(piece, particles, rig, frame):
-    """An effect's mesh on a character: how far the character's surface is behind each of its
-    vertices (UE cm: along the vertex's normal inwards, else outwards; far where there is none) as
-    mp_depth_behind, with mp_depth_known, for its material's DepthFade - UE fades it by the scene's
-    depth behind each pixel, which a material here can't read (Tempest's eye glow sits a few cm off
-    the helmet: unfaded, all of it multiplied the helmet). Measured where its particle is on `frame`."""
-    from mathutils import bvhtree
-    if piece.type != 'MESH' or not len(piece.data.vertices):
-        return False
-    bodies = [o for o in rig.children_recursive if o.type == 'MESH' and not o.get(effects.KEY) and not o.hide_render]
-    if not bodies:
-        return False
-    scene = bpy.context.scene
-    now = scene.frame_current
-    try:
-        scene.frame_set(frame)
-        dg = bpy.context.evaluated_depsgraph_get()
-        place = next((inst.matrix_world.copy() for inst in dg.object_instances
-                      if inst.is_instance and inst.parent is not None and inst.parent.original == particles), None)
-        if place is None:
-            return False
-        trees = [(bvhtree.BVHTree.FromObject(body, dg), body.matrix_world.copy()) for body in bodies]
-    finally:
-        scene.frame_set(now)
-    turn = place.to_3x3()
-    distances = np.full(len(piece.data.vertices), 1e4, np.float32)
-    for i, v in enumerate(piece.data.vertices):
-        at, normal = place @ v.co, (turn @ v.normal).normalized()
-        best = None
-        for way in (-normal, normal):       # the surface behind: inwards first
-            for tree, matrix in trees:
-                inverse = matrix.inverted()
-                hit = tree.ray_cast(inverse @ (at + way * 1e-4), (inverse.to_3x3() @ way).normalized(), 2.0)
-                if hit[0] is not None:
-                    d = (matrix @ hit[0] - at).length
-                    best = d if best is None else min(best, d)
-            if best is not None:
-                break
-        if best is not None:
-            distances[i] = best * 100.0
-    if piece.data.users > 1:
-        piece.data = piece.data.copy()
-    for name in ("mp_depth_behind", "mp_depth_known"):     # (measured again on a replay)
-        if name in piece.data.attributes:
-            piece.data.attributes.remove(piece.data.attributes[name])
-    _attribute(piece.data, "mp_depth_behind", 'FLOAT', distances)
-    _attribute(piece.data, "mp_depth_known", 'FLOAT', np.ones(len(distances), np.float32))
-    return True
-
-
 def _bind(piece, carriers, bound, history, start, loop):
     """A renderer's bound material parameters: each one's value over the replay (keyed where it
     changes) on the piece and what draws it as mp_bind_<parameter>, which an Attribute node hands
@@ -1202,11 +1152,6 @@ def play(root):
                 offset = (listed[at].get("PivotOffset") if at < len(listed) else None) or {}
                 _set(modifier, tree, "Piece Offset", (float(offset.get("X", 0.0)) * scale, -float(offset.get("Y", 0.0)) * scale, float(offset.get("Z", 0.0)) * scale))
             _set(modifier, tree, "Turn", turn)
-            if kind == "Mesh" and rig is not None:
-                # where its material fades by the depth behind it (DepthFade): measured on its first frame
-                frames_drawn = track.frame if keep is None else track.frame[keep]
-                if len(frames_drawn):
-                    _depth_behind(piece, obj, rig, start + int(frames_drawn.min()))
             # the piece itself: what the particles draw, out of sight
             piece.hide_render = True
             piece.hide_viewport = True

@@ -2424,9 +2424,9 @@ class Translator:
             return self.stand_in("%s as 1e-4" % t, self.const(0.0001) if v.w == 1 else self.const((0.0001,) * 3, v.w))
         if t == "DepthFade":
             # soft-particle fade against the scene's depth: InOpacity x saturate((scene depth - pixel
-            # depth) / FadeDistance). A material reads no scene depth here; where the env knows how far
-            # the surface behind is (env.depth_behind(): cm, and whether it's known - an effect's mesh
-            # on a character, measured at import) it fades by that, else not at all
+            # depth) / FadeDistance). Where the env can cast a ray behind this pixel (env.depth_behind:
+            # cm along the view ray, and whether it hit - a see-through material) it fades by that,
+            # else not at all
             opacity = self.input(g, p.get("InOpacity"), scope, self.const(float(p.get("InOpacityDefault", 1.0))))
             behind = getattr(self.env, "depth_behind", None)
             got = behind() if behind is not None else None
@@ -2438,7 +2438,18 @@ class Translator:
             factor = self.math('ADD', self.const(1.0), self.math('MULTIPLY', self.math('SUBTRACT', near, self.const(1.0)), known))
             return self.binop('MULTIPLY', opacity, factor, label="depth fade")
         if t == "SceneDepth":
-            return self.stand_in("SceneDepth as far (1e6)", self.const(1e6))
+            # the depth of the surface behind this pixel: where the env can cast a ray behind it
+            # (env.depth_behind: a see-through material), this pixel's depth carried on along the
+            # view ray by the distance found; else far
+            behind = getattr(self.env, "depth_behind", None)
+            got = behind() if behind is not None else None
+            if got is None:
+                return self.stand_in("SceneDepth as far (1e6)", self.const(1e6))
+            distance, known = got
+            n = self.shared("camera data", lambda: self.node("ShaderNodeCameraData", "camera data"))
+            along = self.math('MULTIPLY', Val(n.outputs["View Distance"], 1), self.const(100.0))
+            scene = self.binop('MULTIPLY', self.pixel_depth(), self.binop('DIVIDE', self.math('ADD', along, distance), along))
+            return self.math('ADD', self.const(1e6), self.math('MULTIPLY', self.math('SUBTRACT', scene, self.const(1e6)), known), label="scene depth")
         if t == "SceneDepthWithoutWater":
             # the scene behind the water: its depth along this pixel's view ray
             return self.binop('ADD', self.pixel_depth(), self.water_path(), label="scene depth without water")
