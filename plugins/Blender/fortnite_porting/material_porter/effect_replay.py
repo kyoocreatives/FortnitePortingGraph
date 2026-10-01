@@ -1116,6 +1116,10 @@ def play(root):
             tied = bindings(renderer, emitter)
             if tied:
                 bound_params.update(_bind(piece, (piece, obj), tied, system.history, start, loop))
+            # what's drawn, selected in the viewport, shows the piece's materials (the same ones: an edit
+            # there is what the particles draw; the points themselves draw nothing)
+            for slot in piece.material_slots:
+                data.materials.append(slot.material)
             if kind == "Ribbon":
                 _set(modifier, tree, "Material", piece.material_slots[0].material if piece.material_slots else None)
                 facing = str(renderer.get("FacingMode"))

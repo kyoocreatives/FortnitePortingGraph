@@ -272,8 +272,9 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     particles out from its modules' settings (same ranges and curves, not the engine's random
     draws). `effect_replay.py` runs the system over the scene's frame range (a whole number of
     ticks per frame, 60 a second or so; it stops where the system completes) and keeps every
-    frame's particles as a mesh of points per drawn piece; a geometry nodes modifier
-    ("MP Effect Particles") keeps the current frame's points and instances the piece on each,
+    frame's particles as a mesh of points per drawn piece (which carries the piece's materials, the
+    same ones: selected in the viewport, its Material tab edits what the particles draw); a geometry
+    nodes modifier ("MP Effect Particles") keeps the current frame's points and instances the piece on each,
     turned as the renderer says (Turn), and "MP Effect Ribbons" strings a ribbon's points into
     ribbons. The modifier's Start Frame and Loop move and repeat the replay.
   - **What a particle gives its material** reaches it as instance attributes (the exact materials'
