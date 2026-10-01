@@ -128,6 +128,19 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   Test routes: `fork-weapon-mods?path=`, `fork-asset-page?type=&name=[&pick=Channel:Option;...][&export=1]`
   (an asset's page as the Assets view builds it, and its export through `ExportService`'s styles),
   `fork-export-asset` takes `wrap=` and `mods=Slot:path;...`.
+- **Creature rig.** With the Tasty rig setting on, a creature (Wildlife, LEGO Wildlife) gets a control
+  rig of its own at import, and the Fortnite Porting sidebar's Creature Rig panel gives one to any
+  selected armature (Rig Creature). Creatures' skeletons share no names (Battle Royale's modular
+  `QuadSpine_A_Pelvis_C`, `PawedLeg_A_Thigh_L`; LEGO Fortnite's `pelvis`, `legB_01_l`), so
+  `processing/context/creature_rig.py` reads the tree: the spine from the pelvis to the head (each
+  step the centre child with the most bones under it, not the tail), the limbs (a side's bones under
+  a centre bone), which reach the ground (legs), the tail, the head's bones. A leg gets IK on its
+  foot (the foot's head the chain's tip: a reoriented bone's tail needn't meet its child), a foot
+  control (`CR_IK_<foot>`, a copy of the foot under the root, the foot turning with it) and a knee
+  pole (`CR_Pole_<leg>`, out from the leg's bend, its angle keeping the rest pose); the foot is the
+  first bone named foot/ankle/wrist/paw/hoof, else the one above the toe. The rest is FK on the
+  original bones, with Tasty's shapes. Each leg's IK is a slider (`ik_<leg>`, 0 to play an
+  animation). The original bones keep their names, rest pose and hierarchy.
 - **Animations tab.** Assets > Gameplay > Animations lists the game's 69,600 animations (sequences
   and montages), which the cooked registry mostly leaves out (2,248, nearly all islands'): found by
   path (an animation folder, "anim" or "montage" in the name: 133,000 packages of 2 million), each
