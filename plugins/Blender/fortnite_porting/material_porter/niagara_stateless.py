@@ -36,10 +36,27 @@ def _vector(value, width):
     return None
 
 
+def _bound(setting, system, width):
+    """The value a distribution bound to a variable of the system takes (its data set's, else a user
+    parameter's), as `width` floats; None where the system has no such value."""
+    if system is None:
+        return None
+    name = str(((setting.get("ParameterBinding") or {}).get("Name")) or "")
+    if not name or name == "None":
+        return None
+    v = system.read(name)
+    if v is None and name in system.user.offsets:
+        v = np.frombuffer(system.user.raw(name), np.float32)
+    if v is None or not len(v):
+        return None
+    v = np.asarray(v, np.float64).ravel()
+    return np.resize(v, width)
+
+
 class Distribution:
     """A module's setting: a constant, a range a particle draws from, or a curve over its life."""
 
-    def __init__(self, setting, usual, width):
+    def __init__(self, setting, usual, width, system=None):
         setting = setting or {}
         self.width = width
         mode = str(setting.get("Mode", "")).split("::")[-1]
@@ -47,7 +64,11 @@ class Distribution:
         self.curve, self.low, self.high = None, usual, usual
         self.uniform = not mode.startswith("NonUniform")
         values = setting.get("Values")
-        if "Min" in setting or "Max" in setting:
+        bound = _bound(setting, system, width) if mode == "Binding" else None
+        if bound is not None:
+            # a value of the system's (System.BurstDelay, a User. parameter) as it is now
+            self.low = self.high = bound
+        elif "Min" in setting or "Max" in setting:
             low, high = _vector(setting.get("Min"), width), _vector(setting.get("Max"), width)
             ranged = "Constant" not in mode
             self.low = low if low is not None else (np.zeros(width) if ranged else high)
@@ -116,15 +137,22 @@ class Emitter:
             module = system.export(ref)
             if module is not None and module["props"].get("bModuleEnabled", True):
                 self.modules[module["type"].replace("NiagaraStatelessModule_", "")] = module["props"]
-        state = props.get("EmitterState") or {}
+        state = self.emitter_state = props.get("EmitterState") or {}
         self.loops = str(state.get("LoopBehavior", "Infinite")).split("::")[-1]
-        self.duration = float(Distribution(state.get("LoopDuration"), 1.0, 1).low[0]) or 1.0
-        self.delay = float(Distribution(state.get("LoopDelay"), 0.0, 1).low[0]) if state.get("bLoopDelayEnabled") else 0.0
+        self._timing()
+        self.timed = False      # the timing read again once the system's scripts have run (a bound delay)
         self.count = int(state.get("LoopCount", 1))
         self.spawns = [s for s in props.get("SpawnInfos") or [] if s.get("bEnabled", True)]
         self.birth = np.zeros(0)                        # each particle's time of birth
         self.random = np.zeros((0, RANDOMS))
         self.left = 0.0                                 # a rate's fraction of a particle carried over
+
+    def _timing(self, system=None):
+        """Its loop's duration and delay: settings, or values of the system they are bound to
+        (Monster Smash's ground burst waits System.BurstDelay, set by the system's own script)."""
+        state = self.emitter_state
+        self.duration = float(Distribution(state.get("LoopDuration"), 1.0, 1, system).low[0]) or 1.0
+        self.delay = float(Distribution(state.get("LoopDelay"), 0.0, 1, system).low[0]) if state.get("bLoopDelayEnabled") else 0.0
 
     def fill(self):
         pass
@@ -166,6 +194,9 @@ class Emitter:
         return times
 
     def tick(self, dt):
+        if not self.timed:
+            self._timing(self.system)
+            self.timed = True
         rng = self.system.rng
         born = self._born(self.age, self.age + dt) if self.system.asked == 0 else []
         self.age += dt
@@ -177,7 +208,7 @@ class Emitter:
         self._state()
 
     def _setting(self, module, name, usual, width, age, slot):
-        d = Distribution((self.modules.get(module) or {}).get(name), usual, width)
+        d = Distribution((self.modules.get(module) or {}).get(name), usual, width, self.system)
         return d.at(age, self.random[:, slot:slot + width])
 
     def _state(self):

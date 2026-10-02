@@ -270,7 +270,8 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
     engine's default: white for a colour - a variant's colour array the game fills), vector fields,
     particle reads, renderer info, camera). `niagara_stateless.py` works a stateless emitter's
     particles out from its modules' settings (same ranges and curves, not the engine's random
-    draws). `effect_replay.py` runs the system over the scene's frame range (a whole number of
+    draws; a setting bound to a value of the system - Monster Smash's ground burst waits
+    `System.BurstDelay` - reads it once the system's scripts have run). `effect_replay.py` runs the system over the scene's frame range (a whole number of
     ticks per frame, 60 a second or so; it stops where the system completes) and keeps every
     frame's particles as a mesh of points per drawn piece (which carries the piece's materials, the
     same ones: selected in the viewport, its Material tab edits what the particles draw); a geometry
