@@ -206,9 +206,18 @@ public class AppService : IService
             AppSettings.Installation.Profiles.FirstOrDefault()?.IsSelected = true;
         }
         
-        if (AppSettings.Plugin.Blender.AutomaticallySync && Dependencies.FinishedEnsuring)
+        // Material Porter fork: the automatic sync waits for the plugins' files (DependencyService.Ensure
+        // puts them out in the background: checked once here, it was usually not done, the sync never
+        // ran and an updated app left Blender on the old plugin)
+        if (AppSettings.Plugin.Blender.AutomaticallySync)
         {
-            TaskService.Run(async () => await AppSettings.Plugin.Blender.SyncInstallations(verbose: false));
+            TaskService.Run(async () =>
+            {
+                for (var waited = 0; !Dependencies.FinishedEnsuring && waited < 600; waited++)
+                    await Task.Delay(100);
+                if (Dependencies.FinishedEnsuring)
+                    await AppSettings.Plugin.Blender.SyncInstallations(verbose: false);
+            });
         }
         
         if (AppSettings.Installation.FinishedSetup)
