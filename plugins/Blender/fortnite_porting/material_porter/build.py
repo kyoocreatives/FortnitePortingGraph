@@ -19,7 +19,7 @@ from .ue_graph import BOUNDS_CENTRE, CARRIED, SHADING_MODELS, Translator, Val
 PREFIX = "MP "            # built materials: "MP MI_Foo"
 KEY_PATH = "mp_path"      # the game object a built material translates
 KEY_REV = "mp_rev"        # the build revision that made it (older ones are rebuilt, not reused)
-BUILD_REVISION = 25       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity; 13: a particle's values from its instance (a replayed effect), a sprite's sub-image; 14: SphereMask and Distance between a float2 and a scalar (Z stays 0); 15: a particle's sprite rotation and direction, the 2D light march of raymarched smoke; 16: the ambient cubemap tint is white; 17: a particle material's World Position Offset (displacement), UE's division by zero; 18: a smoothstep over an empty range is a hard edge, Particle Random from the particle; 19: a Niagara decal's colour and fade (DecalColor, DecalLifetimeOpacity); 20: division by zero per component (a vector divisor); 21: view space is the shader camera space as is (Z forward), Object Position the bounds' centre; 22: Power clamps a negative base to 0 (PositiveClampedPow); 23: vector parameters that aren't colours on vector sockets (a colour socket clamps negatives); 24: BLEND_ColoredTransmittanceOnly is Modulate; 25: DepthFade and SceneDepth by a raycast behind a see-through pixel (Blender's Raycast node)
+BUILD_REVISION = 26       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity; 13: a particle's values from its instance (a replayed effect), a sprite's sub-image; 14: SphereMask and Distance between a float2 and a scalar (Z stays 0); 15: a particle's sprite rotation and direction, the 2D light march of raymarched smoke; 16: the ambient cubemap tint is white; 17: a particle material's World Position Offset (displacement), UE's division by zero; 18: a smoothstep over an empty range is a hard edge, Particle Random from the particle; 19: a Niagara decal's colour and fade (DecalColor, DecalLifetimeOpacity); 20: division by zero per component (a vector divisor); 21: view space is the shader camera space as is (Z forward), Object Position the bounds' centre; 22: Power clamps a negative base to 0 (PositiveClampedPow); 23: vector parameters that aren't colours on vector sockets (a colour socket clamps negatives); 24: BLEND_ColoredTransmittanceOnly is Modulate; 25: DepthFade and SceneDepth by a raycast behind a see-through pixel (Blender's Raycast node); 26: translucency lit from UE's volume: diffuse only, the Normal unused unless per-pixel directional
                           # 4: instance overrides to the default (Opaque, DefaultLit, one-sided) honoured
                           # 6: vector parameters without a stored default are (0, 0, 0, 0), not alpha 1
                           # 8: single layer water (the medium, refraction, water info stand-ins); graph clip()s
@@ -51,6 +51,8 @@ def settings(entry):
         "two_sided": bool(pick("TwoSided", False)),
         "clip": float(pick("OpacityMaskClipValue", 0.3333)),
         "tangent_normal": bool(asset.get("bTangentSpaceNormal", True)),
+        # how a lit translucent material is lit (None from an app that doesn't say: as a surface)
+        "lighting": _enum(asset["TranslucencyLightingMode"], "") if "TranslucencyLightingMode" in asset else None,
         # the Subsurface Profile skin scatters by: {"radius": [r, g, b], "scale": metres}
         "profile": entry.get("subsurface"),
     }
@@ -81,12 +83,25 @@ def assemble(tr, mat, a, s):
         # the water medium comes with the graph's SingleLayerWaterMaterialOutput
         water = shading == "MSM_SingleLayerWater" and "WaterAbsorption" in a
 
+        # a translucent material UE lights from its translucency volume gets diffuse light only (no
+        # specular; Metallic only darkens), and lit per vertex or without a direction its Normal goes
+        # unused (smoke sprites' sphere normals would shade each puff as a ball)
+        volumetric = s["blend"] in TRANSLUCENT and s.get("lighting") in VOLUMETRIC_LIGHTING
+        flat = volumetric and s["lighting"] in NORMAL_UNUSED
         if not water:
             # (water: BaseColor and Metallic are its surface layer's, below)
-            link(a["BaseColor"], "Base Color")
-            link(a["Metallic"], "Metallic")
+            if volumetric:
+                base, metal = a["BaseColor"], a["Metallic"]
+                if base is not None and metal is not None and not (metal.const and _comps(metal.s)[0] == 0.0):
+                    base = tr.vmath('SCALE', tr.as3(base), tr.math('SUBTRACT', tr.const(1.0), metal), out_w=3)
+                link(base, "Base Color")
+            else:
+                link(a["BaseColor"], "Base Color")
+                link(a["Metallic"], "Metallic")
         link(a["Roughness"], "Roughness")
-        if not water:
+        if volumetric:
+            bsdf.inputs["Specular IOR Level"].default_value = 0.0
+        elif not water:
             # UE's Specular 0.5 is F0 0.04, as is Blender's Specular IOR Level 0.5 (IOR 1.5)
             link(a["Specular"], "Specular IOR Level")
         emissive = a["EmissiveColor"]
@@ -96,7 +111,7 @@ def assemble(tr, mat, a, s):
 
         n = a["Normal"]
         bsdf_n = None
-        if not (n.const and _comps(n.s)[:3] == (0.0, 0.0, 1.0)):
+        if not flat and not (n.const and _comps(n.s)[:3] == (0.0, 0.0, 1.0)):
             if s["tangent_normal"]:
                 # UE's tangent space is DirectX (green down): flip Y, then
                 # encode as the colour Blender's Normal Map node reads
@@ -206,6 +221,11 @@ TRANSLUCENT = ("BLEND_Translucent", "BLEND_TranslucentGreyTransmittance", "BLEND
                "BLEND_AlphaComposite", "BLEND_AlphaHoldout")
 # and Modulate BLEND_ColoredTransmittanceOnly (the same value: Tempest's eye glow multiplies its helmet)
 MODULATE = ("BLEND_Modulate", "BLEND_ColoredTransmittanceOnly")
+# translucency lighting from the translucency volume (UE's default the first): diffuse only; all but
+# the per-pixel directional one leave the Normal unused
+VOLUMETRIC_LIGHTING = ("TLM_VolumetricNonDirectional", "TLM_VolumetricPerVertexNonDirectional",
+                       "TLM_VolumetricPerVertexDirectional", "TLM_VolumetricDirectional")
+NORMAL_UNUSED = VOLUMETRIC_LIGHTING[:3]
 
 
 def _see_through_shadows(mat):
