@@ -84,7 +84,8 @@ public partial class ApplicationSettingsViewModel : SettingsViewModelBase
     public DirectSoundDeviceInfo[] AudioDevices => Audio.Devices;
 
     [JsonIgnore]
-    public EExportType[] AssetTypes => Enum.GetValues<EExportType>().Where(type => !type.IsDisabled && type.IsAssetType).ToArray();
+    public EExportType[] AssetTypes => Enum.GetValues<EExportType>()
+        .Where(type => !type.IsDisabled && type.IsAssetType && (type != EExportType.TimeOfDay || MaterialPorter.Fork.TimeOfDayExport)).ToArray();
 
     public async Task BrowseAppDataPath()
     {

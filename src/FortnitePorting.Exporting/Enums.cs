@@ -132,6 +132,10 @@ public enum EExportType
     [Description("Effects"), Export(EPrimitiveExportType.Mesh)]
     Effect = ExportCategory.Gameplay + 9,
 
+    // Material Porter fork: a time of day (a day sequence actor, Fortnite's TODM): its sky dome, clouds, sun and day
+    [Description("Time of Day"), Export(EPrimitiveExportType.Mesh)]
+    TimeOfDay = ExportCategory.Gameplay + 10,
+
     // Material Porter fork: a skydiving contrail (its item's Niagara system); sent to Blender as an Effect
     [Description("Contrails"), Export(EPrimitiveExportType.Mesh)]
     [CosmeticAsset]

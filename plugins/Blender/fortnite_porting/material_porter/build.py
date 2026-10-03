@@ -13,13 +13,14 @@ import bpy
 
 from . import layout
 from .app_client import AppClient
+from . import world
 from .env import MaterialEnv, fit_socket
 from .ue_graph import BOUNDS_CENTRE, CARRIED, SHADING_MODELS, Translator, Val
 
 PREFIX = "MP "            # built materials: "MP MI_Foo"
 KEY_PATH = "mp_path"      # the game object a built material translates
 KEY_REV = "mp_rev"        # the build revision that made it (older ones are rebuilt, not reused)
-BUILD_REVISION = 26       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity; 13: a particle's values from its instance (a replayed effect), a sprite's sub-image; 14: SphereMask and Distance between a float2 and a scalar (Z stays 0); 15: a particle's sprite rotation and direction, the 2D light march of raymarched smoke; 16: the ambient cubemap tint is white; 17: a particle material's World Position Offset (displacement), UE's division by zero; 18: a smoothstep over an empty range is a hard edge, Particle Random from the particle; 19: a Niagara decal's colour and fade (DecalColor, DecalLifetimeOpacity); 20: division by zero per component (a vector divisor); 21: view space is the shader camera space as is (Z forward), Object Position the bounds' centre; 22: Power clamps a negative base to 0 (PositiveClampedPow); 23: vector parameters that aren't colours on vector sockets (a colour socket clamps negatives); 24: BLEND_ColoredTransmittanceOnly is Modulate; 25: DepthFade and SceneDepth by a raycast behind a see-through pixel (Blender's Raycast node); 26: translucency lit from UE's volume: diffuse only, the Normal unused unless per-pixel directional
+BUILD_REVISION = 27       # 2: UE 5 translucent blend modes (glass); 3: custom primitive data; 5: landscape layers; 7: per-instance custom data; 9: images channel-packed (alpha as data); 10: Time runs from 100 s (hit flashes over), unfiltered textures sampled Closest; 11: LocalPosition and PreSkinnedPosition from the rest position (skinned meshes); 12: an additive material's light is Emissive * Opacity; 13: a particle's values from its instance (a replayed effect), a sprite's sub-image; 14: SphereMask and Distance between a float2 and a scalar (Z stays 0); 15: a particle's sprite rotation and direction, the 2D light march of raymarched smoke; 16: the ambient cubemap tint is white; 17: a particle material's World Position Offset (displacement), UE's division by zero; 18: a smoothstep over an empty range is a hard edge, Particle Random from the particle; 19: a Niagara decal's colour and fade (DecalColor, DecalLifetimeOpacity); 20: division by zero per component (a vector divisor); 21: view space is the shader camera space as is (Z forward), Object Position the bounds' centre; 22: Power clamps a negative base to 0 (PositiveClampedPow); 23: vector parameters that aren't colours on vector sockets (a colour socket clamps negatives); 24: BLEND_ColoredTransmittanceOnly is Modulate; 25: DepthFade and SceneDepth by a raycast behind a see-through pixel (Blender's Raycast node); 26: translucency lit from UE's volume: diffuse only, the Normal unused unless per-pixel directional; 27: the sun, the sky and collection values through the file's world groups (a time of day drives them), its height fog
                           # 4: instance overrides to the default (Opaque, DefaultLit, one-sided) honoured
                           # 6: vector parameters without a stored default are (0, 0, 0, 0), not alpha 1
                           # 8: single layer water (the medium, refraction, water info stand-ins); graph clip()s
@@ -569,8 +570,9 @@ def mark_bounds(objects):
             o[BOUNDS_CENTRE] = [sum(c[i] for c in o.bound_box) / 8.0 for i in range(3)]
 
 
-def build_one(entry, app, objects=()):
-    """A Blender material for one bundle entry. Returns (material, notes)."""
+def build_one(entry, app, objects=(), make_env=None):
+    """A Blender material for one bundle entry. Returns (material, notes). make_env(app, entry,
+    objects): an env of the caller's own (a time of day's, whose values follow its hour)."""
     mark_bounds(objects)
     if not entry.get("graph"):
         # a master cooked without its graph (a UEFN island's own): an approximation
@@ -581,7 +583,7 @@ def build_one(entry, app, objects=()):
     tree = mat.node_tree
     tree.nodes.clear()
     root = bpy.data.node_groups.new(mat.name, "ShaderNodeTree")
-    env = MaterialEnv(app, entry, objects)
+    env = make_env(app, entry, objects) if make_env else MaterialEnv(app, entry, objects)
     env.root = root
     tr = Translator(root, env)
     env.h[0] = tr
@@ -616,6 +618,8 @@ def build_one(entry, app, objects=()):
                                                                     for w in ft.tr.warnings]))
     if shared:
         notes.append("%d function groups shared with earlier materials" % shared)
+    # a time of day's height fog, where the file has one
+    world.apply_fog(mat)
     return mat, notes
 
 
@@ -776,6 +780,7 @@ def build_like(src, entry, app):
         mat[KEY_VARIANT] = entry["variant"]
     elif KEY_VARIANT in mat:
         del mat[KEY_VARIANT]
+    world.apply_fog(mat)
     return mat, list(env.notes) + ["same shape as %s: copied, %d group(s) with other images" % (src.name, len(copies))]
 
 

@@ -190,7 +190,8 @@ class MaterialImportContext:
         # A material only *named* "...Transparent" (a car's glass) isn't hidden when exact materials build
         # it: its graph says how see-through it is
         from ...material_porter.hook import exact_available
-        use_exact = exact_available(self) and not prefer_fp
+        # (a time of day's sky and clouds get theirs once the day is known: material_porter.sky)
+        use_exact = exact_available(self) and not prefer_fp and getattr(self, "type", None) != EExportType.TIME_OF_DAY
         if prefer_fp:
             material["MPPreferFP"] = True
         crunch_names = [n for n in vertex_crunch_names if n != "Transparent"] if use_exact else vertex_crunch_names

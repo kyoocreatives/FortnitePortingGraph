@@ -187,11 +187,18 @@ class MeshImportContext:
             
             self.collection.objects.link(empty_object)
             
-            for child in mesh.get("Children"):
-                self.import_model(child, parent=empty_object)
+            imported_children = [(child, self.import_model(child, parent=empty_object)) for child in mesh.get("Children")]
 
             # Material Porter fork: a particle effect's CPU emitters, replayed over the scene's frames
             effects.finish(self, mesh, empty_object)
+            # Material Porter fork: a time of day (the owner's private overlay's module, absent elsewhere)
+            if mesh.get("MPTimeOfDay"):
+                try:
+                    from ...material_porter import sky
+                except ImportError:
+                    sky = None
+                if sky is not None:
+                    sky.finish(self, mesh, empty_object, imported_children)
             return empty_object
         
         if self.type in [EExportType.PREFAB, EExportType.WORLD] and (index := self.mesh_index.get(id(mesh))) is not None:

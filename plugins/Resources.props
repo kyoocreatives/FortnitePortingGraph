@@ -9,7 +9,7 @@
 
     <ItemGroup>
         <AvaloniaResource Include="$(PluginRoot)Blender\**\*"
-                          Exclude="$(PluginRoot)Blender\fortnite_porting\ueformat\**"
+                          Exclude="$(PluginRoot)Blender\fortnite_porting\ueformat\**;$(PluginRoot)Blender\**\__pycache__\**"
                           Link="Blender\%(RecursiveDir)%(Filename)%(Extension)"
                           Visible="false"/>
         <AvaloniaResource Include="$(PluginRoot)Unreal\**\*"

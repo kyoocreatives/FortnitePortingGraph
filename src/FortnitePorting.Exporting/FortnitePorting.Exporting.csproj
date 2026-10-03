@@ -12,4 +12,11 @@
         <ProjectReference Include="..\FortnitePorting.CUE4Parse\FortnitePorting.CUE4Parse.csproj" />
         <ProjectReference Include="..\FortnitePorting.Shared\FortnitePorting.Shared.csproj" />
     </ItemGroup>
+
+    <!-- the owner's private overlay, beside the repo (..\..\..\fpfork-private): its code when it's there;
+         -p:MPPrivateRoot=none\ builds without it -->
+    <PropertyGroup>
+        <MPPrivateRoot Condition="'$(MPPrivateRoot)' == ''">$(MSBuildThisFileDirectory)..\..\..\fpfork-private\</MPPrivateRoot>
+    </PropertyGroup>
+    <Import Project="$(MPPrivateRoot)Exporting.props" Condition="Exists('$(MPPrivateRoot)Exporting.props')" />
 </Project>

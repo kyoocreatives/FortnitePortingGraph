@@ -22,6 +22,7 @@ import re
 
 import bpy
 
+from . import world
 from .ue_graph import WATER_DEPTH_DEFAULT, Val
 
 # a vector parameter that names a colour gets a colour socket (a picker); any other - an offset, a
@@ -140,9 +141,9 @@ class MaterialEnv:
 
         def make():
             cam = self.tr.node("ShaderNodeCameraData", "camera data")
-            world = self.tr.node("ShaderNodeVectorTransform", "view to world", vector_type='VECTOR', convert_from='CAMERA', convert_to='WORLD')
-            self.tr.L.new(cam.outputs["View Vector"], world.inputs[0])
-            away = self.tr.vmath('NORMALIZE', Val(world.outputs[0], 3), out_w=3)
+            to_world = self.tr.node("ShaderNodeVectorTransform", "view to world", vector_type='VECTOR', convert_from='CAMERA', convert_to='WORLD')
+            self.tr.L.new(cam.outputs["View Vector"], to_world.inputs[0])
+            away = self.tr.vmath('NORMALIZE', Val(to_world.outputs[0], 3), out_w=3)
             return self.tr.vmath('SCALE', away, self.tr.const(-1.0), out_w=3)
         return self.once("incoming", make)
 
@@ -170,17 +171,39 @@ class MaterialEnv:
         return self.tr.vmath('SUBTRACT', p, self.camera_position(), out_w=3) if camera_relative else p
 
     def light_direction(self):
-        """Towards the scene's sun (its lamp shines down its local -Z)."""
-        sun = next((o for o in bpy.context.scene.objects if o.type == 'LIGHT' and o.data.type == 'SUN'), None)
-        if sun is None:
-            self.note("no sun lamp: light straight overhead")
-            return self.tr.const((0.0, 0.0, 1.0), 3)
-        z = sun.matrix_world.to_3x3().col[2].normalized()
-        return self.tr.const((z.x, -z.y, z.z), 3)
+        """Towards the sun: the file's sun group (the scene's sun lamp, driven; a time of day's)."""
+        return world.sun(self.tr)
+
+    def light_color(self):
+        """The sun's colour times its strength (UE's DirectionalLightColor): the sun group's."""
+        return world.sun(self.tr, "Color")
 
     def view_luminance(self, direction):
-        self.note("sky atmosphere read as a flat sky colour")
-        return self.tr.const((0.4, 0.5, 0.7), 3)
+        """The sky along a direction: the file's sky group (a time of day's atmosphere; a flat
+        sky colour without one)."""
+        return world.sky(self.tr, direction)
+
+    def sky_light(self, direction, roughness):
+        """UE's sky light along a direction: the same sky."""
+        return world.sky(self.tr, direction)
+
+    def aerial_perspective(self, position):
+        """UE's SkyAtmosphereAerialPerspective at a point (UE cm): the light the air between the camera
+        and it scatters in, and how much of the point shows through. UE reads a froxel volume; here
+        the sky along the way, as much as the air crossed (an exponential atmosphere, 8 km scale
+        height: path = H (1 - exp(-d z / H)) / z km) scatters: in-scattering 1 - exp(-path / 10),
+        transmittance exp(-path / 30)."""
+        tr = self.tr
+        d = tr.vmath('SUBTRACT', tr.as3(position), self.camera_position(), out_w=3)
+        km = tr.binop('DIVIDE', tr.vmath('LENGTH', d, out_w=1), tr.const(1e5))
+        dirn = tr.vmath('NORMALIZE', d, out_w=3)
+        z = tr.math('MAXIMUM', tr.comps(dirn)[2], tr.const(1e-3))
+        path = tr.binop('DIVIDE', tr.binop('MULTIPLY', tr.const(8.0), tr.binop('SUBTRACT', tr.const(1.0), tr.math(
+            'EXPONENT', tr.binop('DIVIDE', tr.binop('MULTIPLY', tr.binop('MULTIPLY', km, z), tr.const(-1.0)), tr.const(8.0))))), z)
+        path = tr.math('MINIMUM', path, km)
+        inscatter = tr.binop('SUBTRACT', tr.const(1.0), tr.math('EXPONENT', tr.binop('DIVIDE', path, tr.const(-10.0))))
+        through = tr.math('EXPONENT', tr.binop('DIVIDE', path, tr.const(-30.0)))
+        return tr.vmath('SCALE', world.sky(tr, dirn), inscatter, out_w=3), through
 
     # the game's clock is never near zero: what a material times from a moment (a hit's
     # flash, a spawn's fade: GameTime + the hit time, against Time) is over, as at rest
@@ -298,8 +321,8 @@ class MaterialEnv:
         if self.root is None:
             return []
         iface = self.root.interface
-        gi = next((n for n in self.root.nodes if n.bl_idname == "NodeGroupInput"), None)
-        linked = {s.identifier for s in gi.outputs if s.is_linked} if gi else set()
+        # (a tree two envs translated into - a sky dome and its sun - has a group input node each)
+        linked = {s.identifier for n in self.root.nodes if n.bl_idname == "NodeGroupInput" for s in n.outputs if s.is_linked}
         for key, (item, _v, _value, _panel) in list(self._params.items()):
             if item.identifier not in linked:
                 iface.remove(item)
@@ -613,15 +636,16 @@ class MaterialEnv:
         return key
 
     def collection(self, name, path=None):
-        """A material parameter collection's default for `name`."""
+        """A material parameter collection's value for `name`: through the file's group of that
+        collection, which a time of day makes follow its hour where its day sequence keys it."""
         if not path:
             self.note("collection parameter %s without its collection: 0" % name)
             return self.tr.const(0.0)
         c = self.app.collection(path)
         if name in c.get("scalars", {}):
-            return self.tr.const(float(c["scalars"][name]))
+            return world.collection(self.tr, path, name, float(c["scalars"][name]))
         if name in c.get("vectors", {}):
-            return self.tr.const(tuple(c["vectors"][name]), 4)
+            return world.collection(self.tr, path, name, tuple(c["vectors"][name]))
         self.note("collection %s has no %s: 0" % (path.split("/")[-1], name))
         return self.tr.const(0.0)
 

@@ -670,6 +670,8 @@ public class MaterialPorterService : IService
             // tests: FP's export of one asset (type=Car|Outfit|...; picks for a car, face=Mouth:12,Eyes:2 for a
             // LEGO figure) as the plugin receives it
             var type = Enum.Parse<EExportType>(query["type"] ?? "Car");
+            if (type == EExportType.TimeOfDay && !Fork.TimeOfDayExport)
+                throw new InvalidOperationException("Time of Day export isn't in this build");
             // listed=1: the asset as its tab lists it (an effect found by file name is listed unread)
             UObject asset;
             if (query["listed"] == "1")

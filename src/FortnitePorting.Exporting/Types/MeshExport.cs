@@ -30,7 +30,7 @@ using Path = System.IO.Path;
 
 namespace FortnitePorting.Exporting.Types;
 
-public class MeshExport : BaseExport
+public partial class MeshExport : BaseExport
 {
     public readonly List<ExportMesh> Meshes = [];
     public readonly List<ExportMesh> OverrideMeshes = [];
@@ -129,6 +129,9 @@ public class MeshExport : BaseExport
         Meshes.Add(exportMesh);
         
     }
+
+    /// <summary>The owner's private overlay's exports (FortnitePorting.Exporting.csproj imports it when it's there).</summary>
+    partial void ExportOwner(UObject asset, EExportType exportType);
 
     public void Export(UObject asset, EExportType exportType)
     {
@@ -609,6 +612,10 @@ public class MeshExport : BaseExport
                 Meshes.Add(Context.Effect(MaterialPorter.Unloaded.Read(asset, Context.Meta.Provider.Provider)));
                 break;
             }
+            case EExportType.TimeOfDay:
+                // Material Porter fork: the owner's private overlay exports it (nothing without it)
+                ExportOwner(asset, exportType);
+                break;
             case EExportType.Contrail:
             {
                 // Material Porter fork: a contrail is its item's effect (put on a character in Blender: Replay Effect)

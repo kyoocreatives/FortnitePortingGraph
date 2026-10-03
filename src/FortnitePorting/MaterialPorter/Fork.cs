@@ -37,4 +37,14 @@ public static class Fork
 #else
     public const bool Islands = false;
 #endif
+
+    /// <summary>
+    /// Time of Day export: only where the owner's private overlay (fpfork-private, beside the repo) is built in.
+    /// Without it the Time of Day tab isn't there and the export is refused.
+    /// </summary>
+#if MP_TIME_OF_DAY
+    public const bool TimeOfDayExport = true;
+#else
+    public const bool TimeOfDayExport = false;
+#endif
 }

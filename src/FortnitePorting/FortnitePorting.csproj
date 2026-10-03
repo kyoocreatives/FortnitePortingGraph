@@ -22,6 +22,13 @@
         <DefineConstants>$(DefineConstants);MP_ISLANDS</DefineConstants>
     </PropertyGroup>
 
+    <!-- the owner's private overlay, beside the repo (..\..\..\fpfork-private): its code and plugin files when it's
+         there; -p:MPPrivateRoot=none\ builds without it -->
+    <PropertyGroup>
+        <MPPrivateRoot Condition="'$(MPPrivateRoot)' == ''">$(MSBuildThisFileDirectory)..\..\..\fpfork-private\</MPPrivateRoot>
+    </PropertyGroup>
+    <Import Project="$(MPPrivateRoot)App.props" Condition="Exists('$(MPPrivateRoot)App.props')" />
+
     <ItemGroup>
         <PackageReference Include="Avalonia" />
         <PackageReference Include="Avalonia.Desktop" />

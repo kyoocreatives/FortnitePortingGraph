@@ -60,6 +60,8 @@ class EExportType(IntEnum):
     SPRITE = ExportCategory.GAMEPLAY + 7
     # Material Porter fork: a particle effect, as what it is made of
     EFFECT = ExportCategory.GAMEPLAY + 9
+    # Material Porter fork: a time of day (Fortnite's TODM): its sky dome, clouds, sun and day
+    TIME_OF_DAY = ExportCategory.GAMEPLAY + 10
 
     # FESTIVAL
     FESTIVAL_GUITAR = ExportCategory.FESTIVAL + 1

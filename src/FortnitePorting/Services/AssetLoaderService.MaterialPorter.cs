@@ -18,6 +18,9 @@ namespace FortnitePorting.Services;
 /// LEGO figures (cooked ones and recipes), their emotes, building props and sets, creatures.</summary>
 public partial class AssetLoaderService
 {
+    /// <summary>The owner's private overlay's tabs (FortnitePorting.csproj imports it when it's there).</summary>
+    partial void AddOwnerLoaders();
+
     public AssetLoaderService()
     {
         // particle effects (Niagara systems): what each emitter draws, to place by hand; the description says
@@ -74,6 +77,9 @@ public partial class AssetLoaderService
                 }
             },
         });
+
+        // the owner's tabs, from the private overlay beside the repo (none without it)
+        AddOwnerLoaders();
 
         // skydiving contrails: each item's effect (played on a character in Blender)
         Categories.First(category => category.Category == EAssetCategory.Cosmetics).Loaders.Add(new AssetLoader(EExportType.Contrail)

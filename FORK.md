@@ -84,6 +84,13 @@ Branch `materialporter` on top of upstream `h4lfheart/FortnitePorting` (remote
   `Fork.Islands` is on only when the git-ignored `src/FortnitePorting/Fork.local.props`
   sets `MPIslands`: releases and anyone else's builds don't export islands
   (upstream keeps it to the accounts it allows).
+- **The owner's private overlay.** Some owner-only parts live outside the repo, in
+  `../fpfork-private` beside it, built in when it's there: FortnitePorting.csproj imports its
+  `App.props`, FortnitePorting.Exporting.csproj its `Exporting.props` (code, defines, and plugin
+  files packed with the plugin's). The repo's side is partial methods
+  (`AssetLoaderService.AddOwnerLoaders`, `MeshExport.ExportOwner`, `MaterialPorterMesh` fields)
+  and plugin imports that do nothing when the module isn't there. `-p:MPPrivateRoot=none\`
+  builds without it (as releases are).
 - **Weapons as the game draws them** (`ExportContext.Weapons.cs`). FP exports an item's
   mesh with the mesh's own materials; two more things make a weapon's look:
   - its actor class's weapon mesh component (`WeaponActorClass` defaults > `WeaponMesh`,

@@ -439,6 +439,13 @@ CUSTOM_HASHES = {
     "eda214ed": "custom_main_pass",         # #if SHADOW_DEPTH_SHADER return Shadow; #endif return Main;
     "f8ae37db": "custom_dither5",           # ((uint)(p.x) + 2 * (uint)(p.y)) % 5
     "ee3c506f": "custom_taa_params",        # View.TemporalAAParams (float2 here)
+    "ce3cc6b5": "custom_cloud_transmittance",   # exp(-CloudHeight * (Scattering + Absorption) * Density), averaged (sky dome clouds)
+    "ba175d0d": "custom_cloud_light",           # single scattering of a cloud layer lit by the sun (Apollo sky dome)
+    "e50d56a3": "custom_cloud_light",           # the same, its phase guarded (LEGO's sky)
+    "3f24674e": "custom_clouds_aerial",         # (1 - T) * AerialPerspective.rgb + CloudLuminance * AerialPerspective.a
+    "103e88cd": "custom_height_fog_coverage",   # 1 - exp(-height fog optical depth) (LEGO's fog)
+    "3eb98e41": "custom_smin",                  # polynomial smooth minimum
+    "5d6f76f9": "custom_cave_type",             # CaveType 0, 2: 0.5; else 1
     "d2fa8df2": "custom_refract",           # return refract(Ray, Normal, Index);
     "0eafe77b": "custom_packed_hsv",        # asuint(PackedHSV.x): H 12 bits, S and V 10 bits each
     "2658b7cc": "custom_euler_to_quat",     # roll/pitch/yaw degrees -> quaternion (MF_EulerToQUat)
@@ -1356,6 +1363,14 @@ class Translator:
         if t == "CloudSampleAttribute":
             # 0 Altitude, 1 AltitudeInLayer, 2 NormAltitudeInLayer, 3 ShadowSampleDistance
             return env.cloud_sample(out)
+        if t == "VolumetricAdvancedMaterialInput":
+            # the material's own Conservative Density (its VolumetricAdvancedMaterialOutput's pin):
+            # UE evaluates it first (empty space skipping) and hands it back here
+            vamo = next((y for y in g.o if T(y) == "VolumetricAdvancedMaterialOutput"), None)
+            pin = ((vamo or {}).get("Properties") or {}).get("ConservativeDensity")
+            if pin is None or not linked(pin):
+                return self.const((1.0, 1.0, 1.0), 3)
+            return self.input(g, pin, scope, self.const(1.0))
         if t == "CameraPositionWS":
             return env.camera_position()
         if t == "SphereMask":
@@ -1405,6 +1420,37 @@ class Translator:
             if d is None:
                 d = self.vmath('SCALE', env.camera_vector(), self.const(-1.0), out_w=3)
             return env.view_luminance(d)
+        if t == "SkyAtmosphereLightDiskLuminance":
+            # the sun's disc: its light over the disc's solid angle where the view ray is within it
+            # (UE also dims it by the atmosphere's transmittance, which the light's colour carries
+            # at sunset); the disc is DiskAngularDiameterOverride degrees across, else the light's
+            # default source angle (0.5357)
+            diam = self.input(g, p.get("DiskAngularDiameterOverride"), scope, None)
+            half = self.binop('MULTIPLY', diam, self.const(math.pi / 360.0)) if diam is not None \
+                else self.const(0.5357 * math.pi / 360.0)
+            view = self.vmath('SCALE', env.camera_vector(), self.const(-1.0), out_w=3)
+            cos_view = self.vmath('DOT_PRODUCT', self.vmath('NORMALIZE', view, out_w=3),
+                                  self.vmath('NORMALIZE', env.light_direction(), out_w=3))
+            cos_half = self.math('COSINE', half)
+            inside = self.math('GREATER_THAN', cos_view, cos_half)
+            solid = self.binop('MULTIPLY', self.const(2.0 * math.pi), self.binop('SUBTRACT', self.const(1.0), cos_half))
+            lum = self.vmath('SCALE', self.light_color(), self.binop('DIVIDE', inside, self.math('MAXIMUM', solid, self.const(1e-9))), out_w=3)
+            return lum
+        if t == "SkyAtmosphereAerialPerspective":
+            # the atmosphere between the camera and a point (in-scattered light, transmittance): the
+            # env's, else none
+            pos = self.input(g, p.get("WorldPosition"), scope, None)
+            if pos is None:
+                pos = env.world_position(False)
+            hook = getattr(env, "aerial_perspective", None)
+            if hook is not None:
+                rgb, a = hook(pos)
+                return self.rgba_out(rgb, a, out)
+            return self.rgba_out(self.stand_in("SkyAtmosphereAerialPerspective as none", self.const((0.0, 0.0, 0.0), 3)),
+                                 self.const(1.0), out)
+        if t == "SkyAtmosphereDistantLightScatteredLuminance":
+            # the atmosphere's light far away (UE's DistantSkyLightLut, its mean luminance): the sky straight up
+            return env.view_luminance(self.const((0.0, 0.0, 1.0), 3))
         if t == "WorldPosition":
             rel = "CameraRelative" in str(p.get("WorldPositionShaderOffset", ""))
             return env.world_position(rel)
@@ -1420,11 +1466,13 @@ class Translator:
                 # UE's Custom Primitive Data: the placed component's own value
                 v = env.primitive_data(v, int(p.get("PrimitiveDataIndex") or 0), 1)
             return v
-        if t == "VectorParameter":
+        if t in ("VectorParameter", "DoubleVectorParameter"):
             # no DefaultValue: the class default (0, 0, 0, 0), which cooking
-            # leaves out (no dumped graph stores it; (0, 0, 0, 1) is stored)
+            # leaves out (no dumped graph stores it; (0, 0, 0, 1) is stored).
+            # A double vector's is X Y Z W
             d = p.get("DefaultValue", {})
-            rgba = (d.get("R", 0.0), d.get("G", 0.0), d.get("B", 0.0), d.get("A", 0.0))
+            rgba = (d.get("R", d.get("X", 0.0)), d.get("G", d.get("Y", 0.0)), d.get("B", d.get("Z", 0.0)),
+                    d.get("A", d.get("W", 0.0)))
             rgb, a = env.vector(p.get("ParameterName"), rgba)
             if p.get("bUseCustomPrimitiveData") and hasattr(env, "primitive_data"):
                 i = int(p.get("PrimitiveDataIndex") or 0)
@@ -2820,6 +2868,71 @@ class Translator:
 
     def custom_identity(self, ins, p):
         return next(iter(ins.values()), self.const(0.0))
+
+    def _exp3(self, v):
+        """exp() per component of a float3."""
+        return self.combine([self.math('EXPONENT', c) for c in self.comps(self.as3(v))])
+
+    def custom_cloud_transmittance(self, ins, p):
+        sigma_e = self.vmath('SCALE', self.vmath('ADD', self.as3(self._in(ins, "ScatteringCoeff")),
+                                                 self.as3(self._in(ins, "AbsorptionCoeff")), out_w=3),
+                             self._in(ins, "CloudDensity"), out_w=3)
+        t = self._exp3(self.vmath('SCALE', sigma_e, self.binop('MULTIPLY', self._in(ins, "CloudHeight"), self.const(-1.0)), out_w=3))
+        return self.saturate(self.vmath('DOT_PRODUCT', t, self.const((1.0 / 3.0,) * 3, 3)))
+
+    def custom_cloud_light(self, ins, p):
+        # sigmaS = Scattering * Density, sigmaE = sigmaS + Absorption * Density, T = exp(-Height * sigmaE);
+        # phase: 0.3 uniform + 0.7 Schlick (k 0.8) over 4 pi; S = Illuminance * phase * sigmaS;
+        # return max(0, (S - S T) / (sigmaE + 1e-6) * T)
+        dens = self._in(ins, "CloudDensity")
+        sigma_s = self.vmath('SCALE', self.as3(self._in(ins, "ScatteringCoeff")), dens, out_w=3)
+        sigma_e = self.vmath('ADD', sigma_s, self.vmath('SCALE', self.as3(self._in(ins, "AbsorptionCoeff")), dens, out_w=3), out_w=3)
+        t = self._exp3(self.vmath('SCALE', sigma_e, self.binop('MULTIPLY', self._in(ins, "CloudHeight"), self.const(-1.0)), out_w=3))
+        to_cam = self.vmath('NORMALIZE', self.vmath('SUBTRACT', self.as3(self._in(ins, "CameraPos")),
+                                                   self.as3(self._in(ins, "WorldPos")), out_w=3), out_w=3)
+        phase_in = self.saturate(self.vmath('DOT_PRODUCT', self.as3(self._in(ins, "SunLightDir")),
+                                            self.vmath('SCALE', to_cam, self.const(-1.0), out_w=3)))
+        factor = self.binop('SUBTRACT', self.const(1.0), self.binop('MULTIPLY', phase_in, self.const(0.8)))
+        schlick = self.binop('DIVIDE', self.const(1.0 - 0.64),
+                             self.binop('ADD', self.binop('MULTIPLY', factor, factor), self.const(1e-6)))
+        phase = self.binop('DIVIDE', self.binop('ADD', self.const(0.3), self.binop('MULTIPLY', schlick, self.const(0.7))),
+                           self.const(4.0 * math.pi))
+        s_ = self.vmath('MULTIPLY', self.as3(self._in(ins, "SunLightIlluminance")),
+                        self.vmath('SCALE', sigma_s, phase, out_w=3), out_w=3)
+        scatt = self.vmath('DIVIDE', self.vmath('SUBTRACT', s_, self.vmath('MULTIPLY', s_, t, out_w=3), out_w=3),
+                           self.vmath('ADD', sigma_e, self.const((1e-6,) * 3, 3), out_w=3), out_w=3)
+        return self.vmath('MAXIMUM', self.vmath('MULTIPLY', scatt, t, out_w=3), self.const((0.0,) * 3, 3), out_w=3)
+
+    def custom_clouds_aerial(self, ins, p):
+        ap = self._in(ins, "AerialPerspective")
+        opacity = self.binop('SUBTRACT', self.const(1.0), self._in(ins, "CloudTransmittance"))
+        return self.vmath('ADD', self.vmath('SCALE', self.as3(ap), opacity, out_w=3),
+                          self.vmath('SCALE', self.as3(self._in(ins, "CloudLuminance")), self.alpha(ap), out_w=3), out_w=3)
+
+    def custom_height_fog_coverage(self, ins, p):
+        # depth = density / falloff * exp(-camZ falloff) * (1 - exp(-distance dirZ falloff)) / dirZ
+        dz = self.binop('ADD', self.comps(self.as3(self._in(ins, "cameraDir")))[2], self.const(1e-5))
+        fall = self._in(ins, "heightFalloff")
+        cam_z = self.comps(self.as3(self._in(ins, "cameraPos")))[2]
+        depth = self.binop('MULTIPLY', self.binop('DIVIDE', self._in(ins, "density"), fall),
+                           self.math('EXPONENT', self.binop('MULTIPLY', self.binop('MULTIPLY', cam_z, fall), self.const(-1.0))))
+        far = self.math('EXPONENT', self.binop('MULTIPLY', self.binop('MULTIPLY', self.binop('MULTIPLY', self._in(ins, "distance"), dz), fall),
+                                                self.const(-1.0)))
+        depth = self.binop('DIVIDE', self.binop('MULTIPLY', depth, self.binop('SUBTRACT', self.const(1.0), far)), dz)
+        return self.binop('SUBTRACT', self.const(1.0), self.math('EXPONENT', self.binop('MULTIPLY', depth, self.const(-1.0))))
+
+    def custom_smin(self, ins, p):
+        a, b, k = self._in(ins, "a"), self._in(ins, "b"), self._in(ins, "k")
+        h = self.saturate(self.binop('ADD', self.const(0.5), self.binop('MULTIPLY', self.const(0.5),
+                                                                         self.binop('DIVIDE', self.binop('SUBTRACT', b, a), k))))
+        return self.binop('SUBTRACT', self.lerp(b, a, h),
+                          self.binop('MULTIPLY', k, self.binop('MULTIPLY', h, self.binop('SUBTRACT', self.const(1.0), h))))
+
+    def custom_cave_type(self, ins, p):
+        c = self._in(ins, "CaveType")
+        half = self.binop('ADD', self.math('COMPARE', c, self.const(0.0), self.const(0.0)),
+                          self.math('COMPARE', c, self.const(2.0), self.const(0.0)))
+        return self.binop('SUBTRACT', self.const(1.0), self.binop('MULTIPLY', half, self.const(0.5)))
 
     def custom_one(self, ins, p):
         return self.const(1.0)

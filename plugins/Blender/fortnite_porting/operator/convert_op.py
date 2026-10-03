@@ -306,15 +306,28 @@ class FPMP_PT_Exact(bpy.types.Panel):
 classes = (FPMP_OT_ConvertExact, FPMP_OT_RemoveWrap, FPMP_OT_ReplayEffect, FPMP_PT_Exact, FPMP_OT_CreatureRig, FPMP_OT_VehicleRig, FPMP_OT_LegoRig, FPMP_PT_CreatureRig)
 
 
+def _owner_panels():
+    """The owner's private overlay's panels, when the app packed them in (none elsewhere)."""
+    try:
+        from ..material_porter import tod_panel
+    except ImportError:
+        return []
+    return [tod_panel]
+
+
 def register():
     from ..processing.context import vehicle_rig
     for c in classes:
         bpy.utils.register_class(c)
     vehicle_rig.register()          # (the armature object's Ground)
+    for m in _owner_panels():
+        m.register()
 
 
 def unregister():
     from ..processing.context import vehicle_rig
+    for m in _owner_panels():
+        m.unregister()
     vehicle_rig.unregister()
     for c in reversed(classes):
         bpy.utils.unregister_class(c)
