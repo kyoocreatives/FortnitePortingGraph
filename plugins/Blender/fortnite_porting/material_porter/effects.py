@@ -75,6 +75,7 @@ def make(context, mesh, name):
     data.materials.append(bpy.data.materials.new(name))
     context.import_material(obj.material_slots[0], fx["Material"], {})
     particle_values(obj)
+    bake_tangents(data)
     sub = fx.get("SubImages") or [1.0, 1.0]
     if kind == "Sprite" and sub[0] * sub[1] > 1:
         obj["mp_subimage"] = 0.0
@@ -108,8 +109,24 @@ def _decal(context, fx, name):
     if obj.material_slots[0].material is not None:
         obj.material_slots[0].material.use_backface_culling = False     # a decal has no side: seen from anywhere
     particle_values(obj)
+    bake_tangents(data)
     obj.visible_shadow = False
     return obj
+
+
+def bake_tangents(mesh):
+    """The mesh's UV tangents as its "mp_tangent" corner attribute: Cycles works out a displacement
+    without tangents (strips thickened along theirs came out flat); the materials read this there."""
+    if not mesh.uv_layers or "mp_tangent" in mesh.attributes:
+        return
+    try:
+        mesh.calc_tangents(uvmap=mesh.uv_layers[0].name)
+    except RuntimeError:        # (an n-gon: no tangents)
+        return
+    values = [0.0] * (len(mesh.loops) * 3)
+    mesh.loops.foreach_get("tangent", values)
+    mesh.attributes.new("mp_tangent", 'FLOAT_VECTOR', 'CORNER').data.foreach_set("vector", values)
+    mesh.free_tangents()
 
 
 def tag_mesh(obj, fx):
@@ -119,6 +136,8 @@ def tag_mesh(obj, fx):
     obj["mp_mesh_index"] = int(fx.get("Index") or 0)
     particle_values(obj)
     obj.visible_shadow = False
+    if obj.type == 'MESH':
+        bake_tangents(obj.data)
 
 
 def ue_rest(bone):
@@ -321,6 +340,7 @@ def settle(context):
 
 FX_CYCLES = "mp_fx_cycles"      # scene: 1 while it renders with Cycles (effect materials read it)
 TRANSPARENT_BOUNCES = 64        # Cycles: see-through surfaces a ray passes before it stops (8 by default)
+FX_CAM_POS, FX_CAM_FWD = "mp_fx_cam_pos", "mp_fx_cam_fwd"
 _ENGINE_OWNER = object()
 
 
@@ -331,9 +351,32 @@ def sync_engine(*_):
     for sc in bpy.data.scenes:
         if FX_CYCLES in sc:
             want = int(sc.render.engine == 'CYCLES')
-            if sc[FX_CYCLES] != want:
+            changed = sc[FX_CYCLES] != want
+            if changed:
                 sc[FX_CYCLES] = want
+            if want and _keep_camera(sc):
+                changed = True
+            if changed:
                 sc.update_tag()         # (a Python write to a custom property tags nothing)
+
+
+def _keep_camera(sc):
+    """Under Cycles: the scene camera's position and direction (world) in ["mp_fx_cam_pos"] and
+    ["mp_fx_cam_fwd"]. Cycles works out a displacement once per mesh, without a camera: effect
+    materials whose vertices turn to the camera (strips thickened towards it) read these. True if
+    they changed."""
+    cam = sc.camera
+    if cam is None:
+        return False
+    m = cam.matrix_world
+    pos = tuple(round(v, 5) for v in m.translation)
+    fwd = tuple(round(-v, 5) for v in m.col[2].xyz.normalized())
+    changed = False
+    for key, value in ((FX_CAM_POS, pos), (FX_CAM_FWD, fwd)):
+        if tuple(sc.get(key, ())) != value:
+            sc[key] = value
+            changed = True
+    return changed
 
 
 def _watch_engine():
@@ -355,11 +398,13 @@ def _on_render(*_):
 def register():
     bpy.app.handlers.load_post.append(_on_load)
     bpy.app.handlers.render_pre.append(_on_render)
+    bpy.app.handlers.frame_change_post.append(_on_render)      # (an animated camera: each frame's)
     _watch_engine()
 
 
 def unregister():
-    for handlers, fn in ((bpy.app.handlers.load_post, _on_load), (bpy.app.handlers.render_pre, _on_render)):
+    for handlers, fn in ((bpy.app.handlers.load_post, _on_load), (bpy.app.handlers.render_pre, _on_render),
+                         (bpy.app.handlers.frame_change_post, _on_render)):
         if fn in handlers:
             handlers.remove(fn)
     bpy.msgbus.clear_by_owner(_ENGINE_OWNER)

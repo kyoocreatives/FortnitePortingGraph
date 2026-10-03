@@ -2283,9 +2283,15 @@ class Translator:
         return Val(n.outputs[socket], 1 if socket in ("Backfacing", "Pointiness", "Random Per Island") else 3)
 
     def _blender_tangent(self):
-        """Blender's UV tangent, back in UE space."""
-        n = self.shared("tangent", lambda: self.node("ShaderNodeTangent", "UV tangent", direction_type='UV_MAP'))
-        return self.from_blender(Val(n.outputs[0], 3))
+        """Blender's UV tangent, back in UE space. Where Blender gives none (Cycles works out a
+        displacement without tangents) the mesh's own "mp_tangent" attribute, which an effect's
+        mesh carries (none elsewhere: there it adds nothing)."""
+        def make():
+            t = Val(self.node("ShaderNodeTangent", "UV tangent", direction_type='UV_MAP').outputs[0], 3)
+            baked = self.node("ShaderNodeAttribute", "baked tangent", attribute_type='GEOMETRY', attribute_name="mp_tangent")
+            none = self.math('LESS_THAN', self.vmath('LENGTH', t, out_w=1), self.const(1e-4))
+            return self.vmath('ADD', t, self.vmath('SCALE', Val(baked.outputs["Vector"], 3), none, out_w=3), out_w=3)
+        return self.from_blender(self.shared("tangent", make))
 
     def vertex_normal(self):
         return self._hook("vertex_normal", lambda: self.shared(

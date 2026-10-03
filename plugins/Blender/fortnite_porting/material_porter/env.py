@@ -144,8 +144,28 @@ class MaterialEnv:
             to_world = self.tr.node("ShaderNodeVectorTransform", "view to world", vector_type='VECTOR', convert_from='CAMERA', convert_to='WORLD')
             self.tr.L.new(cam.outputs["View Vector"], to_world.inputs[0])
             away = self.tr.vmath('NORMALIZE', Val(to_world.outputs[0], 3), out_w=3)
-            return self.tr.vmath('SCALE', away, self.tr.const(-1.0), out_w=3)
+            seen = self.tr.vmath('SCALE', away, self.tr.const(-1.0), out_w=3)
+            # Cycles works out a displacement once per mesh, without a camera: there, the camera's
+            # direction the plugin keeps in the scene's ["mp_fx_cam_fwd"]
+            fwd = self._scene_vector("mp_fx_cam_fwd", "the camera's direction (Cycles)")
+            back = self.tr.vmath('SCALE', self.tr.vmath('NORMALIZE', fwd, out_w=3), self.tr.const(-1.0), out_w=3)
+            return self._when_cycles(seen, back)
         return self.once("incoming", make)
+
+    def _cycles(self):
+        """1 while the scene renders with Cycles (the plugin's ["mp_fx_cycles"]), else 0."""
+        return self.once("cycles flag", lambda: Val(self.tr.node(
+            "ShaderNodeAttribute", "rendering with Cycles", attribute_type='VIEW_LAYER',
+            attribute_name='["mp_fx_cycles"]').outputs["Fac"], 1))
+
+    def _scene_vector(self, name, label):
+        return self.once("scene " + name, lambda: Val(self.tr.node(
+            "ShaderNodeAttribute", label, attribute_type='VIEW_LAYER', attribute_name='["%s"]' % name).outputs["Vector"], 3))
+
+    def _when_cycles(self, eevee, cycles):
+        """eevee, or cycles while the scene renders with Cycles."""
+        return self.tr.vmath('ADD', eevee, self.tr.vmath('SCALE', self.tr.vmath('SUBTRACT', cycles, eevee, out_w=3),
+                                                          self._cycles(), out_w=3), out_w=3)
 
     def camera_vector(self):
         return self.once("camvec", lambda: self._ue(self._incoming()))
@@ -160,7 +180,11 @@ class MaterialEnv:
             cam = self.tr.node("ShaderNodeCameraData", "camera data")
             geo = self._geo()
             ray = self.tr.vmath('SCALE', self._incoming(), Val(cam.outputs["View Distance"], 1), out_w=3)
-            return self._ue(self.tr.vmath('ADD', Val(geo.outputs["Position"], 3), ray, out_w=3), 100.0)
+            at = self.tr.vmath('ADD', Val(geo.outputs["Position"], 3), ray, out_w=3)
+            if self.entry.get("particle"):
+                # (under Cycles, the camera's position the plugin keeps in the scene's ["mp_fx_cam_pos"])
+                at = self._when_cycles(at, self._scene_vector("mp_fx_cam_pos", "the camera's position (Cycles)"))
+            return self._ue(at, 100.0)
         return self.once("campos", make)
 
     def actor_position(self, camera_relative=False):
@@ -477,9 +501,7 @@ class MaterialEnv:
                     # Cycles' Raycast hits the other particles too (EEVEE's reads the screen's depth, which
                     # blended surfaces leave to what is behind): there, no surface behind - the plugin
                     # keeps the scene's ["mp_fx_cycles"] at 1 while it renders with Cycles
-                    cyc = tr.node("ShaderNodeAttribute", "rendering with Cycles", attribute_type='VIEW_LAYER',
-                                  attribute_name='["mp_fx_cycles"]')
-                    hit = tr.math('MULTIPLY', hit, tr.math('SUBTRACT', tr.const(1.0), Val(cyc.outputs["Fac"], 1)))
+                    hit = tr.math('MULTIPLY', hit, tr.math('SUBTRACT', tr.const(1.0), self._cycles()))
             return (tr.math('MULTIPLY', Val(ray.outputs["Hit Distance"], 1), tr.const(100.0)), hit)
         return self.once("raycast behind", make)
 
