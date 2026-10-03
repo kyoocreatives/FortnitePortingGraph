@@ -9,6 +9,7 @@ using CUE4Parse.Encryption.Aes;
 using CUE4Parse.FileProvider;
 using CUE4Parse.FileProvider.Vfs;
 using CUE4Parse.UE4.Assets.Exports;
+using CUE4Parse.UE4.Assets.Objects;
 using CUE4Parse.UE4.Objects.Core.i18N;
 using CUE4Parse.UE4.Objects.Core.Misc;
 using CUE4Parse.UE4.Objects.Engine;
@@ -116,6 +117,27 @@ public class MaterialPorterService : IService
     {
         try { return File.Exists(IslandKeysFile) ? JsonConvert.DeserializeObject<List<IslandKey>>(File.ReadAllText(IslandKeysFile)) ?? [] : []; }
         catch { return []; }
+    }
+
+    /// <summary>
+    /// tests: an item's styles by name (styles=Violet Board Jules;...): each name's option from the item's
+    /// ItemVariants (the one named so, else the first whose name contains it), as the asset page passes it.
+    /// </summary>
+    private static IEnumerable<Exporting.Styles.ExportStyleBase> PickedStyles(UObject asset, string? names)
+    {
+        if (string.IsNullOrWhiteSpace(names)) yield break;
+        var options = new List<FStructFallback>();
+        foreach (var variant in asset.GetOrDefault("ItemVariants", Array.Empty<UObject>()))
+            foreach (var key in new[] { "PartOptions", "MaterialOptions", "ParticleOptions", "MeshOptions", "GenericTagOptions", "MorphTargetOptions", "Variants" })
+                if (variant.TryGetValue(out FStructFallback[] list, key)) options.AddRange(list);
+        string Name(FStructFallback o) => o.GetOrDefault<FText?>("VariantName")?.Text ?? "";
+        foreach (var wanted in names.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+        {
+            var option = options.FirstOrDefault(o => Name(o).Equals(wanted, StringComparison.OrdinalIgnoreCase))
+                         ?? options.FirstOrDefault(o => Name(o).Contains(wanted, StringComparison.OrdinalIgnoreCase))
+                         ?? throw new ArgumentException($"no style named {wanted} (styles: {string.Join(", ", options.Select(Name))})");
+            yield return new Exporting.Styles.ExportStructStyle { StyleData = option };
+        }
     }
 
     private static string NormalGuid(string? g) => new string((g ?? "").Where(Uri.IsHexDigit).ToArray()).ToUpperInvariant();
@@ -694,6 +716,8 @@ public class MaterialPorterService : IService
                 .Concat(query["effects"] == "1" ? [new ExportEffectsStyle { On = true }] : Array.Empty<Exporting.Styles.ExportStyleBase>())
                 .Concat((query["mods"] ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries).Select(x => x.Split(':', 2))
                     .Where(x => x.Length == 2).Select(x => (Exporting.Styles.ExportStyleBase) new ExportWeaponModStyle { Slot = x[0], Path = x[1] }))
+                // styles=<style name>;<style name>: an item's styles picked by their names (as its page shows them)
+                .Concat(PickedStyles(asset, query["styles"]))
                 .ToArray();
             using var assetMeta = AppServices.AppSettings.ExportSettings.CreateExportMeta(EExportLocation.Blender);
             var assetSession = new ExportSession(assetMeta);

@@ -322,10 +322,14 @@ def register():
     vehicle_rig.register()          # (the armature object's Ground)
     for m in _owner_panels():
         m.register()
+    from ..material_porter import effects
+    effects.register()              # (effects' soft fade follows the render engine)
 
 
 def unregister():
     from ..processing.context import vehicle_rig
+    from ..material_porter import effects
+    effects.unregister()
     for m in _owner_panels():
         m.unregister()
     vehicle_rig.unregister()

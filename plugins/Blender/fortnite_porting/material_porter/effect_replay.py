@@ -16,6 +16,7 @@ a character - an effect under an armature reads its bones and sockets frame by f
 contrail's hands and feet, a pickaxe's trail sockets), and one that moves (its own animation, or
 its parent's) leaves its world-space particles where they were spawned, as a trail.
 """
+import re
 import base64
 import json
 import zlib
@@ -27,7 +28,7 @@ from . import effects, niagara
 
 GROUP = "MP Effect Particles"
 RIBBONS = "MP Effect Ribbons"
-GROUP_VERSION = 8
+GROUP_VERSION = 9
 # a decal's turn where the emitter sets none: the engine's FRotator(-90, 0, 90), projecting straight down (x, y, z, w)
 DECAL_DOWN = (-0.5, 0.5, 0.5, 0.5)
 # how a particle's piece is turned (the modifier's Turn): as the renderer says
@@ -591,6 +592,7 @@ def group():
                     description="Where the piece sits on its particle, in the particle's own space: a sprite's pivot, a mesh's pivot offset")
     face.new_socket(name="Piece Rotation", in_out='INPUT', socket_type='NodeSocketRotation', description="The renderer's own rotation of the piece")
     face.new_socket(name="Piece Scale", in_out='INPUT', socket_type='NodeSocketVector', description="The renderer's own scale of the piece").default_value = (1.0, 1.0, 1.0)
+    face.new_socket(name="Depth Bias", in_out='INPUT', socket_type='NodeSocketFloat', description=DEPTH_BIAS)
 
     nodes, links = g.nodes, g.links
     column = [0]
@@ -722,8 +724,19 @@ def group():
     links.new(shaded.outputs[0], instances.inputs["Instance"])
     links.new(rotation.outputs[0], instances.inputs["Rotation"])
     links.new(attribute("mp_scale", 'FLOAT_VECTOR'), instances.inputs["Scale"])
+    # the depth bias: each instance scaled about the camera, so it moves along its own view rays (it
+    # looks the same, only nearer)
+    gap = node("ShaderNodeVectorMath", operation='DISTANCE')
+    links.new(node("GeometryNodeInputPosition").outputs[0], gap.inputs[0])
+    links.new(camera.outputs["Location"], gap.inputs[1])
+    nearer_by = math_('MAXIMUM', math_('SUBTRACT', 1.0, math_('DIVIDE', inputs.outputs["Depth Bias"], math_('MAXIMUM', gap.outputs["Value"], 0.01))), 0.05)
+    biased = node("GeometryNodeScaleInstances")
+    links.new(instances.outputs[0], biased.inputs["Instances"])
+    links.new(nearer_by, biased.inputs["Scale"])
+    links.new(camera.outputs["Location"], biased.inputs["Center"])
+    biased.inputs["Local Space"].default_value = False
     outputs.location = (column[0], 0)
-    links.new(instances.outputs[0], outputs.inputs[0])
+    links.new(biased.outputs[0], outputs.inputs[0])
     return g
 
 
@@ -750,6 +763,7 @@ def ribbons():
     shape.min_value, shape.max_value = 0, 2
     sides = face.new_socket(name="Sides", in_out='INPUT', socket_type='NodeSocketInt', description="How many planes (Shape 1), how many sides the tube has (Shape 2)")
     sides.min_value, sides.default_value = 1, 2
+    face.new_socket(name="Depth Bias", in_out='INPUT', socket_type='NodeSocketFloat', description=DEPTH_BIAS)
 
     nodes, links = g.nodes, g.links
     column = [0]
@@ -895,14 +909,53 @@ def ribbons():
     material = node("GeometryNodeSetMaterial")
     links.new(mapped.outputs[0], material.inputs[0])
     links.new(inputs.outputs["Material"], material.inputs["Material"])
+    # the depth bias: each vertex along its own view ray, nearer by it
+    eye = node("GeometryNodeObjectInfo", transform_space='RELATIVE')
+    links.new(node("GeometryNodeInputActiveCamera").outputs[0], eye.inputs["Object"])
+    to_eye = vector('NORMALIZE', vector('SUBTRACT', eye.outputs["Location"], node("GeometryNodeInputPosition").outputs[0]))
+    step = node("ShaderNodeVectorMath", operation='SCALE')
+    links.new(to_eye, step.inputs[0])
+    links.new(inputs.outputs["Depth Bias"], step.inputs["Scale"])
+    biased = node("GeometryNodeSetPosition")
+    links.new(material.outputs[0], biased.inputs["Geometry"])
+    links.new(step.outputs[0], biased.inputs["Offset"])
     outputs.location = (column[0], 0)
-    links.new(material.outputs[0], outputs.inputs[0])
+    links.new(biased.outputs[0], outputs.inputs[0])
     return g
 
 
 def _set(modifier, tree, name, value):
     identifier = next(i.identifier for i in tree.interface.items_tree if i.item_type == 'SOCKET' and i.in_out == 'INPUT' and i.name == name)
     getattr(modifier.properties.inputs, identifier).value = value
+
+
+DEPTH_BIAS = ("Metres the particles are drawn nearer the camera, along their view rays (they look the same). "
+              "Under Cycles, a renderer drawn after others: UE and EEVEE draw blended layers in order, Cycles by depth")
+DRAW_STEP = 0.03        # m: each renderer drawn after another one nearer by this under Cycles
+
+
+def bias_by_order(obj, modifier, tree, scene):
+    """The player's Depth Bias: its draw order x DRAW_STEP while the scene renders with Cycles (a driver on
+    the scene's ["mp_fx_cycles"], which the plugin keeps), 0 under EEVEE."""
+    identifier = next((i.identifier for i in tree.interface.items_tree if i.item_type == 'SOCKET' and i.in_out == 'INPUT'
+                       and i.name == "Depth Bias"), None)
+    order = int(obj.get("mp_draw_order", 0))
+    if identifier is None or order == 0:
+        return
+    socket = getattr(modifier.properties.inputs, identifier)
+    fc = socket.driver_add("value")
+    fc.keyframe_points.clear()
+    for m in list(fc.modifiers):
+        fc.modifiers.remove(m)
+    d = fc.driver
+    d.type = 'SCRIPTED'
+    var = d.variables[0] if len(d.variables) else d.variables.new()
+    var.name = "cycles"
+    var.type = 'SINGLE_PROP'
+    var.targets[0].id_type = 'SCENE'
+    var.targets[0].id = scene
+    var.targets[0].data_path = '["%s"]' % effects.FX_CYCLES
+    d.expression = "cycles * %r" % round(order * DRAW_STEP, 4)
 
 
 def _camera(scene, root, scale, world):
@@ -1010,6 +1063,7 @@ def play(root):
         return
     exports, fields, table = stored
     scale = float(root.get(KEY_SCALE, 0.01))
+    drawn_order = {}        # per piece (its layers: Fire, Fire001...), the players in the order they're made
     scene = bpy.context.scene
     clear(root)
     system = niagara.System(exports, fields=fields, sockets=[s for s in str(root.get(KEY_SOCKETS) or "").split(",") if s])
@@ -1106,6 +1160,10 @@ def play(root):
             obj[effects.KEY] = "Particles"
             obj[KEY_ROOT] = root
             obj.visible_shadow = False
+            # layers of one piece (a mesh's shells, a sprite's copies) drawn in the renderers' order
+            layer = re.sub(r"[\d.]+", "", piece.name)
+            obj["mp_draw_order"] = drawn_order.get(layer, 0)
+            drawn_order[layer] = obj["mp_draw_order"] + 1
             for collection in piece.users_collection:
                 collection.objects.link(obj)
             modifier = obj.modifiers.new("Particles", 'NODES')
@@ -1113,6 +1171,7 @@ def play(root):
             _set(modifier, tree, "Start Frame", start)
             _set(modifier, tree, "Frames", len(track.frames))
             _set(modifier, tree, "Loop", loop)
+            bias_by_order(obj, modifier, tree, bpy.context.scene)
             tied = bindings(renderer, emitter)
             if tied:
                 bound_params.update(_bind(piece, (piece, obj), tied, system.history, start, loop))

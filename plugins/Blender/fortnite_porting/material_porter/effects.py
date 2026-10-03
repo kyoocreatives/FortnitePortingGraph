@@ -319,11 +319,66 @@ def settle(context):
             _log("%s: not replayed (%s: %s, at %s:%d)" % (root.name, type(e).__name__, e, os.path.basename(at.filename), at.lineno))
 
 
+FX_CYCLES = "mp_fx_cycles"      # scene: 1 while it renders with Cycles (effect materials read it)
+TRANSPARENT_BOUNCES = 64        # Cycles: see-through surfaces a ray passes before it stops (8 by default)
+_ENGINE_OWNER = object()
+
+
+def sync_engine(*_):
+    """Each scene with effects: ["mp_fx_cycles"] 1 when it renders with Cycles, else 0. Their soft
+    particles (DepthFade) cast a ray behind the pixel: EEVEE's reads the screen's depth, Cycles' hits
+    the other particles too and faded them all, so under Cycles they don't fade."""
+    for sc in bpy.data.scenes:
+        if FX_CYCLES in sc:
+            want = int(sc.render.engine == 'CYCLES')
+            if sc[FX_CYCLES] != want:
+                sc[FX_CYCLES] = want
+                sc.update_tag()         # (a Python write to a custom property tags nothing)
+
+
+def _watch_engine():
+    bpy.msgbus.clear_by_owner(_ENGINE_OWNER)
+    bpy.msgbus.subscribe_rna(key=(bpy.types.RenderSettings, "engine"), owner=_ENGINE_OWNER, args=(), notify=sync_engine)
+
+
+@bpy.app.handlers.persistent
+def _on_load(*_):
+    _watch_engine()
+    sync_engine()
+
+
+@bpy.app.handlers.persistent
+def _on_render(*_):
+    sync_engine()
+
+
+def register():
+    bpy.app.handlers.load_post.append(_on_load)
+    bpy.app.handlers.render_pre.append(_on_render)
+    _watch_engine()
+
+
+def unregister():
+    for handlers, fn in ((bpy.app.handlers.load_post, _on_load), (bpy.app.handlers.render_pre, _on_render)):
+        if fn in handlers:
+            handlers.remove(fn)
+    bpy.msgbus.clear_by_owner(_ENGINE_OWNER)
+
+
 def finish(context, mesh, root):
     """Once a system's tree is imported: its CPU emitters replayed, their pieces played on the particles."""
     fx = mesh.get("MPEffect") or {}
     if fx.get("Kind") != "System":
         return
+    scene = bpy.context.scene
+    if FX_CYCLES not in scene:
+        scene[FX_CYCLES] = int(scene.render.engine == 'CYCLES')
+    # Cycles stops a ray after 8 see-through surfaces by default (black where more particles overlap)
+    cycles = getattr(scene, "cycles", None)
+    if cycles is not None and cycles.transparent_max_bounces < TRANSPARENT_BOUNCES:
+        cycles.transparent_max_bounces = TRANSPARENT_BOUNCES
+        from .hook import _log as log
+        log("Cycles' transparent bounces raised to %d for effects (overlapping particles)" % TRANSPARENT_BOUNCES)
     from . import effect_replay
     from .hook import _log
     # what FP's importer hides on a character (an anime outline's shell: its material draws ink lines

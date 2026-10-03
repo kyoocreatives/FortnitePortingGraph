@@ -472,8 +472,15 @@ class MaterialEnv:
                 tr.L.new(self._geo().outputs["Position"], ray.inputs["Position"])
                 tr.L.new(away.outputs[0], ray.inputs["Direction"])
                 ray.inputs["Length"].default_value = 100.0
-            return (tr.math('MULTIPLY', Val(ray.outputs["Hit Distance"], 1), tr.const(100.0)),
-                    Val(ray.outputs["Is Hit"], 1))
+                hit = Val(ray.outputs["Is Hit"], 1)
+                if self.entry.get("particle"):
+                    # Cycles' Raycast hits the other particles too (EEVEE's reads the screen's depth, which
+                    # blended surfaces leave to what is behind): there, no surface behind - the plugin
+                    # keeps the scene's ["mp_fx_cycles"] at 1 while it renders with Cycles
+                    cyc = tr.node("ShaderNodeAttribute", "rendering with Cycles", attribute_type='VIEW_LAYER',
+                                  attribute_name='["mp_fx_cycles"]')
+                    hit = tr.math('MULTIPLY', hit, tr.math('SUBTRACT', tr.const(1.0), Val(cyc.outputs["Fac"], 1)))
+            return (tr.math('MULTIPLY', Val(ray.outputs["Hit Distance"], 1), tr.const(100.0)), hit)
         return self.once("raycast behind", make)
 
     def decal_fade(self):
