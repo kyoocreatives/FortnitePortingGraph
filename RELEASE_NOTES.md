@@ -3,13 +3,12 @@ An unofficial fork of [FortnitePorting](https://github.com/h4lfheart/FortnitePor
 **Install:** download `FortnitePortingMP.exe` below and run it (Windows x64, no installer). Windows may warn about an unsigned app: *More info > Run anyway*. It runs beside an installed FortnitePorting, with its own settings (`%APPDATA%\FortnitePorting MP`) and its own Blender plugin (`fortnite_porting_mp`), installed from the Plugins page as in FortnitePorting. Exact materials need Blender 5.0 or newer; older Blender gets FortnitePorting's shaders.
 
 **This release**
-- Effects follow the item's styles: a style that swaps an outfit's effect or recolours it (Blackheart's stages, auras that only some styles have) now exports that effect, and the *Effects* pick shows on outfits whose effect comes from a style.
-- Effects use more of what the game feeds their materials: colours and values the effect computes while it plays (Geno, Cerberus, Ares...), colour ramps from the effect itself (Voyager Unleashed's head flames), and materials and textures picked through the effect's own parameters (Renzo's hair).
-- Effects on arms, hands and other bones are placed and oriented correctly with the Tasty rig and bone reorientation; a head's own effect no longer ends up at the feet.
-- An effect that plays but stays invisible until the game raises one of its parameters (Salvador's flames) is reported in the log, with the parameters to set on the effect's empty before *Replay Effect*.
-- Selecting an effect's particles in the viewport shows their material in the Material tab, ready to tweak.
-- Cars: Mutable wheels' tire textures fixed, and a per-wheel arch control that moves the wheel's body area without moving the wheel.
-- Exact materials: materials that read Material Attributes through functions no longer fail as a false loop (InfoInvader's head).
+- Effects render in Cycles as they do in EEVEE: glows no longer fade each other out, overlapping particles no longer turn black, stacked flame layers draw in the game's order (Elite Jules' leg flames), and flame strips that turn to the camera show up (her shoulder flames).
+- Soft particles: effects fade where they meet what's behind them, as in game (sprites crossing the ground, a character's effect meshes against the body). An effect whose fade distance the game leaves at 0 stays fully drawn (Elite Jules' crown).
+- Smoke lit by the game's lighting volume (round puffs) is lit softly, without its sphere's shading.
+- Effects use the values the system hands its stateless emitters while it plays; an outfit's effect starts once the character's skeleton is in place; materials that tint what's behind them under UE 5's name for it (Tempest's eye glow) work.
+- Exact materials: more of Fortnite's sky and cloud expressions translate (sky atmosphere light, aerial perspective, volumetric cloud inputs).
+- Fixed: an import right after an update could fail with an unknown export type when the automatic Blender plugin sync hadn't finished.
 
 **What it adds**
 - Exact materials, rebuilt from each material's Unreal graph. *Settings > Blender > Prefer FP Shaders for Characters* keeps FortnitePorting's shaders for character materials it has one for.
