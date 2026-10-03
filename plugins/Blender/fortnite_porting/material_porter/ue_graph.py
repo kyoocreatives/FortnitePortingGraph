@@ -2488,6 +2488,9 @@ class Translator:
                 return self.stand_in("DepthFade as its opacity", opacity)
             distance, known = got
             fade = self.input(g, p.get("FadeDistance"), scope, self.const(float(p.get("FadeDistanceDefault", 100.0))))
+            # UE divides by max(FadeDistance, 0.0001): a 0 fade distance leaves it all drawn (Blender's
+            # x / 0 is 0, which hid it wherever anything was behind - Elite Jules' crown)
+            fade = self.math('MAXIMUM', fade, self.const(0.0001))
             near = self.saturate(self.binop('DIVIDE', distance, fade, label="depth fade"))
             factor = self.math('ADD', self.const(1.0), self.math('MULTIPLY', self.math('SUBTRACT', near, self.const(1.0)), known))
             return self.binop('MULTIPLY', opacity, factor, label="depth fade")
